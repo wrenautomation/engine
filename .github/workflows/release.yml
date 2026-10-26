@@ -1,10 +1,9 @@
-# Publish a tagged version to npm.
+# Publish a tagged version to npm with no stored credential: GitHub signs the request
+# and npm checks the signature (trusted publishing), which also attaches provenance.
 #
-# Today: the `NPM_TOKEN` repository secret (a granular npm token) signs the publish.
-# Target: trusted publishing (no stored credential, GitHub signs the request, npm checks
-# the signature and attaches provenance). Setting the package's trusted publisher on npm
-# needs William's npm sign-in (TOTP or passkey); once it points at this repository and
-# this workflow file, delete the secret and the `NODE_AUTH_TOKEN` line below.
+# npm's trusted publisher for the package points at this repository and this workflow
+# file (set 2026-10-26 by autobrowse `npm POST /packages/{package}/trust`). The very
+# first publish was a manual `npm publish`; every one after it is a tag.
 name: release
 on:
   push: { tags: ["v*"] }
@@ -36,5 +35,3 @@ jobs:
         run: npm install -g npm@latest
       - if: steps.published.outputs.skip != 'true'
         run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

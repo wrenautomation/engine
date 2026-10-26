@@ -46,6 +46,6 @@ pnpm install
 pnpm lint && pnpm typecheck && pnpm test
 ```
 
-A `v*` tag publishes to npm (`.github/workflows/release.yml`) with the `NPM_TOKEN` secret; trusted publishing replaces the token once the package's trusted publisher is set on npm.
+A `v*` tag publishes to npm (`.github/workflows/release.yml`, trusted publishing: no stored token).
 
 License: PolyForm Shield 1.0.0 (`LICENSE.md`).
