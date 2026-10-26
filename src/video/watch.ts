@@ -519,7 +519,7 @@ async function allSettled<T extends unknown[]>(ps: { [K in keyof T]: Promise<T[K
 export async function watch(input: string, opts: WatchOptions): Promise<Watched> {
   if (!opts.cohereKeys.length)
     throw new Error(`${input}: needs COHERE keys to read the speech and the screen`);
-  const ffmpeg = opts.ffmpeg ?? process.env.WREN_FFMPEG ?? "ffmpeg";
+  const ffmpeg = opts.ffmpeg ?? "ffmpeg";
   const fetchFn = opts.fetchFn ?? fetch;
   const dir = await mkdtemp(join(tmpdir(), "watch-"));
   try {

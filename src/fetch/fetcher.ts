@@ -132,12 +132,26 @@ export class PoliteFetcher implements Fetcher {
     await turn;
   }
 
-  private request(url: string): Promise<Response> {
+  private request(url: string, init: RequestInit = {}): Promise<Response> {
+    const headers = new Headers(init.headers);
+    if (!headers.has("user-agent")) headers.set("User-Agent", this.userAgent);
     return this.fetchImpl(url, {
-      headers: { "User-Agent": this.userAgent },
       redirect: "follow",
       signal: AbortSignal.timeout(this.timeoutMs),
+      ...init,
+      headers,
     });
+  }
+
+  /**
+   * One throttled request as the raw `Response`, for a body the caller streams (a file it
+   * filters as it lands) or a method other than GET. `init` wins: its signal replaces the
+   * fetcher's timeout, its headers join the User-Agent. No retries: a half-read stream cannot be
+   * asked again, so the caller decides what a bad status means.
+   */
+  async open(url: string, init: RequestInit = {}): Promise<Response> {
+    await this.throttle(url);
+    return this.request(url, init);
   }
 
   /**

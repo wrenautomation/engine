@@ -1,6 +1,6 @@
 {
   "name": "@wrenautomation/scribe",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Pages, files and videos in; text and quoted facts out. Polite fetching, robots, HTML and PDF to text, video watching with ffmpeg and a vision model, and a study core whose every claim quotes a page.",
   "repository": {
     "type": "git",

@@ -7,9 +7,9 @@ Four doors:
 
 | Import | Does |
 |---|---|
-| `@wrenautomation/scribe/fetch` | `PoliteFetcher` (declared User-Agent, per-host throttle, retries, never re-downloads a file on disk), robots.txt, `readPage` (HTML to title, text, links, mailtos, tels), `fetchLadder` (asks a fetch ladder for a blocked page through an injected client) |
+| `@wrenautomation/scribe/fetch` | `PoliteFetcher` (declared User-Agent, per-host throttle, retries, never re-downloads a file on disk; `open` for a stream or a POST), robots.txt, `readPage` (HTML to title, text, links, mailtos, tels), `fetchLadder` (asks a fetch ladder for a blocked page through an injected client) |
 | `@wrenautomation/scribe/text` | `htmlText`, `pdfText`, `decodeHtml` |
-| `@wrenautomation/scribe/video` | `watch`: ffmpeg cuts and frames, Cohere speech and on-screen text, Gemini's read of the screen when a key works; shot labels |
+| `@wrenautomation/scribe/video` | `watch`: ffmpeg cuts and frames, Cohere speech and on-screen text, Gemini's read of the screen when a key works; shot labels. The readers over it, one `VideoRead` shape: `readYoutube` (captions and chapters by yt-dlp, the screen by Gemini), `readYoutubeByUrl` (Gemini alone, no download), `readVideo` (a reel, TikTok or X post, watched), `readAudio` (a podcast episode, cut by ffmpeg, heard by Gemini); `flatPlaylist` lists a profile, channel or search |
 | `@wrenautomation/scribe/study` | a study whose every claim quotes a page: query planning, the claim gate, which pages to read, drafts that cite claims, the markdown report |
 
 Everything is a pure function of what you pass: bytes, a URL, a video path, keys, a client.
@@ -17,13 +17,15 @@ What searches, stores, schedules or knows a customer belongs to the caller.
 
 ## CLI
 
-Needs Node 24+. `watch` needs ffmpeg, and `yt-dlp` for a URL.
+Needs Node 24+. `watch`, `read` and `list` need ffmpeg and `yt-dlp` as the URL asks.
 
 ```sh
 npm i @wrenautomation/scribe
 npx scribe fetch https://example.com --contact you@example.com   # a page as text
 npx scribe text report.pdf                                        # a PDF as text
 COHERE_API_KEY=... npx scribe watch talk.mp4                      # speech, on-screen text, cuts
+GEMINI_API_KEY=... npx scribe read https://youtu.be/<id>           # captions per chapter, plus the screen
+npx scribe list "ytsearch10:cold email"                           # titles, ids, counts, no downloads
 ```
 
 ## Library

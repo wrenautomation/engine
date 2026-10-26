@@ -12,8 +12,7 @@ function scripted(script: Script) {
   let clock = 0;
   const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
-    const headers = init?.headers as Record<string, string> | undefined;
-    calls.push({ url, ua: headers?.["User-Agent"] });
+    calls.push({ url, ua: new Headers(init?.headers).get("user-agent") ?? undefined });
     const step = script.shift();
     if (!step) throw new Error("script exhausted");
     if (step.throw) throw step.throw;
@@ -95,5 +94,42 @@ describe("PoliteFetcher.download", () => {
     expect(calls).toHaveLength(1);
     writeFileSync(join(dir, "marker"), "");
     expect(() => readFileSync(`${dest}.part`)).toThrow();
+  });
+});
+
+describe("PoliteFetcher.open", () => {
+  it("throttles, sends the UA beside the caller's headers and method, and returns the raw response", async () => {
+    const seen: RequestInit[] = [];
+    const fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      seen.push(init ?? {});
+      return new Response("ok", { status: 503 });
+    }) as typeof globalThis.fetch;
+    const sleeps: number[] = [];
+    let clock = 0;
+    const fetcher = new PoliteFetcher("scribe/0.1 (t@example.com)", {
+      fetch,
+      sleep: async (ms) => {
+        sleeps.push(ms);
+        clock += ms;
+      },
+      now: () => clock,
+    });
+    const signal = AbortSignal.timeout(60_000);
+    const first = await fetcher.open("https://a.example/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+      signal,
+    });
+    // A bad status comes back as is: no retry, the caller reads it.
+    expect(first.status).toBe(503);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.method).toBe("POST");
+    expect(seen[0]?.signal).toBe(signal);
+    const h = new Headers(seen[0]?.headers);
+    expect(h.get("user-agent")).toBe("scribe/0.1 (t@example.com)");
+    expect(h.get("content-type")).toBe("application/json");
+    await fetcher.open("https://a.example/next");
+    expect(sleeps).toEqual([1000]);
   });
 });

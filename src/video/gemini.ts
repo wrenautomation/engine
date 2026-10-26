@@ -110,7 +110,7 @@ export async function shrink(
   src: string,
   out: string,
   info: { duration?: number; width?: number; height?: number },
-  ffmpeg = process.env.WREN_FFMPEG ?? "ffmpeg",
+  ffmpeg = "ffmpeg",
 ): Promise<Buffer> {
   const seconds = info.duration && info.duration > 0 ? info.duration : 240;
   const audio = 48_000;
