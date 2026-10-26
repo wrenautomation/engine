@@ -1,0 +1,73 @@
+{
+  "name": "@wrenautomation/scribe",
+  "version": "0.1.0",
+  "description": "Pages, files and videos in; text and quoted facts out. Polite fetching, robots, HTML and PDF to text, video watching with ffmpeg and a vision model, and a study core whose every claim quotes a page.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wrenautomation/scribe.git"
+  },
+  "license": "PolyForm-Shield-1.0.0",
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "README.md",
+    "LICENSE.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./fetch": {
+      "types": "./dist/fetch/index.d.ts",
+      "import": "./dist/fetch/index.js"
+    },
+    "./text": {
+      "types": "./dist/text/index.d.ts",
+      "import": "./dist/text/index.js"
+    },
+    "./video": {
+      "types": "./dist/video/index.d.ts",
+      "import": "./dist/video/index.js"
+    },
+    "./study": {
+      "types": "./dist/study/index.d.ts",
+      "import": "./dist/study/index.js"
+    }
+  },
+  "bin": {
+    "scribe": "dist/app/cli.js"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "prepare": "git config core.hooksPath .githooks || true",
+    "lint": "biome check --error-on-warnings .",
+    "lint:fix": "biome check --write .",
+    "typecheck": "tsc --noEmit",
+    "build": "rm -rf dist && tsc && chmod +x dist/app/cli.js",
+    "test": "vitest run",
+    "gates": "lockf -t 900 /tmp/wren_automation-checks.lock sh -c 'pnpm lint && pnpm typecheck && pnpm test'",
+    "prepublishOnly": "pnpm build"
+  },
+  "dependencies": {
+    "commander": "15.0.0",
+    "entities": "8.1.0",
+    "htmlparser2": "12.0.0",
+    "robots-parser": "3.0.1",
+    "unpdf": "1.8.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.14",
+    "@types/node": "22.20.3",
+    "typescript": "5.9.3",
+    "vitest": "5.0.1"
+  }
+}
