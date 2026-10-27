@@ -2,8 +2,8 @@
 # and npm checks the signature (trusted publishing), which also attaches provenance.
 #
 # npm's trusted publisher for the package points at this repository and this workflow
-# file (set 2026-10-27 by autobrowse `npm POST /packages/{package}/trust`, when raven was
-# built as the planner of the research engine). The very first publish of a name is a manual `npm publish`; every one
+# file (set by hand on npm's package access page 2026-10-27, when raven was built as the
+# planner of the research engine). The very first publish of a name is a manual `npm publish`; every one
 # after it is a tag.
 name: release
 on:

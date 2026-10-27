@@ -122,6 +122,8 @@ export const HitView = z.object({
   sources: z.array(z.string()).default([]),
 });
 export type HitView = z.infer<typeof HitView>;
+/** A hit as a caller may pass it: `sources` optional. */
+export type HitViewIn = z.input<typeof HitView>;
 
 export const Triage = z.object({
   url: z.string(),

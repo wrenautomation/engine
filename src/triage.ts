@@ -6,16 +6,24 @@
 import { fill, type Model } from "./model.js";
 import { defaultPlanFile } from "./plans/index.js";
 import { lines, renderHits, renderYield } from "./render.js";
-import { type HitView, type Plan, type PlanFile, type Triage, type YieldRow, z } from "./types.js";
+import {
+  HitView,
+  type HitViewIn,
+  type Plan,
+  type PlanFile,
+  type Triage,
+  type YieldRow,
+  z,
+} from "./types.js";
 
 const TriageAnswer = z.object({
   hits: z.array(z.object({ url: z.string(), read: z.boolean(), why: z.string() })),
 });
 
 /** One hit per url, sources merged, order of first sight. */
-export function dedupeHits(hits: readonly HitView[]): HitView[] {
+export function dedupeHits(hits: readonly HitViewIn[]): HitView[] {
   const byUrl = new Map<string, HitView>();
-  for (const h of hits) {
+  for (const h of hits.map((x) => HitView.parse(x))) {
     const url = h.url.trim();
     const have = byUrl.get(url);
     if (!have) {
@@ -48,7 +56,7 @@ export function triagePrompt(
 
 /** Read or skip per hit, with why. Reads over the plan's budget flip to skips, in the model's order. */
 export async function triage(
-  hits: readonly HitView[],
+  hits: readonly HitViewIn[],
   plan: Plan,
   model: Model,
   options: { planFile?: PlanFile; yieldRows?: readonly YieldRow[] } = {},
