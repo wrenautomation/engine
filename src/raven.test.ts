@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { commandModel, fill, parseAnswer, readOutput, scriptedModel } from "./model.js";
 import { mergeProposals, plan, proposePrompt } from "./plan.js";
 import { defaultPlanFile, PLAN_KINDS } from "./plans/index.js";
-import { review } from "./review.js";
+import { review, reviewPrompt } from "./review.js";
 import { dedupeHits, triage } from "./triage.js";
-import { type Ask, type Plan, PlanFile, type Proposal, type Round, z } from "./types.js";
+import { type Ask, type Plan, PlanFile, type Proposal, Round, z } from "./types.js";
 
 const ask: Ask = {
   text: "how do staffing firms win repeat clients",
@@ -128,7 +128,7 @@ describe("merge", () => {
     expect(p.snapshot).toEqual({
       at: "2026-10-27T00:00:00.000Z",
       known: ["referrals convert"],
-      planFile: { id: "raven/web", version: 1 },
+      planFile: { id: "raven/web", version: 2 },
       model: "m1",
       yieldRows: 0,
     });
@@ -167,7 +167,7 @@ describe("triage", () => {
     snapshot: {
       at: "",
       known: [],
-      planFile: { id: "raven/web", version: 1 },
+      planFile: { id: "raven/web", version: 2 },
       model: "m1",
       yieldRows: 0,
     },
@@ -221,7 +221,19 @@ describe("review", () => {
     kept: 2,
     found: ["referrals convert"],
     notes: [],
+    verdicts: [
+      { url: "https://a.example/survey", quality: "rich", gap: "no cost per hire" },
+      { url: "https://b.example/ad", quality: "off" },
+    ],
   };
+
+  it("shows the verdicts, one line per read, and parses a round without them", () => {
+    const p = reviewPrompt(round, defaultPlanFile("web"));
+    expect(p).toContain(
+      "- https://a.example/survey: rich. no cost per hire\n- https://b.example/ad: off",
+    );
+    expect(Round.parse({ ...round, verdicts: undefined }).verdicts).toEqual([]);
+  });
 
   it("stops on a spent round budget without asking the model", async () => {
     const e = await review({ ...round, round: 2 }, scriptedModel([]));

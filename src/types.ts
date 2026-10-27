@@ -134,7 +134,15 @@ export const Triage = z.object({
 });
 export type Triage = z.infer<typeof Triage>;
 
-/** What one round came to, as counts and notes. The runner fills it; raven reads it. */
+/** The extractor's word on one read document: how much of the ask it served, what is still missing. */
+export const Verdict = z.object({
+  url: z.string(),
+  quality: z.enum(["rich", "thin", "off", "empty"]),
+  gap: z.string().optional(),
+});
+export type Verdict = z.infer<typeof Verdict>;
+
+/** What one round came to, as counts, verdicts and notes. The runner fills it; raven reads it. */
 export const Round = z.object({
   ask: Ask,
   round: z.number().int().positive(),
@@ -147,6 +155,8 @@ export const Round = z.object({
   found: z.array(z.string()).default([]),
   /** What went wrong or ran out, one line each. */
   notes: z.array(z.string()).default([]),
+  /** The extractor's verdict on each document read this round: the planner sees what the reads were worth. */
+  verdicts: z.array(Verdict).default([]),
 });
 export type Round = z.infer<typeof Round>;
 

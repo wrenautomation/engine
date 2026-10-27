@@ -6,13 +6,15 @@
 import { fill, type Model } from "./model.js";
 import { defaultPlanFile } from "./plans/index.js";
 import { lines } from "./render.js";
-import { type Edge, type PlanFile, type Round, Step, z } from "./types.js";
+import { type Edge, type PlanFile, type Round, Step, type Verdict, z } from "./types.js";
 
 const EdgeAnswer = z.object({
   next: z.enum(["stop", "again", "back"]),
   to: Step.optional(),
   why: z.string(),
 });
+
+const verdictLine = (v: Verdict): string => `${v.url}: ${v.quality}${v.gap ? `. ${v.gap}` : ""}`;
 
 export function reviewPrompt(round: Round, planFile: PlanFile): string {
   return fill(planFile.review, {
@@ -25,6 +27,7 @@ export function reviewPrompt(round: Round, planFile: PlanFile): string {
     kept: String(round.kept),
     found: lines(round.found),
     notes: lines(round.notes, "(none)"),
+    verdicts: lines(round.verdicts.map(verdictLine), "(none)"),
   });
 }
 

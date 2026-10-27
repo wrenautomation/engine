@@ -29,7 +29,8 @@ ${SHAPE_EDGE}
 
 Rules:
 - "stop" when the found lines answer the ask, or when another round would likely add nothing.
-- "again" when the ask is still open and new queries could find more. Say what to look for next in "why".
+- "again" when the ask is still open and new queries could find more. The gaps say what is missing; say what to look for next in "why".
+- "again" too when the reads were mostly "thin" or "off": the queries found the wrong pages, so plan different ones.
 - "back" when one step of this round failed for a reason a rerun fixes (a source was down, reads timed out). Name the step in "to".
 - "why" is one short line a person reads to agree or not.
 
@@ -37,13 +38,15 @@ Ask: {ask}
 Round {round} of at most {rounds}. Hits {hits}, reads {reads}, findings proposed {proposed}, kept {kept}.
 Found:
 {found}
+Read (quality: rich, thin, off or empty; then the gap, what the ask still lacks):
+{verdicts}
 Notes:
 {notes}`;
 
 const web: PlanFile = {
   id: "raven/web",
   kind: "web",
-  version: 1,
+  version: 2,
   propose: `You plan web searches for one research ask.
 
 ${SHAPE_QUERIES}
@@ -75,7 +78,7 @@ Hits:
 const video: PlanFile = {
   id: "raven/video",
   kind: "video",
-  version: 1,
+  version: 2,
   propose: `You plan video searches for one research ask: talks, walkthroughs, interviews and reviews on YouTube and podcast feeds.
 
 ${SHAPE_QUERIES}
@@ -107,7 +110,7 @@ Hits:
 const channel: PlanFile = {
   id: "raven/channel",
   kind: "channel",
-  version: 1,
+  version: 2,
   propose: `You plan searches that find the people and channels worth following for one research ask: creators, newsletters, podcasts, forums.
 
 ${SHAPE_QUERIES}
@@ -137,7 +140,7 @@ Hits:
 const person: PlanFile = {
   id: "raven/person",
   kind: "person",
-  version: 1,
+  version: 2,
   propose: `You plan searches about one person or company for one research ask: what they do, what they said, what others say about them.
 
 ${SHAPE_QUERIES}
@@ -169,7 +172,7 @@ Hits:
 const site: PlanFile = {
   id: "raven/site",
   kind: "site",
-  version: 1,
+  version: 2,
   propose: `You plan searches inside one website for one research ask. Every query runs on {site} only.
 
 ${SHAPE_QUERIES}
