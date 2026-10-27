@@ -1,0 +1,61 @@
+{
+  "name": "@wrenautomation/weaver",
+  "version": "0.1.0",
+  "description": "The web in, documents out. Polite HTTP fetching with robots and a fetch ladder up to a browser; YouTube, any other video and podcasts read from a URL through yt-dlp and @wrenautomation/falcon; what a channel or search holds. The source interface, runner and ledger of Wren's research engine come next.",
+  "license": "PolyForm-Shield-1.0.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wrenautomation/weaver.git"
+  },
+  "type": "module",
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.map"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./fetch": {
+      "types": "./dist/fetch/index.d.ts",
+      "import": "./dist/fetch/index.js"
+    },
+    "./video": {
+      "types": "./dist/video/index.d.ts",
+      "import": "./dist/video/index.js"
+    }
+  },
+  "bin": {
+    "weaver": "dist/app/cli.js"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "prepare": "git config core.hooksPath .githooks || true",
+    "lint": "biome check --error-on-warnings .",
+    "lint:fix": "biome check --write .",
+    "typecheck": "tsc --noEmit",
+    "build": "rm -rf dist && tsc && chmod +x dist/app/cli.js",
+    "test": "vitest run",
+    "gates": "lockf -t 900 /tmp/wren_automation-checks.lock sh -c 'pnpm lint && pnpm typecheck && pnpm test'",
+    "prepublishOnly": "pnpm build"
+  },
+  "dependencies": {
+    "@wrenautomation/falcon": "0.3.0",
+    "commander": "15.0.0",
+    "robots-parser": "3.0.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.14",
+    "@types/node": "22.20.3",
+    "typescript": "5.9.3",
+    "vitest": "5.0.1"
+  }
+}
