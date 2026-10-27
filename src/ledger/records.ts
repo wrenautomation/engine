@@ -10,6 +10,7 @@
 import {
   Document as FalconDocument,
   Finding as FalconFinding,
+  Verdict as FalconVerdict,
 } from "@wrenautomation/falcon/document";
 import {
   Ask,
@@ -35,6 +36,7 @@ export const RECORD_TYPES = [
   "hit",
   "document",
   "finding",
+  "verdict",
   "call",
   "spend",
   "snapshot",
@@ -87,6 +89,16 @@ export const FindingRecord = Envelope.extend({ type: z.literal("finding") })
 export type FindingRecord = z.infer<typeof FindingRecord>;
 
 /**
+ * The extractor's word on a document once its findings are through the gate: how much of the
+ * ask it held, and what the ask still lacks. One per document per extract; the extract step's
+ * checkpoint, and the review's view of what the reads were worth.
+ */
+export const VerdictRecord = Envelope.extend({ type: z.literal("verdict") })
+  .extend(FalconVerdict.shape)
+  .extend({ document: z.string().min(1) });
+export type VerdictRecord = z.infer<typeof VerdictRecord>;
+
+/**
  * The call: keep or drop, on a hit (read or skip) or a finding, with why. The latest call on a
  * record is its state. A person's call and a model's are the same row with a different `from`.
  */
@@ -113,6 +125,8 @@ export const SpendRecord = Envelope.extend({
   on: z.string().optional(),
   ok: z.boolean(),
   error: z.string().optional(),
+  /** ISO time the source said to try again after, on a failure worth another try. */
+  retryAfter: z.string().optional(),
   cost: CostKind,
   ms: z.number().nonnegative(),
   usd: z.number().nonnegative().optional(),
@@ -146,6 +160,7 @@ export const LedgerRecord = z.discriminatedUnion("type", [
   HitRecord,
   DocumentRecord,
   FindingRecord,
+  VerdictRecord,
   CallRecord,
   SpendRecord,
   SnapshotRecord,

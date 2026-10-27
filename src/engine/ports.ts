@@ -45,6 +45,8 @@ export interface Deps {
   ids: Ids;
   /** `by` on the records the runner itself writes. */
   runner: string;
+  /** The pause between tries of a call that failed with a Transient; `setTimeout` by default. A test passes a stub. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export interface RunOptions {
@@ -62,6 +64,8 @@ export interface RunOptions {
   run?: string;
   /** Called after each step, for a progress line. */
   onStep?: (event: StepEvent) => void;
+  /** Steps to run before returning, whatever the pointer says: 64 by default. A loop that advances a run a little per pass passes a few. */
+  steps?: number;
 }
 
 export interface StepEvent {

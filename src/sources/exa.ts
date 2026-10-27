@@ -1,5 +1,6 @@
 /** Exa: `POST https://api.exa.ai/search`, a key per call from the ring. Metered. */
 import type { Source } from "../engine/ports.js";
+import { httpError, transport } from "../engine/transient.js";
 
 interface ExaResult {
   url: string;
@@ -30,8 +31,10 @@ export function exa(o: { keys: readonly string[]; fetchFn?: typeof fetch; n?: nu
           ...(q.site ? { includeDomains: [q.site] } : {}),
         }),
         signal: AbortSignal.timeout(30_000),
+      }).catch((err) => {
+        throw transport("exa", err);
       });
-      if (!res.ok) throw new Error(`exa: HTTP ${res.status}`);
+      if (!res.ok) throw httpError("exa", res);
       const body = (await res.json()) as { results?: ExaResult[] };
       return (body.results ?? []).map((r) => ({
         url: r.url,

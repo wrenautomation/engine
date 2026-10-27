@@ -23,5 +23,6 @@ function pruneLeakedRuns(): void {
 }
 pruneLeakedRuns();
 export default defineConfig({
-  test: { testTimeout: 120_000, hookTimeout: 180_000 },
+  // Only the sources: a build leaves compiled tests in dist/.
+  test: { include: ["src/**/*.test.ts"], testTimeout: 120_000, hookTimeout: 180_000 },
 });

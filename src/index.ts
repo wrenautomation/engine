@@ -5,8 +5,11 @@
  * falcon's (`@wrenautomation/falcon`). Three more doors run the research engine (wren's
  * `designs/2026-10-26-research-engine.md`, 3.5c): `./engine` (the source port, registry, runner),
  * `./sources` (SearXNG, Exa, yt-dlp, the fetcher, the ladder, a paste, the ledger) and
- * `./ledger` (the records, a folder of JSON lines per run per writer, yield rows).
+ * `./ledger` (the records, a folder of JSON lines per run per writer, yield rows). The engine's
+ * CLI commands and model adapters (`addEngineCommands`, `anthropicModel`, `gatewayModel`) are
+ * on this root door, for a host that mounts them on its own program.
  */
+export * from "./app/index.js";
 export * from "./engine/index.js";
 export * from "./fetch/index.js";
 export * from "./ledger/index.js";

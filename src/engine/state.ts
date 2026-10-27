@@ -4,7 +4,7 @@
  * has handled, and the pointer: the next step to run, from the `done` and `edge` records.
  */
 import { Plan } from "@wrenautomation/raven";
-import { ofType, verdicts } from "../ledger/ledger.js";
+import { latestCalls, ofType } from "../ledger/ledger.js";
 import {
   type CallRecord,
   type DocumentRecord,
@@ -17,6 +17,7 @@ import {
   type SpendRecord,
   STEPS,
   type Step,
+  type VerdictRecord,
 } from "../ledger/records.js";
 
 export interface Pointer {
@@ -39,13 +40,15 @@ export interface RunState {
   hits: HitRecord[];
   documents: DocumentRecord[];
   findings: FindingRecord[];
+  /** The extractor's word on each document it handled. */
+  verdicts: VerdictRecord[];
   calls: CallRecord[];
   spends: SpendRecord[];
   edges: EdgeRecord[];
   /** Keys of every hit in the run: a hit seen again in a later round is not a new record. */
   seen: Set<string>;
   /** The latest call on each hit and finding. */
-  verdicts: Map<string, "keep" | "drop">;
+  called: Map<string, "keep" | "drop">;
 }
 
 const after = (step: Step): Step | null => STEPS[STEPS.indexOf(step) + 1] ?? null;
@@ -88,11 +91,12 @@ export function fold(run: string, records: readonly LedgerRecord[]): RunState {
     hits,
     documents: ofType(records, "document"),
     findings: ofType(records, "finding"),
+    verdicts: ofType(records, "verdict"),
     calls: ofType(records, "call"),
     spends: ofType(records, "spend"),
     edges: ofType(records, "edge"),
     seen: new Set(hits.map((h) => h.key)),
-    verdicts: verdicts(records),
+    called: latestCalls(records),
   };
 }
 
@@ -125,7 +129,7 @@ export function planOf(state: RunState, round: number): Plan {
 
 /** A finding stays kept unless its latest call is a drop. */
 export const kept = (state: RunState, f: FindingRecord): boolean =>
-  state.verdicts.get(f.id) !== "drop";
+  state.called.get(f.id) !== "drop";
 
 /** What the run has found so far: the kept findings' sentences, oldest first. */
 export const found = (state: RunState, round?: number): string[] =>
@@ -135,20 +139,18 @@ export const found = (state: RunState, round?: number): string[] =>
 
 /** The hits of a round, the ones no call has named yet. */
 export const uncalledHits = (state: RunState, round: number): HitRecord[] =>
-  state.hits.filter((h) => h.round === round && !state.verdicts.has(h.id));
+  state.hits.filter((h) => h.round === round && !state.called.has(h.id));
 
 /** The hits to read: kept by triage in this round, no document yet, no failed open on record. */
 export const toRead = (state: RunState, round: number): HitRecord[] => {
   const read = new Set(state.documents.map((d) => d.hit));
   return state.hits.filter(
-    (h) => h.round === round && state.verdicts.get(h.id) === "keep" && !read.has(h.id),
+    (h) => h.round === round && state.called.get(h.id) === "keep" && !read.has(h.id),
   );
 };
 
-/** The documents of a round no extract ask has handled. */
+/** The documents of a round without a verdict: the extract step has not finished them. */
 export const toExtract = (state: RunState, round: number): DocumentRecord[] => {
-  const asked = new Set(
-    state.spends.filter((s) => s.op === "ask" && s.ok && s.on).map((s) => s.on),
-  );
-  return state.documents.filter((d) => d.round === round && !asked.has(d.id));
+  const judged = new Set(state.verdicts.map((v) => v.document));
+  return state.documents.filter((d) => d.round === round && !judged.has(d.id));
 };

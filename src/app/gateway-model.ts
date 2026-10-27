@@ -4,6 +4,7 @@
  * that speaks the same. The answer is parsed with raven's shape; the usage is the tokens it reports.
  */
 import { type Model, parseAnswer } from "@wrenautomation/raven";
+import { httpError, transport } from "../engine/transient.js";
 
 interface Completion {
   choices?: { message?: { content?: string | null } }[];
@@ -38,11 +39,13 @@ export function gatewayModel(o: {
           response_format: { type: "json_object" },
         }),
         signal: AbortSignal.timeout(120_000),
+      }).catch((err) => {
+        throw transport(`gateway ${model}`, err);
       });
       const body = (await res.json().catch(() => ({}))) as Completion;
       if (!res.ok) {
         const why = typeof body.error === "string" ? body.error : body.error?.message;
-        throw new Error(`gateway ${model}: HTTP ${res.status}${why ? ` ${why}` : ""}`);
+        throw httpError(`gateway ${model}`, res, why);
       }
       const text = body.choices?.[0]?.message?.content;
       if (!text) throw new Error(`gateway ${model}: empty answer`);

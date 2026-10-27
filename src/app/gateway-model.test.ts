@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { Transient } from "../engine/transient.js";
 import { endpoint, gatewayModel } from "./gateway-model.js";
 
 describe("gatewayModel", () => {
@@ -33,15 +34,15 @@ describe("gatewayModel", () => {
     expect(endpoint("https://llm.example/v1")).toBe("https://llm.example/v1/chat/completions");
     expect(endpoint("https://llm.example/")).toBe("https://llm.example/v1/chat/completions");
   });
-  it("throws with the gateway's reason", async () => {
+  it("throws with the gateway's reason, a Transient on a 429", async () => {
     const model = gatewayModel({
       url: "https://llm.example",
       model: "gemini/flash",
       fetchFn: async () =>
         new Response(JSON.stringify({ error: { message: "faucet dry" } }), { status: 429 }),
     });
-    await expect(model.ask("x", z.object({}))).rejects.toThrow(
-      "gateway gemini/flash: HTTP 429 faucet dry",
-    );
+    const err = await model.ask("x", z.object({})).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Transient);
+    expect((err as Error).message).toBe("gateway gemini/flash: HTTP 429 faucet dry");
   });
 });

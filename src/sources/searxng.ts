@@ -1,5 +1,6 @@
 /** SearXNG: a self-hosted metasearch, `GET $url/search?q=&format=json`. Free. */
 import type { Source } from "../engine/ports.js";
+import { httpError, transport } from "../engine/transient.js";
 
 interface SearxResult {
   url?: string;
@@ -19,8 +20,10 @@ export function searxng(o: { url: string; fetchFn?: typeof fetch; n?: number }):
       const u = new URL(`${base}/search`);
       u.searchParams.set("q", q.site ? `site:${q.site} ${q.terms}` : q.terms);
       u.searchParams.set("format", "json");
-      const res = await fetchFn(u, { signal: AbortSignal.timeout(30_000) });
-      if (!res.ok) throw new Error(`searxng: HTTP ${res.status}`);
+      const res = await fetchFn(u, { signal: AbortSignal.timeout(30_000) }).catch((err) => {
+        throw transport("searxng", err);
+      });
+      if (!res.ok) throw httpError("searxng", res);
       const body = (await res.json()) as { results?: SearxResult[] };
       return (body.results ?? [])
         .filter((r): r is SearxResult & { url: string } => typeof r.url === "string")

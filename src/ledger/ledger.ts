@@ -57,7 +57,7 @@ export const ofType = <T extends RecordType>(records: readonly LedgerRecord[], t
   records.filter((r): r is RecordOf<T> => r.type === type);
 
 /** The latest call on each record: keep or drop. Records must be in time order. */
-export function verdicts(records: readonly LedgerRecord[]): Map<string, "keep" | "drop"> {
+export function latestCalls(records: readonly LedgerRecord[]): Map<string, "keep" | "drop"> {
   const out = new Map<string, "keep" | "drop">();
   for (const c of ofType(records, "call")) out.set(c.on, c.verdict);
   return out;
@@ -84,7 +84,7 @@ export function yieldRows(records: readonly LedgerRecord[], filter: YieldFilter 
   const queries = new Map(ofType(sorted, "query").map((q) => [q.id, q]));
   const hits = new Map(ofType(sorted, "hit").map((h) => [h.id, h]));
   const documents = new Map(ofType(sorted, "document").map((d) => [d.id, d]));
-  const kept = verdicts(sorted);
+  const kept = latestCalls(sorted);
   const tallies = new Map<string, Tally>();
   const tally = (grain: Grain, value: string): Tally => {
     const k = `${grain}\u0000${value}`;

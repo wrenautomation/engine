@@ -1,10 +1,12 @@
 /**
  * The polite fetcher as an open source: one GET, the body read by falcon's reader for its media.
- * A 4xx or an empty page is null (the next source may try); a transport failure throws.
+ * A 4xx or an empty page is null (the next source may try); a transport failure throws a
+ * Transient.
  */
 import { defaultReaders, type Media, mediaOf, type Reader } from "@wrenautomation/falcon/document";
 import { youtubeId } from "../engine/canonical.js";
 import type { Source } from "../engine/ports.js";
+import { transport } from "../engine/transient.js";
 import type { PoliteFetcher } from "../fetch/fetcher.js";
 
 export interface Opener {
@@ -61,7 +63,10 @@ export function fetcherSource(o: {
       if (!/^https?:/.test(h.url)) return null;
       // A video page is not a document: the `youtube` source reads it, when it is in the allow-list.
       if (youtubeId(new URL(h.url))) return null;
-      return readResponse(await o.fetcher.open(h.url), h.url, readers, h);
+      const res = await o.fetcher.open(h.url).catch((err) => {
+        throw transport("fetcher", err);
+      });
+      return readResponse(res, h.url, readers, h);
     },
   };
 }

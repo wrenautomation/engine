@@ -1,19 +1,31 @@
 /**
  * The step table: one typed call per step, records in, records out. The runner interprets it in
  * order; wren's executor mounts the same table as stations. A step reads the fold, calls ports,
- * and appends records; it holds nothing between calls.
+ * and appends records; it holds nothing between calls. Source calls fan out (per query across
+ * the searchers; reads and extracts a few at a time) and their records land in order, so a
+ * trace reads the same whatever answered first. A step runs again after a transient failure
+ * from where its records say it got to: a search with an ok spend, a hit with a document, a
+ * document with a verdict, are not done twice.
  */
 import type { Model } from "@wrenautomation/raven";
 import { dedupeHits, defaultPlanFile, plan, review, triage } from "@wrenautomation/raven";
-import type { Envelope, From, LedgerRecord, Step } from "../ledger/records.js";
+import type {
+  DocumentRecord,
+  Envelope,
+  From,
+  HitRecord,
+  LedgerRecord,
+  Step,
+} from "../ledger/records.js";
 import { canonical } from "./canonical.js";
 import { type Deps, pick, type RunOptions, type Source } from "./ports.js";
 import { found, planOf, type RunState, toExtract, toRead, uncalledHits } from "./state.js";
+import { Transient } from "./transient.js";
 
 export interface StepContext {
   deps: Deps;
   options: RunOptions;
-  /** The run's model, wrapped so every ask writes a spend. */
+  /** The run's model, wrapped so every ask writes a spend; a Transient after the tries run out. */
   model: Model | null;
   /** The same model, its spends marked with the record they are about. */
   modelOn(on: string): Model | null;
@@ -25,7 +37,10 @@ export interface StepContext {
     record: T,
     who: { from: From; by: string },
   ): Promise<string>;
-  /** Times a source call and writes its spend; a throw becomes `ok: false` and null. */
+  /**
+   * Times a source call and writes its spend. A throw becomes `ok: false` and null; a
+   * Transient is tried again, and thrown when the tries run out.
+   */
   invoke<T>(
     source: Source,
     op: "search" | "open",
@@ -38,10 +53,41 @@ export interface StepContext {
 export type StepResult = { ok: true; note?: string } | { ok: false; note: string };
 export type StepFn = (ctx: StepContext, state: RunState) => Promise<StepResult>;
 
+/** Reads and extracts in flight at once. */
+export const PARALLEL = 4;
+
 const tool = (by: string) => ({ from: "tool" as const, by });
 
 const sourcesOf = (ctx: StepContext, state: RunState): Source[] =>
   pick(ctx.deps.sources, state.snapshot?.sources ?? []);
+
+/** Settled calls in order: the values, the first Transient, and any other error thrown on. */
+function gather<T>(settled: PromiseSettledResult<T>[]): {
+  values: (T | null)[];
+  transient: Transient | null;
+} {
+  let transient: Transient | null = null;
+  const values = settled.map((r) => {
+    if (r.status === "fulfilled") return r.value;
+    if (r.reason instanceof Transient) {
+      transient ??= r.reason;
+      return null;
+    }
+    throw r.reason;
+  });
+  return { values, transient };
+}
+
+/** `calls` a few at a time, in order. */
+async function batched<I, O>(
+  items: I[],
+  call: (item: I) => Promise<O>,
+): Promise<PromiseSettledResult<O>[]> {
+  const out: PromiseSettledResult<O>[] = [];
+  for (let i = 0; i < items.length; i += PARALLEL)
+    out.push(...(await Promise.allSettled(items.slice(i, i + PARALLEL).map(call))));
+  return out;
+}
 
 export const planStep: StepFn = async (ctx, state) => {
   const ask = state.snapshot?.ask ?? ctx.options.ask;
@@ -77,22 +123,40 @@ export const fetchStep: StepFn = async (ctx, state) => {
   const searchers = sourcesOf(ctx, state).filter((s) => s.search);
   if (!searchers.length) return { ok: false, note: "no search source in the allow-list" };
   const seen = new Set(state.seen);
+  const searched = new Set(
+    state.spends
+      .filter((s) => s.round === ctx.round && s.op === "search" && s.ok && s.on)
+      .map((s) => `${s.on}\u0000${s.source}`),
+  );
   let written = 0;
   let calls = 0;
+  let answered = 0;
+  let transient: Transient | null = null;
   for (const q of queries) {
+    const todo = searchers.filter((s) => !searched.has(`${q.id}\u0000${s.name}`));
+    calls += todo.length;
+    const got = gather(
+      await Promise.allSettled(
+        todo.map((s) =>
+          ctx.invoke(s, "search", q.terms, q.id, () =>
+            (s.search as NonNullable<Source["search"]>)(q),
+          ),
+        ),
+      ),
+    );
+    transient ??= got.transient;
     const byKey = new Map<
       string,
       { hit: Parameters<typeof dedupeHits>[0][number]; by: string; from: From }
     >();
-    for (const s of searchers) {
-      calls++;
-      const hits = await ctx.invoke(s, "search", q.terms, q.id, () =>
-        (s.search as NonNullable<Source["search"]>)(q),
-      );
-      for (const h of hits ?? []) {
+    for (const [i, hits] of got.values.entries()) {
+      if (!hits) continue;
+      answered++;
+      const s = todo[i] as Source;
+      for (const h of hits) {
         const key = canonical(h.url);
-        const got = byKey.get(key);
-        if (got) got.hit.sources = [...new Set([...(got.hit.sources ?? []), s.name])];
+        const have = byKey.get(key);
+        if (have) have.hit.sources = [...new Set([...(have.hit.sources ?? []), s.name])];
         else
           byKey.set(key, {
             hit: { ...h, sources: [s.name] },
@@ -110,6 +174,7 @@ export const fetchStep: StepFn = async (ctx, state) => {
       written++;
     }
   }
+  if (transient && !answered) throw transient;
   return { ok: true, note: `${written} new hits from ${calls} searches` };
 };
 
@@ -170,21 +235,34 @@ export const readStep: StepFn = async (ctx, state) => {
   const openers = sourcesOf(ctx, state).filter((s) => s.open);
   if (hits.length && !openers.length)
     return { ok: false, note: "no open source in the allow-list" };
-  let read = 0;
-  for (const h of hits) {
+  let transient: Transient | null = null;
+  /** The openers in order; the first document wins. A Transient from one leaves the next its turn. */
+  const openOne = async (h: HitRecord) => {
     for (const s of openers) {
-      const doc = await ctx.invoke(s, "open", h.url, h.id, () =>
-        (s.open as NonNullable<Source["open"]>)(h),
-      );
-      if (!doc) continue;
-      await ctx.write(
-        { type: "document", ...doc, hit: h.id },
-        { from: s.from ?? "tool", by: s.by ?? s.name },
-      );
-      read++;
-      break;
+      try {
+        const doc = await ctx.invoke(s, "open", h.url, h.id, () =>
+          (s.open as NonNullable<Source["open"]>)(h),
+        );
+        if (doc) return { doc, source: s };
+      } catch (err) {
+        if (!(err instanceof Transient)) throw err;
+        transient ??= err;
+      }
     }
+    return null;
+  };
+  const got = gather(await batched(hits, openOne));
+  let read = 0;
+  for (const [i, g] of got.values.entries()) {
+    if (!g) continue;
+    const h = hits[i] as HitRecord;
+    await ctx.write(
+      { type: "document", ...g.doc, hit: h.id },
+      { from: g.source.from ?? "tool", by: g.source.by ?? g.source.name },
+    );
+    read++;
   }
+  if (transient && !read) throw transient;
   return { ok: true, note: `${read} of ${hits.length} hits read` };
 };
 
@@ -195,9 +273,7 @@ export const extractStep: StepFn = async (ctx, state) => {
   const ask = state.snapshot?.ask;
   if (!ask) return { ok: false, note: "no snapshot" };
   const known = [...new Set([...ask.known, ...found(state)])];
-  let proposed = 0;
-  let dropped = 0;
-  for (const d of docs) {
+  const extractOne = async (d: DocumentRecord) => {
     const {
       type: _t,
       id,
@@ -210,17 +286,29 @@ export const extractStep: StepFn = async (ctx, state) => {
       hit: _h,
       ...doc
     } = d;
-    const model = ctx.modelOn(id);
-    if (!model) break;
-    const out = await ctx.deps.extractor.extract(doc, { text: ask.text, known }, model);
-    for (const f of out.findings)
-      await ctx.write({ type: "finding", ...f, document: id }, { from: "ai", by: model.id });
-    proposed += out.findings.length;
-    dropped += out.dropped.length;
+    const model = ctx.modelOn(id) as Model;
+    return { out: await ctx.deps.extractor.extract(doc, { text: ask.text, known }, model), model };
+  };
+  const got = gather(await batched(docs, extractOne));
+  let proposed = 0;
+  let dropped = 0;
+  let done = 0;
+  for (const [i, g] of got.values.entries()) {
+    if (!g) continue;
+    const id = (docs[i] as DocumentRecord).id;
+    const who = { from: "ai" as const, by: g.model.id };
+    for (const f of g.out.findings) await ctx.write({ type: "finding", ...f, document: id }, who);
+    const { quality, gap } = g.out.verdict;
+    await ctx.write({ type: "verdict", document: id, quality, ...(gap ? { gap } : {}) }, who);
+    proposed += g.out.findings.length;
+    dropped += g.out.dropped.length;
+    done++;
   }
+  // The verdict is the checkpoint: the documents without one are extracted on the next try.
+  if (got.transient) throw got.transient;
   return {
     ok: true,
-    note: `${proposed} findings from ${docs.length} documents, ${dropped} dropped at the gate`,
+    note: `${proposed} findings from ${done} documents, ${dropped} dropped at the gate`,
   };
 };
 
@@ -231,6 +319,7 @@ export const reviewStep: StepFn = async (ctx, state) => {
   const reads = state.documents.filter(inRound).length;
   const proposed = state.findings.filter(inRound).length;
   const foundNow = found(state, ctx.round);
+  const urlOf = new Map(state.documents.map((d) => [d.id, d.url]));
   const round = {
     ask: p.ask,
     round: ctx.round,
@@ -240,9 +329,18 @@ export const reviewStep: StepFn = async (ctx, state) => {
     proposed,
     kept: foundNow.length,
     found: foundNow,
-    notes: state.spends
-      .filter((s) => inRound(s) && !s.ok)
-      .map((s) => `${s.source} ${s.op} failed: ${s.error ?? "?"}`),
+    verdicts: state.verdicts.filter(inRound).map((v) => ({
+      url: urlOf.get(v.document) ?? v.document,
+      quality: v.quality,
+      ...(v.gap ? { gap: v.gap } : {}),
+    })),
+    notes: [
+      ...new Set(
+        state.spends
+          .filter((s) => inRound(s) && !s.ok)
+          .map((s) => `${s.source} ${s.op} failed: ${s.error ?? "?"}`),
+      ),
+    ],
   };
   const edge = ctx.model
     ? await review(round, ctx.model, {

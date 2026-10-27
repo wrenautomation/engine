@@ -1,13 +1,17 @@
 /**
  * The interpreter: fold the trace, take the pointer's step from the table, write `done`, fold
  * again. `--resume` is the same loop on an old run: the fold says where it stopped. Every model
- * ask and source call writes a `spend` with what it cost and whether it worked.
+ * ask and source call writes a `spend` with what it cost and whether it worked. A call that
+ * fails with a `Transient` is tried again with a pause, three tries in all, every attempt on
+ * record; a step that still cannot go on throws it past the runner with no `done`, so a resume
+ * runs the step again once the cause has passed.
  */
-import type { Model } from "@wrenautomation/raven";
+import type { Model, Usage } from "@wrenautomation/raven";
 import { type Envelope, type From, LedgerRecord, type Step } from "../ledger/records.js";
 import type { Deps, RunOptions, Source } from "./ports.js";
 import { fold, type RunState } from "./state.js";
 import { STEP_TABLE, type StepContext } from "./steps.js";
+import { Transient } from "./transient.js";
 
 export interface RunResult {
   run: string;
@@ -19,10 +23,29 @@ export interface RunResult {
   state: RunState;
 }
 
+/** Tries per call over a Transient. */
+export const TRIES = 3;
+/** The longest pause before another try, whatever `retry-after` said. */
+const MAX_WAIT_MS = 60_000;
+/** The default step bound: three full rounds and some backs. */
+export const DEFAULT_STEPS = 64;
+
+/** The pause before the next try: to `retryAfter` (a minute at most), else a second per try so far. */
+export function waitMs(attempt: number, retryAfter: string | undefined, now: () => Date): number {
+  if (retryAfter) {
+    const until = Date.parse(retryAfter) - now().getTime();
+    if (!Number.isNaN(until)) return Math.max(0, Math.min(until, MAX_WAIT_MS));
+  }
+  return 1000 * attempt;
+}
+
+const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
+const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 export async function run(deps: Deps, options: RunOptions = {}): Promise<RunResult> {
   const id = options.resume ?? options.run ?? deps.ids();
   if (!options.resume && !options.ask) throw new Error("a new run needs an ask");
-  const steps = 64;
+  const steps = options.steps ?? DEFAULT_STEPS;
   let state = fold(id, await deps.ledger.trace(id));
   if (options.resume && !state.records.length) throw new Error(`run ${id}: no records`);
   for (let n = 0; n < steps && state.next; n++) {
@@ -33,7 +56,8 @@ export async function run(deps: Deps, options: RunOptions = {}): Promise<RunResu
     try {
       result = await STEP_TABLE[step](ctx, state);
     } catch (err) {
-      result = { ok: false, note: err instanceof Error ? err.message : String(err) };
+      if (err instanceof Transient) throw err;
+      result = { ok: false, note: message(err) };
     }
     await ctx.write(
       { type: "done", step, ok: result.ok, ...(result.note ? { note: result.note } : {}) },
@@ -60,6 +84,22 @@ export async function run(deps: Deps, options: RunOptions = {}): Promise<RunResu
   };
 }
 
+type Outcome =
+  | { ok: true; usd?: number; tokens?: { input?: number; output?: number } }
+  | { ok: false; error: string; retryAfter?: string };
+
+const tokens = (u: Usage | undefined): Omit<Extract<Outcome, { ok: true }>, "ok"> => ({
+  ...(u?.usd !== undefined ? { usd: u.usd } : {}),
+  ...(u && (u.input !== undefined || u.output !== undefined)
+    ? {
+        tokens: {
+          ...(u.input !== undefined ? { input: u.input } : {}),
+          ...(u.output !== undefined ? { output: u.output } : {}),
+        },
+      }
+    : {}),
+});
+
 function context(
   deps: Deps,
   options: RunOptions,
@@ -67,6 +107,7 @@ function context(
   round: number,
   step: Step,
 ): StepContext {
+  const sleep = deps.sleep ?? defaultSleep;
   const write: StepContext["write"] = async (record, who) => {
     const id = deps.ids();
     const full = LedgerRecord.parse({
@@ -82,15 +123,14 @@ function context(
     await deps.ledger.append(full);
     return id;
   };
-  const spend = async (
-    source: Source | { name: string; cost: "metered" },
+  type Spender = Source | { name: string; cost: "metered" };
+  const spend = (
+    source: Spender,
     op: "search" | "open" | "ask",
     about: string,
     on: string | undefined,
     t0: number,
-    outcome:
-      | { ok: true; usd?: number; tokens?: { input?: number; output?: number } }
-      | { ok: false; error: string },
+    outcome: Outcome,
   ) =>
     write(
       {
@@ -105,17 +145,45 @@ function context(
       },
       { from: "tool", by: deps.runner },
     );
-  const invoke: StepContext["invoke"] = async (source, op, about, on, call) => {
+  /** One attempt, its spend written either way. */
+  const once = async <T>(
+    source: Spender,
+    op: "search" | "open" | "ask",
+    about: string,
+    on: string | undefined,
+    call: () => Promise<T>,
+    usageOf?: (out: T) => Usage | undefined,
+  ): Promise<T> => {
     const t0 = performance.now();
     try {
       const out = await call();
-      await spend(source, op, about, on, t0, { ok: true });
+      await spend(source, op, about, on, t0, { ok: true, ...tokens(usageOf?.(out)) });
       return out;
     } catch (err) {
       await spend(source, op, about, on, t0, {
         ok: false,
-        error: err instanceof Error ? err.message : String(err),
+        error: message(err),
+        ...(err instanceof Transient && err.retryAfter ? { retryAfter: err.retryAfter } : {}),
       });
+      throw err;
+    }
+  };
+  /** The call again after a Transient, with a pause, TRIES in all. */
+  const tried = async <T>(call: () => Promise<T>): Promise<T> => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await call();
+      } catch (err) {
+        if (!(err instanceof Transient) || attempt >= TRIES) throw err;
+        await sleep(waitMs(attempt, err.retryAfter, deps.clock));
+      }
+    }
+  };
+  const invoke: StepContext["invoke"] = async (source, op, about, on, call) => {
+    try {
+      return await tried(() => once(source, op, about, on, call));
+    } catch (err) {
+      if (err instanceof Transient) throw err;
       return null;
     }
   };
@@ -123,33 +191,19 @@ function context(
     deps.model
       ? {
           id: deps.model.id,
-          ask: async (prompt, shape) => {
+          ask: (prompt, shape) => {
             const m = deps.model as Model;
-            const t0 = performance.now();
             const about = prompt.split("\n").find((l) => l.trim()) ?? "";
-            try {
-              const a = await m.ask(prompt, shape);
-              const u = a.usage;
-              await spend({ name: m.id, cost: "metered" }, "ask", about, on, t0, {
-                ok: true,
-                ...(u?.usd !== undefined ? { usd: u.usd } : {}),
-                ...(u && (u.input !== undefined || u.output !== undefined)
-                  ? {
-                      tokens: {
-                        ...(u.input !== undefined ? { input: u.input } : {}),
-                        ...(u.output !== undefined ? { output: u.output } : {}),
-                      },
-                    }
-                  : {}),
-              });
-              return a;
-            } catch (err) {
-              await spend({ name: m.id, cost: "metered" }, "ask", about, on, t0, {
-                ok: false,
-                error: err instanceof Error ? err.message : String(err),
-              });
-              throw err;
-            }
+            return tried(() =>
+              once(
+                { name: m.id, cost: "metered" },
+                "ask",
+                about,
+                on,
+                () => m.ask(prompt, shape),
+                (a) => a.usage,
+              ),
+            );
           },
         }
       : null;

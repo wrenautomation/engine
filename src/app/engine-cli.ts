@@ -4,22 +4,44 @@
  * can drive it. The ledger is a folder (`--ledger`, WEAVER_LEDGER, default `./ledger`); a
  * writer names this terminal's file in it (`--writer`, WEAVER_WRITER, default the user name).
  * The model is `claude -p --output-format json` by default (Claude Code headless, raven's way:
- * any command that reads a prompt on stdin and prints the answer), or `gateway[:alias]` for
- * Wren's LLM gateway (WREN_LLM_GATEWAY_URL and WREN_LLM_GATEWAY_TOKEN).
+ * any command that reads a prompt on stdin and prints the answer), `anthropic[:model]` for
+ * Claude direct (ANTHROPIC_API_KEY), or `gateway[:alias]` for Wren's LLM gateway
+ * (WREN_LLM_GATEWAY_URL and WREN_LLM_GATEWAY_TOKEN). A host with its own ledger, sources or
+ * model passes them in `EngineCliDeps`; wren's `research` command is these commands over
+ * Postgres. A run that stops on a transient failure (a 429, a 5xx, a dropped connection) is
+ * resumed by `run` itself after a pause, up to RESUMES times.
  */
 import { userInfo } from "node:os";
+import type { Extractor } from "@wrenautomation/falcon/document";
 import { claimExtractor } from "@wrenautomation/falcon/document";
 import {
+  type AskKind,
   commandModel,
   defaultPlanFile,
   type Model,
   PLAN_KINDS,
+  type PlanFile,
   type Proposal,
 } from "@wrenautomation/raven";
 import type { Command } from "commander";
-import { registry, run, type Source, type Sources, type StepEvent } from "../engine/index.js";
+import {
+  fold,
+  registry,
+  run,
+  type Source,
+  type Sources,
+  type StepEvent,
+  Transient,
+} from "../engine/index.js";
 import { PoliteFetcher, userAgent } from "../fetch/fetcher.js";
-import { FilesLedger, type LedgerRecord, ofType, ulids } from "../ledger/index.js";
+import {
+  FilesLedger,
+  type Ledger,
+  type LedgerRecord,
+  ofType,
+  type Problem,
+  ulids,
+} from "../ledger/index.js";
 import {
   exa,
   fetcherSource,
@@ -30,12 +52,25 @@ import {
   searxng,
   ytdlpSource,
 } from "../sources/index.js";
+import { anthropicModel } from "./anthropic-model.js";
 import { gatewayModel } from "./gateway-model.js";
 
 const DEFAULT_MODEL = "claude -p --output-format json";
+/** Resumes `run` makes on its own after a transient failure. */
+export const RESUMES = 5;
+/** The longest pause before a resume, whatever `retry-after` said. */
+const MAX_RESUME_WAIT_MS = 300_000;
 
-/** `gateway[:alias]` is the LLM gateway; anything else is a command, raven's way. */
+/**
+ * `anthropic[:model]` is Claude direct, `gateway[:alias]` the LLM gateway; anything else is a
+ * command, raven's way.
+ */
 export function modelOf(spec: string, printed: NodeJS.ProcessEnv): Model {
+  const a = /^anthropic(?::(.+))?$/.exec(spec);
+  if (a) {
+    if (!printed.ANTHROPIC_API_KEY) throw new Error("--model anthropic needs ANTHROPIC_API_KEY");
+    return anthropicModel({ apiKey: printed.ANTHROPIC_API_KEY, ...(a[1] ? { model: a[1] } : {}) });
+  }
   const m = /^gateway(?::(.+))?$/.exec(spec);
   if (!m) return commandModel(spec, spec === DEFAULT_MODEL ? "claude-code" : spec);
   if (!printed.WREN_LLM_GATEWAY_URL) throw new Error("--model gateway needs WREN_LLM_GATEWAY_URL");
@@ -44,6 +79,15 @@ export function modelOf(spec: string, printed: NodeJS.ProcessEnv): Model {
     token: printed.WREN_LLM_GATEWAY_TOKEN ?? null,
     ...(m[1] ? { model: m[1] } : {}),
   });
+}
+
+/** The pause before a resume: to `retryAfter` (five minutes at most), else 15 s per resume so far. */
+export function resumeWaitMs(n: number, retryAfter: string | undefined, now = Date.now()): number {
+  if (retryAfter) {
+    const until = Date.parse(retryAfter) - now;
+    if (!Number.isNaN(until)) return Math.max(0, Math.min(until, MAX_RESUME_WAIT_MS));
+  }
+  return 15_000 * n;
 }
 
 /** `NAME`, then `NAME_1`, `NAME_2`, ... in order: a fleet of keys for one vendor. */
@@ -59,12 +103,29 @@ export function keys(printed: NodeJS.ProcessEnv, name: string): string[] {
   return out;
 }
 
-interface Common {
+export interface Common {
   ledger: string;
   writer: string;
 }
 
-const ledgerOf = (o: Common) => new FilesLedger(o.ledger, o.writer);
+/** A ledger a host hands the commands: the contract, and what the files backend adds when it has it. */
+export type HostLedger = Ledger & {
+  readPlan?(kind: AskKind): Promise<PlanFile | null>;
+  problems?: Problem[];
+};
+
+/** What a host swaps in: the files backend, this machine's sources and `--model` are the defaults. */
+export interface EngineCliDeps {
+  ledger?(o: Common): HostLedger;
+  sources?(o: Common, ledger: HostLedger): Sources;
+  /** The model for a `--model` spec; the default knows `anthropic`, `gateway` and a command. */
+  model?(spec: string, printed: NodeJS.ProcessEnv): Model;
+  extractor?: Extractor;
+  /** The pause before a resume; a test passes a stub. */
+  sleep?(ms: number): Promise<void>;
+}
+
+const filesLedger = (o: Common) => new FilesLedger(o.ledger, o.writer);
 
 /** The sources this machine can run, from the environment. */
 export function sourcesHere(
@@ -119,7 +180,9 @@ const progress = (e: StepEvent) =>
     `${e.run} ${e.round}.${e.step} ${e.ok ? "ok" : "gave up"} ${e.ms}ms${e.note ? `: ${e.note}` : ""}`,
   );
 
-export function addEngineCommands(program: Command): void {
+export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): void {
+  const ledgerOf = deps.ledger ?? filesLedger;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const common = (c: Command) =>
     c
       .option("--ledger <dir>", "the ledger folder", process.env.WEAVER_LEDGER ?? "./ledger")
@@ -149,7 +212,7 @@ export function addEngineCommands(program: Command): void {
     )
     .option(
       "--model <command>",
-      "gateway[:alias], or a command (stdin: prompt, stdout: answer)",
+      "anthropic[:model], gateway[:alias], or a command (stdin: prompt, stdout: answer)",
       process.env.WEAVER_MODEL ?? DEFAULT_MODEL,
     )
     .option("--no-model", "no model: your queries only, every hit read, nothing extracted")
@@ -176,7 +239,9 @@ export function addEngineCommands(program: Command): void {
         if (!ask && !o.resume) throw new Error("run needs an ask, or --resume <run>");
         const kind = defaultPlanFile(o.kind as never).kind;
         const ledger = ledgerOf(o);
-        const sources = sourcesHere(process.env, ledger, o.ytDlp);
+        const sources = deps.sources
+          ? deps.sources(o, ledger)
+          : sourcesHere(process.env, ledger as FilesLedger, o.ytDlp);
         if (o.url?.length)
           sources.set(
             "paste",
@@ -185,11 +250,17 @@ export function addEngineCommands(program: Command): void {
               o.by,
             ),
           );
-        const tuned = (await ledger.readPlan(kind)) ?? defaultPlanFile(kind);
+        const stock = defaultPlanFile(kind);
+        const tuned = (await ledger.readPlan?.(kind)) ?? stock;
+        if (tuned.version < stock.version)
+          console.error(
+            `plan file ${kind} is version ${tuned.version}; weaver ships ${stock.version}: delete it to take the new one`,
+          );
         const wanted = o.sources ?? [...(o.url?.length ? ["paste"] : []), ...tuned.sources];
         // raven narrows to the plan file's sources, so the run's allow-list goes in as the plan file's.
         const planFile = { ...tuned, sources: allowList(sources, wanted, !!o.sources) };
-        const model: Model | null = o.model === false ? null : modelOf(o.model, process.env);
+        const model: Model | null =
+          o.model === false ? null : (deps.model ?? modelOf)(o.model, process.env);
         const byHand = [
           ...(o.propose ?? []).map((terms) => ({ kind, terms, why: "proposed by hand" })),
           // The paste answers the first query it sees: this one, when nothing else is proposed.
@@ -200,45 +271,62 @@ export function addEngineCommands(program: Command): void {
         const proposals: Proposal[] = byHand.length
           ? [{ from: "human", by: o.by, queries: byHand }]
           : [];
-        const result = await run(
-          {
-            sources,
-            ledger,
-            model,
-            extractor: claimExtractor,
-            clock: () => new Date(),
-            ids: ulids(),
-            runner: o.writer,
-          },
-          {
-            ...(ask
-              ? {
-                  ask: {
-                    text: ask,
-                    kind,
-                    known: o.known ?? [],
-                    ...(o.site ? { site: o.site } : {}),
-                  },
-                }
-              : {}),
-            planFile,
-            proposals,
-            ...(o.resume ? { resume: o.resume } : {}),
-            ...(o.run ? { run: o.run } : {}),
-            onStep: progress,
-          },
-        );
-        const { state } = result;
+        const id = o.resume ?? o.run ?? ulids()();
+        const engineDeps = {
+          sources,
+          ledger,
+          model,
+          extractor: deps.extractor ?? claimExtractor,
+          clock: () => new Date(),
+          ids: ulids(),
+          runner: o.writer,
+        };
+        const options = {
+          ...(ask
+            ? {
+                ask: {
+                  text: ask,
+                  kind,
+                  known: o.known ?? [],
+                  ...(o.site ? { site: o.site } : {}),
+                },
+              }
+            : {}),
+          planFile,
+          proposals,
+          onStep: progress,
+        };
+        let result: Awaited<ReturnType<typeof run>> | null = null;
+        for (let n = 0; result === null; n++) {
+          try {
+            result = await run(engineDeps, {
+              ...options,
+              ...(n === 0 && !o.resume ? { run: id } : { resume: id }),
+            });
+          } catch (err) {
+            if (!(err instanceof Transient)) throw err;
+            if (n >= RESUMES) {
+              console.error(`${id}: ${err.message}; stopped after ${RESUMES} resumes`);
+              break;
+            }
+            const ms = resumeWaitMs(n + 1, err.retryAfter);
+            console.error(
+              `${id}: ${err.message}; resume ${n + 1} of ${RESUMES} in ${Math.round(ms / 1000)}s`,
+            );
+            await sleep(ms);
+          }
+        }
+        const state = result?.state ?? fold(id, await ledger.trace(id));
         console.log(
           JSON.stringify(
             {
-              run: result.run,
-              rounds: result.rounds,
-              finished: result.finished,
-              note: result.note,
+              run: id,
+              rounds: state.round,
+              finished: result?.finished ?? false,
+              note: result ? result.note : "stopped on a transient failure: --resume to go on",
               hits: state.hits.length,
               documents: state.documents.length,
-              findings: state.findings.filter((f) => state.verdicts.get(f.id) !== "drop"),
+              findings: state.findings.filter((f) => state.called.get(f.id) !== "drop"),
               spends: state.spends.map(({ source, op, about, ok, cost, ms, usd }) => ({
                 source,
                 op,
@@ -248,13 +336,13 @@ export function addEngineCommands(program: Command): void {
                 ms,
                 ...(usd !== undefined ? { usd } : {}),
               })),
-              problems: ledger.problems,
+              problems: ledger.problems ?? [],
             },
             null,
             2,
           ),
         );
-        if (!result.finished) process.exitCode = 2;
+        if (!result?.finished) process.exitCode = 2;
       },
     );
 
@@ -267,7 +355,7 @@ export function addEngineCommands(program: Command): void {
       if (!records.length) throw new Error(`run ${id}: no records`);
       for (const r of records)
         if (!o.type || o.type.includes(r.type)) console.log(JSON.stringify(r));
-      for (const p of ledger.problems) console.error(`${p.file}:${p.line}: ${p.why}`);
+      for (const p of ledger.problems ?? []) console.error(`${p.file}:${p.line}: ${p.why}`);
     });
 
   for (const verdict of ["keep", "drop"] as const)
@@ -318,14 +406,16 @@ export function addEngineCommands(program: Command): void {
     .description("the sources this machine can run, from the environment")
     .option("--yt-dlp <cmd>", "the yt-dlp command", process.env.WEAVER_YTDLP ?? "yt-dlp")
     .action(async (o: Common & { ytDlp: string }) => {
-      const rows = [...sourcesHere(process.env, ledgerOf(o), o.ytDlp).values()].map(
-        ({ name, kind, cost, from }) => ({
-          name,
-          kind,
-          cost,
-          from: from ?? "tool",
-        }),
-      );
+      const ledger = ledgerOf(o);
+      const sources = deps.sources
+        ? deps.sources(o, ledger)
+        : sourcesHere(process.env, ledger as FilesLedger, o.ytDlp);
+      const rows = [...sources.values()].map(({ name, kind, cost, from }) => ({
+        name,
+        kind,
+        cost,
+        from: from ?? "tool",
+      }));
       console.log(JSON.stringify(rows, null, 2));
     });
 }

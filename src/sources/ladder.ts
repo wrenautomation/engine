@@ -6,6 +6,7 @@
  */
 import { defaultReaders, type Media, type Reader } from "@wrenautomation/falcon/document";
 import type { Source } from "../engine/ports.js";
+import { Transient } from "../engine/transient.js";
 import { fetchLadder, type LadderClient, type LadderTier } from "../fetch/ladder.js";
 
 export function ladderSource(o: {
@@ -21,7 +22,11 @@ export function ladderSource(o: {
     async open(h) {
       if (!/^https?:/.test(h.url)) return null;
       const r = await fetchLadder(o.sites, h.url, o.from ?? "impersonate");
-      if ("failed" in r) throw new Error(`ladder: ${r.failed}`);
+      // offline: the worker did not answer, worth another try. cap: the day's bucket is spent.
+      if ("failed" in r) {
+        if (r.failed === "offline") throw new Transient("ladder: offline");
+        throw new Error(`ladder: ${r.failed}`);
+      }
       if (r.fetched.block)
         throw new Error(`ladder: blocked (${r.fetched.block}) at ${r.fetched.tier}`);
       const html = readers.get("html");
