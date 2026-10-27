@@ -23,7 +23,8 @@ learns. Raven never loops; the runner takes the edge.
 Needs Node 24+. The model is a command that reads the prompt on stdin and prints the answer.
 Default `claude -p --output-format json`, so Claude Code is the model in any terminal and its
 envelope gives the cost per call; `RAVEN_MODEL` or `--model` changes it (plain text out is fine);
-`--no-model` plans from your own queries only.
+`--no-model` plans from your own queries only. A command that says nothing for 3 minutes is
+killed and the call fails with why.
 
 ```sh
 npm i @wrenautomation/raven

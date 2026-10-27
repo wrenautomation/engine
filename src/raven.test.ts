@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fill, parseAnswer, readOutput, scriptedModel } from "./model.js";
+import { commandModel, fill, parseAnswer, readOutput, scriptedModel } from "./model.js";
 import { mergeProposals, plan, proposePrompt } from "./plan.js";
 import { defaultPlanFile, PLAN_KINDS } from "./plans/index.js";
 import { review } from "./review.js";
@@ -28,6 +28,14 @@ describe("model seam", () => {
       'Notes {not json} then {"meta": {"n": 1}, "hits": [{"url": "https://a/{x}", "read": true}]} and {"hits": []}';
     expect(parseAnswer(text, shape)).toEqual({ hits: [{ url: "https://a/{x}", read: true }] });
     expect(parseAnswer('{"a": "}"} {"hits": []}', shape)).toEqual({ hits: [] });
+  });
+
+  it("a command answers from stdout; a command that hangs is killed and the ask fails with why", async () => {
+    const shape = z.object({ ok: z.boolean() });
+    const echo = commandModel("cat", "cat");
+    expect(await echo.ask('{"ok": true}', shape)).toEqual({ value: { ok: true } });
+    const hung = commandModel("sleep 30", "sleep", 300);
+    await expect(hung.ask("x", shape)).rejects.toThrow(/no answer in 0s/);
   });
 
   it("reads Claude Code's JSON envelope for the text and the usage, else the text as is", () => {

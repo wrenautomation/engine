@@ -96,18 +96,31 @@ export function readOutput(stdout: string): { text: string; usage?: Usage } {
 /**
  * A model that is a shell command: the prompt on stdin, the answer on stdout. When stdout is
  * Claude Code's JSON envelope (`claude -p --output-format json`) the usage comes with it.
+ * A command that says nothing for `timeoutMs` (3 minutes) is killed and the ask fails with
+ * why, so a hung model never hangs the run.
  */
-export function commandModel(command: string, id = command): Model {
+export function commandModel(command: string, id = command, timeoutMs = 180_000): Model {
   return {
     id,
     ask: (prompt, shape) =>
       new Promise((resolve, reject) => {
         const child = spawn(command, { shell: true, stdio: ["pipe", "pipe", "inherit"] });
         const out: Buffer[] = [];
+        let timedOut = false;
+        const timer = setTimeout(() => {
+          timedOut = true;
+          child.kill();
+        }, timeoutMs);
         child.stdout.on("data", (b: Buffer) => out.push(b));
-        child.on("error", reject);
+        child.on("error", (e) => {
+          clearTimeout(timer);
+          reject(e);
+        });
         child.on("close", (code) => {
+          clearTimeout(timer);
           const stdout = Buffer.concat(out).toString("utf8");
+          if (timedOut)
+            return reject(new Error(`${command}: no answer in ${Math.round(timeoutMs / 1000)}s`));
           if (code !== 0)
             return reject(new Error(`${command} exited ${code}: ${stdout.slice(0, 400)}`));
           try {
