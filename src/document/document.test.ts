@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claimExtractor, claimPrompt, gateFindings } from "./extract.js";
+import { claimExtractor, claimPrompt, gateFindings, verdictOf } from "./extract.js";
 import type { Model } from "./model.js";
 import { defaultReaders, mediaOf } from "./readers.js";
 import { Document, Finding, Proof } from "./types.js";
@@ -83,6 +83,8 @@ describe("claim extractor", () => {
           },
           { text: "Short.", quote: "tiny" },
         ],
+        quality: "rich",
+        gap: "No numbers on referral cost.",
       },
     ]);
     const out = await claimExtractor.extract(doc, { text: "repeat clients" }, model);
@@ -96,7 +98,19 @@ describe("claim extractor", () => {
       "number_not_in_quote",
       "no_quote",
     ]);
+    expect(out.verdict).toEqual({ quality: "rich", gap: "No numbers on referral cost." });
     expect(out.usage).toEqual({ usd: 0.01 });
+  });
+
+  it("corrects the verdict by what the gate kept; an empty document is empty", () => {
+    expect(verdictOf({ quality: "rich" }, doc, 0)).toEqual({ quality: "thin" });
+    expect(verdictOf({}, doc, 0)).toEqual({ quality: "off" });
+    expect(verdictOf({}, doc, 2)).toEqual({ quality: "thin" });
+    expect(verdictOf({ quality: "off", gap: " more  numbers " }, doc, 0)).toEqual({
+      quality: "off",
+      gap: "more numbers",
+    });
+    expect(verdictOf({ quality: "rich" }, { ...doc, text: " " }, 0)).toEqual({ quality: "empty" });
   });
 
   it("lets a year come from the document and dedupes by quote", () => {
@@ -111,5 +125,6 @@ describe("claim extractor", () => {
     );
     expect(out.findings).toHaveLength(1);
     expect(out.dropped).toEqual([]);
+    expect(out.verdict).toEqual({ quality: "thin" });
   });
 });

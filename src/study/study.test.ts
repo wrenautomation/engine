@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { fill, gateClaims, planQueries } from "./claims.js";
+import { fill } from "./claims.js";
 import { gateDrafts, type NumberedClaim } from "./drafts.js";
-import { pageEvidence, passages, pickReads, terms } from "./evidence.js";
+import { pageEvidence, passages, terms } from "./evidence.js";
 import { numbersQuoted, pageQuoted } from "./grounding.js";
 import { type ReportClaim, studyReport } from "./report.js";
 
@@ -50,67 +50,9 @@ describe("claims", () => {
   it("fills marks once: a mark inside a value stays text", () => {
     expect(fill("{a} and {b}", { a: "{b}", b: "$&" })).toBe("{b} and $&");
   });
-
-  it("plans at most three distinct queries", () => {
-    expect(planQueries({ queries: [" a  b ", "A B", "c", "d", "e"] })).toEqual(["a b", "c", "d"]);
-  });
-
-  it("keeps a quoted claim on an angle, drops what the page doesn't say, keeps each quote once", () => {
-    const quote = "38% of placements came from repeat clients";
-    const { kept, dropped } = gateClaims(
-      {
-        claims: [
-          { angle: 2, claim: "A survey found 38% of placements are repeat clients.", quote },
-          { angle: 1, claim: "Same thing again at 38%.", quote },
-          { angle: 1, claim: "Half of placements are repeat clients (50%).", quote },
-          { angle: 1, claim: "Referrals beat ads.", quote: "referrals were far cheaper than ads" },
-          { angle: 1, claim: "Short quote.", quote: "repeat clients" },
-          { angle: 1, claim: "Whole section.", quote: "word ".repeat(81) },
-          { angle: 3, claim: "No such angle.", quote },
-          { claim: "No angle at all.", quote },
-        ],
-      },
-      PAGE,
-      2,
-    );
-    expect(kept).toEqual([
-      {
-        angle: 1,
-        claim: "A survey found 38% of placements are repeat clients.",
-        quote,
-        source_url: PAGE.url,
-      },
-    ]);
-    expect(dropped.map((d) => d.why)).toEqual([
-      "number_not_in_quote",
-      "quote_not_found",
-      "no_quote",
-      "quote_too_long",
-      "no_angle",
-      "no_angle",
-    ]);
-  });
 });
 
 describe("evidence", () => {
-  const hit = (url: string) => ({ title: url, url, snippet: null });
-
-  it("reads round-robin by rank, once per page, never social or video", () => {
-    const a = [hit("https://a.example/1/"), hit("https://a.example/2"), hit("https://a.example/3")];
-    const b = [
-      hit("https://www.linkedin.com/pulse/x"),
-      hit("https://a.example/1#top"),
-      hit("https://b.example/2"),
-    ];
-    const c = [hit("ftp://c.example/1"), hit("https://c.example/2")];
-    expect(pickReads([a, b, c], 4)).toEqual([
-      "https://a.example/1",
-      "https://a.example/2",
-      "https://c.example/2",
-      "https://a.example/3",
-    ]);
-  });
-
   it("shows the chunks that match, in page order, within the budget", () => {
     const filler = "lorem ipsum dolor sit amet ".repeat(30);
     const text = [

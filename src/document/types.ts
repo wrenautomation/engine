@@ -51,3 +51,18 @@ export const Finding = z.object({
   proof: Proof,
 });
 export type Finding = z.infer<typeof Finding>;
+
+/** How much of the ask one document served: rich, thin, off (another subject) or empty (no text). */
+export const Quality = z.enum(["rich", "thin", "off", "empty"]);
+export type Quality = z.infer<typeof Quality>;
+
+/**
+ * The extractor's word on one document after its findings: the quality, and the gap, one
+ * sentence on what the ask still lacks after this document. A filter's report to the planner,
+ * never a query: raven reads the round's verdicts before it picks the edge.
+ */
+export const Verdict = z.object({
+  quality: Quality,
+  gap: z.string().min(1).optional(),
+});
+export type Verdict = z.infer<typeof Verdict>;

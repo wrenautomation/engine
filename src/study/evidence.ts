@@ -1,64 +1,8 @@
 /**
- * What a study reads and what the model is shown. Pure: the run stores the
- * hits and pages, these decide which pages and which parts of them.
+ * What the model is shown of a page: the passages that match the question's terms, within a
+ * budget. Pure. Which pages to read is raven's triage now (0.5.0).
  */
 import { type EvidencePage, foldText } from "./grounding.js";
-
-export interface Hit {
-  title: string;
-  url: string;
-  snippet: string | null;
-}
-
-/** Pages that read as a login wall or a video player, not text. */
-const UNREADABLE = [
-  "linkedin.com",
-  "facebook.com",
-  "instagram.com",
-  "x.com",
-  "twitter.com",
-  "tiktok.com",
-  "youtube.com",
-  "youtu.be",
-];
-
-const hostOf = (url: string): string | null => {
-  try {
-    const u = new URL(url);
-    return /^https?:$/.test(u.protocol) ? u.hostname.replace(/^www\./, "") : null;
-  } catch {
-    return null;
-  }
-};
-
-/** One page, one read: no fragment, no trailing slash. */
-export const pageKey = (url: string): string => url.replace(/#.*$/, "").replace(/\/+$/, "");
-
-/**
- * The pages to read for one angle: each list's best hit, then each list's
- * second, until `limit`. One list per query (and one for an answer engine's
- * sources), so no single query fills the angle. Social and video pages are
- * skipped; they don't read as text.
- */
-export function pickReads(lists: readonly (readonly Hit[])[], limit: number): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  const longest = Math.max(0, ...lists.map((l) => l.length));
-  for (let rank = 0; rank < longest && out.length < limit; rank++) {
-    for (const list of lists) {
-      const hit = list[rank];
-      if (!hit) continue;
-      const host = hostOf(hit.url);
-      if (!host || UNREADABLE.some((h) => host === h || host.endsWith(`.${h}`))) continue;
-      const key = pageKey(hit.url);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(key);
-      if (out.length >= limit) break;
-    }
-  }
-  return out;
-}
 
 const STOP = new Set(
   "about after also been being between both could does doing each from have having here into more most much only other over same should some such than that their them then there these they this those through under very what when where which while with would your year years".split(
