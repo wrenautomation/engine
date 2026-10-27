@@ -42,7 +42,7 @@ export async function review(
     };
   }
   const planFile = options.planFile ?? defaultPlanFile(round.ask.kind);
-  const out = await model.ask(reviewPrompt(round, planFile), EdgeAnswer);
+  const { value: out } = await model.ask(reviewPrompt(round, planFile), EdgeAnswer);
   const edge: Edge = { next: out.next, why: out.why, from: "ai", by: model.id };
   if (out.next === "back") edge.to = out.to ?? "fetch";
   return edge;

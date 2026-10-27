@@ -150,7 +150,7 @@ export const Round = z.object({
 });
 export type Round = z.infer<typeof Round>;
 
-export const Step = z.enum(["plan", "fetch", "read", "extract"]);
+export const Step = z.enum(["plan", "fetch", "triage", "read", "extract"]);
 export type Step = z.infer<typeof Step>;
 
 /** The edge out of a round. `again` is a new round from `plan`; `back` reruns one step of this round. */

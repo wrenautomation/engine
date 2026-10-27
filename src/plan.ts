@@ -44,7 +44,10 @@ export async function propose(
   yieldRows: readonly YieldRow[] = [],
   now: Date = new Date(),
 ): Promise<Proposal> {
-  const out = await model.ask(proposePrompt(ask, planFile, yieldRows, now), ProposalAnswer);
+  const { value: out } = await model.ask(
+    proposePrompt(ask, planFile, yieldRows, now),
+    ProposalAnswer,
+  );
   return {
     from: "ai",
     by: model.id,

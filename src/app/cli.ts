@@ -16,7 +16,7 @@ import { review } from "../review.js";
 import { triage } from "../triage.js";
 import { AskKind, HitView, Plan, PlanFile, type Proposal, Round, YieldRow, z } from "../types.js";
 
-const DEFAULT_MODEL = "claude -p";
+const DEFAULT_MODEL = "claude -p --output-format json";
 
 const readJson = <T>(path: string, shape: z.ZodType<T>): T =>
   shape.parse(JSON.parse(readFileSync(path, "utf8")));

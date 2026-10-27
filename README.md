@@ -21,8 +21,9 @@ learns. Raven never loops; the runner takes the edge.
 ## CLI
 
 Needs Node 24+. The model is a command that reads the prompt on stdin and prints the answer.
-Default `claude -p`, so Claude Code is the model in any terminal; `RAVEN_MODEL` or `--model`
-changes it; `--no-model` plans from your own queries only.
+Default `claude -p --output-format json`, so Claude Code is the model in any terminal and its
+envelope gives the cost per call; `RAVEN_MODEL` or `--model` changes it (plain text out is fine);
+`--no-model` plans from your own queries only.
 
 ```sh
 npm i @wrenautomation/raven
@@ -38,7 +39,10 @@ npx raven plans web > plans/web.json                                            
 ```ts
 import { plan, triage, review, type Model } from "@wrenautomation/raven";
 
-const model: Model = { id: "claude-sonnet-5-5", ask: (prompt, shape) => yourClient.json(prompt, shape) };
+const model: Model = {
+  id: "claude-sonnet-5-5",
+  ask: async (prompt, shape) => ({ value: await yourClient.json(prompt, shape), usage: { usd: 0.01 } }),
+};
 const p = await plan({ ask: { text, kind: "web", known }, model, proposals: [byHand] });
 const reads = await triage(hits, p, model);
 const edge = await review(round, model);

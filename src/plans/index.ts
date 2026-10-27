@@ -10,7 +10,7 @@ const SHAPE_HITS = `Return ONLY a JSON object, no prose, exactly this shape:
 {"hits": [{"url": "...", "read": true, "why": "..."}]}`;
 const SHAPE_EDGE = `Return ONLY a JSON object, no prose, exactly this shape:
 {"next": "stop", "why": "..."}
-where "next" is "stop", "again" (a new round from plan) or "back" (rerun one step of this round, named in "to": "plan", "fetch", "read" or "extract").`;
+where "next" is "stop", "again" (a new round from plan) or "back" (rerun one step of this round, named in "to": "plan", "fetch", "triage", "read" or "extract").`;
 
 const CONTEXT = `Ask: {ask}
 Known already (look past these):

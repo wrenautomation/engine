@@ -64,7 +64,7 @@ export async function triage(
   const unique = dedupeHits(hits);
   if (!unique.length) return [];
   const planFile = options.planFile ?? defaultPlanFile(plan.ask.kind);
-  const out = await model.ask(
+  const { value: out } = await model.ask(
     triagePrompt(unique, plan, planFile, options.yieldRows ?? []),
     TriageAnswer,
   );
