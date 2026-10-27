@@ -16,6 +16,7 @@ import {
   type SnapshotRecord,
   type SpendRecord,
   STEPS,
+  type SteerRecord,
   type Step,
   type VerdictRecord,
 } from "../ledger/records.js";
@@ -45,6 +46,8 @@ export interface RunState {
   calls: CallRecord[];
   spends: SpendRecord[];
   edges: EdgeRecord[];
+  /** What the person said along the way, oldest first. */
+  steers: SteerRecord[];
   /** Keys of every hit in the run: a hit seen again in a later round is not a new record. */
   seen: Set<string>;
   /** The latest call on each hit and finding. */
@@ -95,6 +98,7 @@ export function fold(run: string, records: readonly LedgerRecord[]): RunState {
     calls: ofType(records, "call"),
     spends: ofType(records, "spend"),
     edges: ofType(records, "edge"),
+    steers: ofType(records, "steer"),
     seen: new Set(hits.map((h) => h.key)),
     called: latestCalls(records),
   };

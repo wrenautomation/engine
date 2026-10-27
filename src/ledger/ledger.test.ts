@@ -160,6 +160,10 @@ describe("records", () => {
     expect(
       LedgerRecord.safeParse({ ...base({ step: "plan" }), type: "done", ok: true }).success,
     ).toBe(true);
+    expect(LedgerRecord.safeParse({ ...base(), type: "steer", text: "numbers only" }).success).toBe(
+      true,
+    );
+    expect(LedgerRecord.safeParse({ ...base(), type: "steer", text: "" }).success).toBe(false);
   });
 });
 

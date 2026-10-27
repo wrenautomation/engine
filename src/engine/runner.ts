@@ -4,8 +4,11 @@
  * ask and source call writes a `spend` with what it cost and whether it worked. A call that
  * fails with a `Transient` is tried again with a pause, three tries in all, every attempt on
  * record; a step that still cannot go on throws it past the runner with no `done`, so a resume
- * runs the step again once the cause has passed.
+ * runs the step again once the cause has passed. A model answer the output cap cut (falcon's
+ * `Cut`) is a spend that worked, with its tokens: the extractor goes on from it. `pause` stops
+ * the loop after a review that says `again`, so the person can steer before the next round.
  */
+import { isCut } from "@wrenautomation/falcon/document";
 import type { Model, Usage } from "@wrenautomation/raven";
 import { type Envelope, type From, LedgerRecord, type Step } from "../ledger/records.js";
 import type { Deps, RunOptions, Source } from "./ports.js";
@@ -20,6 +23,8 @@ export interface RunResult {
   note: string | null;
   /** The run stopped on an edge, not on a step that gave up. */
   finished: boolean;
+  /** The run stopped after a review that said `again`, on `pause`: `resume` goes on. */
+  paused: boolean;
   state: RunState;
 }
 
@@ -48,6 +53,7 @@ export async function run(deps: Deps, options: RunOptions = {}): Promise<RunResu
   const steps = options.steps ?? DEFAULT_STEPS;
   let state = fold(id, await deps.ledger.trace(id));
   if (options.resume && !state.records.length) throw new Error(`run ${id}: no records`);
+  let paused = false;
   for (let n = 0; n < steps && state.next; n++) {
     const { round, step } = state.next;
     const ctx = context(deps, options, id, round, step);
@@ -74,12 +80,17 @@ export async function run(deps: Deps, options: RunOptions = {}): Promise<RunResu
     });
     state = fold(id, await deps.ledger.trace(id));
     if (!result.ok) break;
+    if (options.pause && step === "review" && state.next?.step === "plan") {
+      paused = true;
+      break;
+    }
   }
   return {
     run: id,
     rounds: state.round,
     note: state.note,
     finished: !state.next && state.edges.at(-1)?.next === "stop",
+    paused,
     state,
   };
 }
@@ -160,11 +171,13 @@ function context(
       await spend(source, op, about, on, t0, { ok: true, ...tokens(usageOf?.(out)) });
       return out;
     } catch (err) {
-      await spend(source, op, about, on, t0, {
-        ok: false,
-        error: message(err),
-        ...(err instanceof Transient && err.retryAfter ? { retryAfter: err.retryAfter } : {}),
-      });
+      if (isCut(err)) await spend(source, op, about, on, t0, { ok: true, ...tokens(err.usage) });
+      else
+        await spend(source, op, about, on, t0, {
+          ok: false,
+          error: message(err),
+          ...(err instanceof Transient && err.retryAfter ? { retryAfter: err.retryAfter } : {}),
+        });
       throw err;
     }
   };

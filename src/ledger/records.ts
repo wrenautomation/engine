@@ -42,6 +42,7 @@ export const RECORD_TYPES = [
   "snapshot",
   "edge",
   "done",
+  "steer",
 ] as const;
 export const RecordType = z.enum(RECORD_TYPES);
 export type RecordType = z.infer<typeof RecordType>;
@@ -155,6 +156,13 @@ export const DoneRecord = Envelope.extend({
 });
 export type DoneRecord = z.infer<typeof DoneRecord>;
 
+/**
+ * What the person says to the run: free text, written between rounds (`weaver steer`), rendered
+ * first in every prompt of the rounds after it. Always `from: human`; `step` absent.
+ */
+export const SteerRecord = Envelope.extend({ type: z.literal("steer"), text: z.string().min(1) });
+export type SteerRecord = z.infer<typeof SteerRecord>;
+
 export const LedgerRecord = z.discriminatedUnion("type", [
   QueryRecord,
   HitRecord,
@@ -166,6 +174,7 @@ export const LedgerRecord = z.discriminatedUnion("type", [
   SnapshotRecord,
   EdgeRecord,
   DoneRecord,
+  SteerRecord,
 ]);
 export type LedgerRecord = z.infer<typeof LedgerRecord>;
 

@@ -57,6 +57,9 @@ WEAVER_CONTACT=you@example.com npx weaver run "how do staffing firms win repeat 
 npx weaver run "..." --kind video --propose "cold email teardown" --by will   # your queries, merged with the model's
 npx weaver run "..." --url https://a.example/report https://b.example/post    # pages you want read, first
 npx weaver run --resume 01M5YS... --url https://a.example/report             # from the step it stopped on; same --url, same --model
+npx weaver run "..." --pause                                                   # stop after each round's review
+npx weaver steer 01M5YS... "numbers only; skip vendor pages"                   # what you say, first in every prompt after
+npx weaver run --resume 01M5YS... --pause                                      # the next round, steered
 npx weaver trace 01M5YS... --type finding spend                                # the run's records, JSON lines
 npx weaver drop 01M5YT... -r "the quote is a forecast, not a result"           # a call in your name
 npx weaver yield --source exa                                                  # hits, reads, proposed, kept
@@ -71,7 +74,14 @@ before it exits 2. Searches, reads and extracts fan out (four reads or extracts 
 each document's records land as its batch settles, and a step run again skips what its records
 show done. An extract that fails for good (the model's answer would not parse, a 400) stops the
 step with its findings so far on record and `run` exits 2: `--resume` asks only for the
-documents without a verdict.
+documents without a verdict. A model answer the output cap cut is not a failure: the whole
+findings before the cut go through the gate and the model is asked again for the rest of the
+document, with those findings known (falcon's `Cut`; the `spend` carries both calls' tokens).
+
+`--pause` stops the run after a review that says `again`, with no exit code: between rounds
+you (or a Claude Code session) read the trace, `keep` or `drop` findings, and `steer` the run
+with free text. Every `steer` record is rendered first in every prompt of the rounds after it,
+under "The person says:". `--resume` goes on.
 
 ## Library
 

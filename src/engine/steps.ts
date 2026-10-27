@@ -113,8 +113,9 @@ export const planStep: StepFn = async (ctx, state) => {
   const planFile = ctx.options.planFile ?? defaultPlanFile(ask.kind);
   const yieldRows = await ctx.deps.ledger.yield();
   const known = [...new Set([...(ask.known ?? []), ...found(state)])];
+  const steer = [...new Set([...(ask.steer ?? []), ...state.steers.map((s) => s.text)])];
   const p = await plan({
-    ask: { ...ask, known },
+    ask: { ...ask, known, steer },
     planFile,
     model: ctx.model,
     proposals: ctx.round === 1 ? (ctx.options.proposals ?? []) : [],
@@ -303,11 +304,19 @@ export const extractStep: StepFn = async (ctx, state) => {
       ...doc
     } = d;
     const model = ctx.modelOn(id) as Model;
-    return { out: await ctx.deps.extractor.extract(doc, { text: ask.text, known }, model), model };
+    return {
+      out: await ctx.deps.extractor.extract(
+        doc,
+        { text: ask.text, known, steer: ask.steer },
+        model,
+      ),
+      model,
+    };
   };
   let proposed = 0;
   let dropped = 0;
   let done = 0;
+  let continued = 0;
   // Each document's findings and verdict land as its batch settles: a document whose extract
   // fails costs only itself. The verdict is the checkpoint: the documents without one are
   // extracted on the next try.
@@ -318,12 +327,13 @@ export const extractStep: StepFn = async (ctx, state) => {
     await ctx.write({ type: "verdict", document: d.id, quality, ...(gap ? { gap } : {}) }, who);
     proposed += g.out.findings.length;
     dropped += g.out.dropped.length;
+    continued += g.out.continued ?? 0;
     done++;
   });
   if (got.transient) throw got.transient;
   return {
     ok: true,
-    note: `${proposed} findings from ${done} documents, ${dropped} dropped at the gate`,
+    note: `${proposed} findings from ${done} documents, ${dropped} dropped at the gate${continued ? `, ${continued} cut answers continued` : ""}`,
   };
 };
 

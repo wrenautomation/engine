@@ -2,12 +2,14 @@
  * An OpenAI-compatible chat endpoint as raven's `Model`: Wren's LLM gateway
  * (`POST <url>/v1/chat/completions`, a bearer token, an alias such as `free`), or any server
  * that speaks the same. The answer is parsed with raven's shape; the usage is the tokens it reports.
+ * An answer the output cap cut (`finish_reason: length`) is falcon's `Cut`, the text so far with it.
  */
+import { Cut } from "@wrenautomation/falcon/document";
 import { type Model, parseAnswer } from "@wrenautomation/raven";
 import { httpError, transport } from "../engine/transient.js";
 
 interface Completion {
-  choices?: { message?: { content?: string | null } }[];
+  choices?: { message?: { content?: string | null }; finish_reason?: string | null }[];
   usage?: { prompt_tokens?: number; completion_tokens?: number };
   error?: { message?: string } | string;
 }
@@ -50,17 +52,15 @@ export function gatewayModel(o: {
       const text = body.choices?.[0]?.message?.content;
       if (!text) throw new Error(`gateway ${model}: empty answer`);
       const u = body.usage;
-      return {
-        value: parseAnswer(text, shape),
-        ...(u
-          ? {
-              usage: {
-                ...(u.prompt_tokens !== undefined ? { input: u.prompt_tokens } : {}),
-                ...(u.completion_tokens !== undefined ? { output: u.completion_tokens } : {}),
-              },
-            }
-          : {}),
-      };
+      const usage = u
+        ? {
+            ...(u.prompt_tokens !== undefined ? { input: u.prompt_tokens } : {}),
+            ...(u.completion_tokens !== undefined ? { output: u.completion_tokens } : {}),
+          }
+        : undefined;
+      if (body.choices?.[0]?.finish_reason === "length")
+        throw new Cut(`gateway ${model}: the answer was cut by the output cap`, text, usage);
+      return { value: parseAnswer(text, shape), ...(usage ? { usage } : {}) };
     },
   };
 }

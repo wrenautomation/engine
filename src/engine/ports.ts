@@ -51,7 +51,14 @@ export interface Deps {
 
 export interface RunOptions {
   /** Absent on a resume: the first snapshot has it. */
-  ask?: { text: string; kind: PlanFile["kind"]; known?: string[]; site?: string };
+  ask?: {
+    text: string;
+    kind: PlanFile["kind"];
+    known?: string[];
+    /** What the person says at the start; `steer` records add to it between rounds. */
+    steer?: string[];
+    site?: string;
+  };
   /** The ledger's tuned plan file for the ask's kind; raven's default when absent. */
   planFile?: PlanFile;
   /** Queries from people or other models, merged with the model's in round 1. */
@@ -66,6 +73,8 @@ export interface RunOptions {
   onStep?: (event: StepEvent) => void;
   /** Steps to run before returning, whatever the pointer says: 64 by default. A loop that advances a run a little per pass passes a few. */
   steps?: number;
+  /** Stop after each round's review when it says `again`: the person steers, then resumes. */
+  pause?: boolean;
 }
 
 export interface StepEvent {

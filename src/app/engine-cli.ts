@@ -208,6 +208,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     )
     .option("--kind <kind>", `one of ${PLAN_KINDS.join(", ")}`, "web")
     .option("--known <line...>", "what is known already, one line each")
+    .option("--steer <line...>", "what you say to the model, first in every prompt")
     .option("--site <host>", "the site the ask is about")
     .option(
       "--sources <name...>",
@@ -228,6 +229,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     .option("--no-model", "no model: your queries only, every hit read, nothing extracted")
     .option("--resume <run>", "continue an earlier run from the step it stopped on")
     .option("--run <id>", "the new run's id")
+    .option("--pause", "stop after each round's review: `weaver steer`, then --resume")
     .option("--yt-dlp <cmd>", "the yt-dlp command", process.env.WEAVER_YTDLP ?? "yt-dlp")
     .action(
       async (
@@ -235,6 +237,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
         o: Common & {
           kind: string;
           known?: string[];
+          steer?: string[];
           site?: string;
           sources?: string[];
           propose?: string[];
@@ -243,6 +246,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
           model: string | false;
           resume?: string;
           run?: string;
+          pause?: boolean;
           ytDlp: string;
         },
       ) => {
@@ -298,6 +302,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
                   text: ask,
                   kind,
                   known: o.known ?? [],
+                  steer: o.steer ?? [],
                   ...(o.site ? { site: o.site } : {}),
                 },
               }
@@ -305,6 +310,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
           planFile,
           proposals,
           onStep: progress,
+          ...(o.pause ? { pause: true } : {}),
         };
         let result: Awaited<ReturnType<typeof run>> | null = null;
         for (let n = 0; result === null; n++) {
@@ -327,12 +333,17 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
           }
         }
         const state = result?.state ?? fold(id, await ledger.trace(id));
+        if (result?.paused)
+          console.error(
+            `${id}: paused after round ${state.edges.length}; weaver steer ${id} "<what you say>", then weaver run --resume ${id} --pause`,
+          );
         console.log(
           JSON.stringify(
             {
               run: id,
               rounds: state.round,
               finished: result?.finished ?? false,
+              ...(result?.paused ? { paused: true } : {}),
               note: result ? result.note : "stopped on a transient failure: --resume to go on",
               hits: state.hits.length,
               documents: state.documents.length,
@@ -352,7 +363,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
             2,
           ),
         );
-        if (!result?.finished) process.exitCode = 2;
+        if (!result?.finished && !result?.paused) process.exitCode = 2;
       },
     );
 
@@ -393,6 +404,26 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
         await ledger.append(record);
         console.log(JSON.stringify(record));
       });
+
+  common(program.command("steer <run> <text>"))
+    .description("say something to the run: first in every prompt of the rounds after it")
+    .action(async (runId: string, text: string, o: Common) => {
+      const ledger = ledgerOf(o);
+      const state = fold(runId, await ledger.trace(runId));
+      if (!state.records.length) throw new Error(`no run ${runId}`);
+      const record: LedgerRecord = {
+        type: "steer",
+        id: ulids()(),
+        run: runId,
+        round: state.round,
+        at: new Date().toISOString(),
+        from: "human",
+        by: o.writer,
+        text,
+      };
+      await ledger.append(record);
+      console.log(JSON.stringify(record));
+    });
 
   common(program.command("yield"))
     .description("hits, reads, proposed and kept per source, by, channel and kind, over every run")

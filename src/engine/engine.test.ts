@@ -1,4 +1,4 @@
-import { claimExtractor } from "@wrenautomation/falcon/document";
+import { Cut, claimExtractor } from "@wrenautomation/falcon/document";
 import { defaultPlanFile, type Model, scriptedModel } from "@wrenautomation/raven";
 import { describe, expect, it } from "vitest";
 import { countingIds } from "../ledger/ids.js";
@@ -399,6 +399,97 @@ describe("runner", () => {
     expect(review).toContain("thin");
     expect(review).toContain("https://a.example/three");
     expect(review).toContain("off");
+  });
+
+  it("pauses after a review that says again; a steer is first in every prompt after", async () => {
+    const a = answers;
+    const prompts: string[] = [];
+    const inner = scriptedModel(
+      [
+        a.plan1,
+        a.triage1,
+        a.extractOne,
+        a.extractThree,
+        a.again,
+        a.plan2,
+        a.triage2,
+        a.extractFour,
+        a.stop,
+      ],
+      "m",
+    );
+    const model: Model = {
+      id: "m",
+      ask: (prompt, shape) => {
+        prompts.push(prompt);
+        return inner.ask(prompt, shape);
+      },
+    };
+    const d = deps(model);
+    const first = await run(d, {
+      ask: { text: "repeat clients", kind: "web", steer: ["numbers only"] },
+      planFile,
+      pause: true,
+    });
+    expect(first.paused).toBe(true);
+    expect(first.finished).toBe(false);
+    expect(first.rounds).toBe(2);
+    expect(first.state.next).toEqual({ round: 2, step: "plan" });
+    expect(first.state.edges).toHaveLength(1);
+    expect(first.state.records.filter((x) => x.type === "done").every((x) => x.ok)).toBe(true);
+    expect(prompts[0]).toContain("The person says:\n- numbers only\nKnown already");
+    expect(prompts.at(-1)).toContain("The person says:\n- numbers only\nRound 1");
+    await d.ledger.append({
+      type: "steer",
+      id: "steer-1",
+      run: first.run,
+      round: 1,
+      at: "2026-10-27T10:30:00.000Z",
+      from: "human",
+      by: "will",
+      text: "skip vendor pages",
+    });
+    const second = await run(d, { resume: first.run, planFile, pause: true });
+    expect(second.paused).toBe(false);
+    expect(second.finished).toBe(true);
+    expect(second.state.steers.map((x) => x.text)).toEqual(["skip vendor pages"]);
+    const plan2 = prompts[5] ?? "";
+    expect(plan2).toContain("The person says:\n- numbers only\n- skip vendor pages\nKnown already");
+    expect(second.state.snapshot?.ask.steer).toEqual(["numbers only", "skip vendor pages"]);
+    const extract4 = prompts[7] ?? "";
+    expect(extract4).toContain("The person says:\n- numbers only\n- skip vendor pages\n");
+  });
+
+  it("continues an extract the output cap cut: both asks a spend that worked, with tokens", async () => {
+    const a = answers;
+    const inner = scriptedModel([a.plan1, a.triage1, a.extractThree, a.extractThree, a.stop], "m");
+    let askedOne = 0;
+    const model: Model = {
+      id: "m",
+      ask: async (prompt, shape) => {
+        if (prompt.includes("DOCUMENT: https://a.example/one") && !askedOne++)
+          throw new Cut(
+            "cut",
+            '{"findings": [{"text": "38% of placements came from repeat clients.", "quote": "38% of placements came from repeat clients"}, {"text": "half',
+            { input: 100, output: 50 },
+          );
+        return inner.ask(prompt, shape);
+      },
+    };
+    const out = await run(deps(model), { ask: { text: "repeat clients", kind: "web" }, planFile });
+    expect(out.finished).toBe(true);
+    expect(askedOne).toBe(2);
+    expect(out.state.findings.map((f) => f.proof.quote)).toEqual([
+      "38% of placements came from repeat clients",
+    ]);
+    const asks = out.state.spends.filter((x) => x.op === "ask" && x.on);
+    expect(asks.map((x) => [x.ok, x.tokens])).toEqual([
+      [true, { input: 100, output: 50 }],
+      [true, undefined],
+      [true, undefined],
+    ]);
+    const done = out.state.records.find((x) => x.type === "done" && x.step === "extract");
+    expect(done?.type === "done" && done.note).toContain("1 cut answers continued");
   });
 
   it("without a model reads in order up to the budget and stops after one round", async () => {
