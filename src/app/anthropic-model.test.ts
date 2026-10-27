@@ -36,7 +36,10 @@ describe("anthropicModel", () => {
     });
     const a = await model.ask("decide", z.object({ next: z.string(), why: z.string() }));
     expect(model.id).toBe("claude-haiku-5-5");
-    expect(a).toEqual({ value: { next: "stop", why: "enough" }, usage: { input: 12, output: 5 } });
+    expect(a).toEqual({
+      value: { next: "stop", why: "enough" },
+      usage: { input: 12, output: 5, usd: 3.7e-6 },
+    });
     expect(seen[0]?.url).toBe("https://api.anthropic.com/v1/messages");
     expect(new Headers(seen[0]?.init?.headers).get("authorization")).toContain("k");
     expect(JSON.parse(String(seen[0]?.init?.body))).toMatchObject({
@@ -68,7 +71,11 @@ describe("anthropicModel", () => {
       "anthropic claude-haiku-5-5: the answer was cut at 50 output tokens (max_tokens 50)",
     );
     expect(isCut(err) && err.partial).toBe('{"findings": [{"text": "half a');
-    expect(isCut(err) && err.usage).toEqual({ input: 12, output: 50 });
+    expect(isCut(err) && err.usage).toEqual({
+      input: 12,
+      output: 50,
+      usd: 2.62e-5,
+    });
   });
   it("turns a 429 with retry-after into a Transient, a 400 into a plain error", async () => {
     const at = (status: number, headers: Record<string, string> = {}) =>

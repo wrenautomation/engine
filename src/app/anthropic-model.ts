@@ -5,12 +5,14 @@
  * `retry-after` the API sent. `haiku`, `sonnet` and `opus` name the current Claude 5.5 ids.
  * The output cap is 8192 tokens: an extract of a long document with its quotes passed 4096.
  * An answer the cap cut is falcon's `Cut`, the text so far and the usage with it: the claim
- * extractor keeps the whole findings and asks again for the rest of the document.
+ * extractor keeps the whole findings and asks again for the rest of the document. The usage
+ * carries `usd` from the price table in `prices.ts`.
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { Cut } from "@wrenautomation/falcon/document";
 import { type Model, parseAnswer } from "@wrenautomation/raven";
 import { Transient } from "../engine/transient.js";
+import { priced } from "./prices.js";
 
 export const ANTHROPIC_ALIASES: Readonly<Record<string, string>> = {
   haiku: "claude-haiku-5-5",
@@ -57,11 +59,11 @@ export function anthropicModel(o: {
         throw new Cut(
           `anthropic ${model}: the answer was cut at ${res.usage.output_tokens} output tokens (max_tokens ${o.maxTokens ?? MAX_TOKENS})`,
           text,
-          { input: res.usage.input_tokens, output: res.usage.output_tokens },
+          priced(model, { input: res.usage.input_tokens, output: res.usage.output_tokens }),
         );
       return {
         value: parseAnswer(text, shape),
-        usage: { input: res.usage.input_tokens, output: res.usage.output_tokens },
+        usage: priced(model, { input: res.usage.input_tokens, output: res.usage.output_tokens }),
       };
     },
   };

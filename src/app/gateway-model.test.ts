@@ -22,7 +22,10 @@ describe("gatewayModel", () => {
     });
     const a = await model.ask("decide", z.object({ next: z.string(), why: z.string() }));
     expect(model.id).toBe("gateway:free");
-    expect(a).toEqual({ value: { next: "stop", why: "enough" }, usage: { input: 12, output: 5 } });
+    expect(a).toEqual({
+      value: { next: "stop", why: "enough" },
+      usage: { input: 12, output: 5, usd: 0 },
+    });
     expect(seen[0]?.url).toBe("https://llm.example/v1/chat/completions");
     expect(new Headers(seen[0]?.init?.headers).get("authorization")).toBe("Bearer t");
     expect(JSON.parse(String(seen[0]?.init?.body))).toMatchObject({

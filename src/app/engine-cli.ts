@@ -39,6 +39,7 @@ import {
   type LedgerRecord,
   ofType,
   type Problem,
+  type SpendRecord,
   ulids,
 } from "../ledger/index.js";
 import {
@@ -86,6 +87,42 @@ export function modelOf(spec: string, printed: NodeJS.ProcessEnv): Model {
 }
 
 /** The pause before a resume: to `retryAfter` (five minutes at most), else 15 s per resume so far. */
+/** What a run's spends add up to: USD where priced, tokens and calls per model or source. */
+export function costOf(spends: readonly SpendRecord[]): {
+  total: { usd: number; unpriced: number; input: number; output: number; calls: number };
+  line: string;
+} {
+  let usd = 0;
+  let unpriced = 0;
+  let input = 0;
+  let output = 0;
+  const by = new Map<string, { calls: number; input: number; output: number; usd: number }>();
+  for (const s of spends) {
+    const row = by.get(s.source) ?? { calls: 0, input: 0, output: 0, usd: 0 };
+    row.calls++;
+    row.input += s.tokens?.input ?? 0;
+    row.output += s.tokens?.output ?? 0;
+    input += s.tokens?.input ?? 0;
+    output += s.tokens?.output ?? 0;
+    if (s.usd !== undefined) {
+      usd += s.usd;
+      row.usd += s.usd;
+    } else if (s.cost === "metered") unpriced++;
+    by.set(s.source, row);
+  }
+  const parts = [...by].map(
+    ([name, r]) =>
+      `${name} ${r.calls} calls` +
+      (r.input || r.output ? `, ${r.input} in, ${r.output} out` : "") +
+      (r.usd ? `, $${r.usd.toFixed(4)}` : ""),
+  );
+  const line =
+    `$${usd.toFixed(4)}` +
+    (unpriced ? ` plus ${unpriced} metered calls with no price` : "") +
+    `; ${parts.join("; ")}`;
+  return { total: { usd, unpriced, input, output, calls: spends.length }, line };
+}
+
 export function resumeWaitMs(n: number, retryAfter: string | undefined, now = Date.now()): number {
   if (retryAfter) {
     const until = Date.parse(retryAfter) - now;
@@ -337,18 +374,21 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
           console.error(
             `${id}: paused after round ${state.edges.length}; weaver steer ${id} "<what you say>", then weaver run --resume ${id} --pause`,
           );
+        const cost = costOf(state.spends);
+        console.error(`${id}: ${cost.line}`);
         console.log(
           JSON.stringify(
             {
               run: id,
               rounds: state.round,
+              cost: cost.total,
               finished: result?.finished ?? false,
               ...(result?.paused ? { paused: true } : {}),
               note: result ? result.note : "stopped on a transient failure: --resume to go on",
               hits: state.hits.length,
               documents: state.documents.length,
               findings: state.findings.filter((f) => state.called.get(f.id) !== "drop"),
-              spends: state.spends.map(({ source, op, about, ok, cost, ms, usd }) => ({
+              spends: state.spends.map(({ source, op, about, ok, cost, ms, usd, tokens }) => ({
                 source,
                 op,
                 about,
@@ -356,6 +396,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
                 cost,
                 ms,
                 ...(usd !== undefined ? { usd } : {}),
+                ...(tokens ? { tokens } : {}),
               })),
               problems: ledger.problems ?? [],
             },

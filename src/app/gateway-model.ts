@@ -3,6 +3,7 @@
  * (`POST <url>/v1/chat/completions`, a bearer token, an alias such as `free`), or any server
  * that speaks the same. The answer is parsed with raven's shape; the usage is the tokens it reports.
  * An answer the output cap cut (`finish_reason: length`) is falcon's `Cut`, the text so far with it.
+ * The `free` alias costs nothing, so its usage says `usd: 0`; any other alias reports tokens only.
  */
 import { Cut } from "@wrenautomation/falcon/document";
 import { type Model, parseAnswer } from "@wrenautomation/raven";
@@ -56,6 +57,7 @@ export function gatewayModel(o: {
         ? {
             ...(u.prompt_tokens !== undefined ? { input: u.prompt_tokens } : {}),
             ...(u.completion_tokens !== undefined ? { output: u.completion_tokens } : {}),
+            ...(model === "free" ? { usd: 0 } : {}),
           }
         : undefined;
       if (body.choices?.[0]?.finish_reason === "length")
