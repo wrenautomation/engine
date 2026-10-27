@@ -39,7 +39,7 @@ export interface VendorOptions {
   model?: string;
   rotate?: RotateOptions;
   limitMs?: number;
-  /** For tests: the wire. */
+  /** The wire: a test's, or a proxy's (wren's gateway holds Gemini keys behind one). */
   fetch?: typeof fetch;
 }
 
@@ -53,6 +53,7 @@ export function anthropic(o: VendorOptions): Model {
     (apiKey) =>
       sdkModel({
         provider: "anthropic",
+        secret: apiKey,
         modelId,
         model: createAnthropic({ apiKey, ...wire(o) })(modelId),
         takes: kinds("text", "image", "pdf"),
@@ -63,7 +64,10 @@ export function anthropic(o: VendorOptions): Model {
   );
 }
 
-/** Gemini on the free key ring. It takes every part kind, YouTube URLs as video included. */
+/**
+ * Gemini on the free key ring. It takes every part kind, YouTube URLs as video included; a video
+ * part with a `clip` goes through the Interactions API, the one that reads a stretch.
+ */
 export function gemini(o: VendorOptions): Model {
   const modelId = o.model ?? "gemini-3.5-flash";
   return ring(
@@ -71,8 +75,10 @@ export function gemini(o: VendorOptions): Model {
     (apiKey) =>
       sdkModel({
         provider: "google",
+        secret: apiKey,
         modelId,
         model: createGoogle({ apiKey, ...wire(o) })(modelId),
+        clipModel: createGoogle({ apiKey, ...wire(o) }).interactions(modelId),
         takes: kinds("text", "image", "video", "audio", "pdf"),
         free: true,
         ...(o.limitMs ? { limitMs: o.limitMs } : {}),
@@ -80,6 +86,31 @@ export function gemini(o: VendorOptions): Model {
     o.rotate,
     "gemini",
   );
+}
+
+const GEMINI_MODELS = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1";
+
+/**
+ * The Gemini keys the API still takes. A suspended key answers 403 and the ring passes it at once,
+ * but only after the call is sent: check first before a large inline body goes to each.
+ */
+export async function geminiLiveKeys(
+  keys: readonly string[],
+  o: { fetch?: typeof fetch } = {},
+): Promise<string[]> {
+  const fetchFn = o.fetch ?? fetch;
+  const ok = await Promise.all(
+    keys.map((key) =>
+      fetchFn(GEMINI_MODELS, {
+        headers: { "x-goog-api-key": key },
+        signal: AbortSignal.timeout(15_000),
+      }).then(
+        (r) => r.ok,
+        () => false,
+      ),
+    ),
+  );
+  return keys.filter((_, i) => ok[i]);
 }
 
 /** Cohere's own API on the free key ring: text and images. */
@@ -90,6 +121,7 @@ export function cohere(o: VendorOptions): Model {
     (apiKey) =>
       sdkModel({
         provider: "cohere",
+        secret: apiKey,
         modelId,
         model: createCohere({ apiKey, ...wire(o) })(modelId),
         takes: modelId.includes("vision") ? kinds("text", "image") : TEXT_ONLY,
@@ -133,6 +165,7 @@ export function compatible(vendor: CompatibleVendor, o: VendorOptions): Model {
     (apiKey) =>
       sdkModel({
         provider: vendor,
+        secret: apiKey,
         modelId,
         model: createOpenAICompatible({ name: vendor, baseURL: spec.baseURL, apiKey, ...wire(o) })(
           modelId,

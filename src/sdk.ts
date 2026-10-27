@@ -10,7 +10,7 @@ import {
   type ModelMessage,
   type SystemModelMessage,
 } from "ai";
-import { Cut, statusError, Transient, transport } from "./errors.js";
+import { Cut, Filtered, redact, statusError, Transient, transport } from "./errors.js";
 import { modelOf } from "./model.js";
 import { wellFormed } from "./parse.js";
 import { priced } from "./prices.js";
@@ -29,6 +29,11 @@ export interface SdkModelOptions {
   /** The vendor's model id. */
   modelId: string;
   model: LanguageModel;
+  /**
+   * Where a request with a clipped video goes. Gemini's generateContent has no clip field through
+   * the SDK; its Interactions API takes one.
+   */
+  clipModel?: LanguageModel;
   takes: ReadonlySet<PartKind>;
   /** Tokens added to every ceiling for a model that thinks inside its output budget. */
   thinking?: number;
@@ -37,6 +42,8 @@ export interface SdkModelOptions {
   /** The id the price table knows, when it is not `modelId`. */
   priceId?: string;
   limitMs?: number;
+  /** The call's key, put out of every error message. */
+  secret?: string;
 }
 
 const GEMINI_LEVEL: Record<Effort, "low" | "medium" | "high"> = {
@@ -47,15 +54,34 @@ const GEMINI_LEVEL: Record<Effort, "low" | "medium" | "high"> = {
   max: "high",
 };
 
-function effortOptions(provider: string, effort: Effort | undefined) {
-  if (!effort) return {};
-  if (provider === "anthropic") return { providerOptions: { anthropic: { effort } } };
-  if (provider === "google")
-    return {
-      providerOptions: { google: { thinkingConfig: { thinkingLevel: GEMINI_LEVEL[effort] } } },
-    };
-  return {};
+const GEMINI_RESOLUTION = {
+  low: "MEDIA_RESOLUTION_LOW",
+  medium: "MEDIA_RESOLUTION_MEDIUM",
+  high: "MEDIA_RESOLUTION_HIGH",
+} as const;
+
+/** Effort and resolution as the vendor's options. `clip`: the Gemini Interactions route. */
+function vendorOptions(provider: string, req: Request, clip: boolean) {
+  if (provider === "anthropic")
+    return req.effort ? { providerOptions: { anthropic: { effort: req.effort } } } : {};
+  if (provider !== "google") return {};
+  const level = req.effort ? GEMINI_LEVEL[req.effort] : undefined;
+  // Interactions stores each exchange unless told not to; nothing here reads one back.
+  const google = clip
+    ? {
+        store: false,
+        ...(level ? { thinkingLevel: level } : {}),
+        ...(req.resolution ? { mediaResolution: req.resolution } : {}),
+      }
+    : {
+        ...(level ? { thinkingConfig: { thinkingLevel: level } } : {}),
+        ...(req.resolution ? { mediaResolution: GEMINI_RESOLUTION[req.resolution] } : {}),
+      };
+  return Object.keys(google).length ? { providerOptions: { google } } : {};
 }
+
+const clipped = (req: Request) =>
+  typeof req.prompt !== "string" && req.prompt.some((p) => p.type === "video" && p.clip);
 
 function contentOf(parts: readonly Part[]) {
   return parts.map((p) => {
@@ -63,9 +89,16 @@ function contentOf(parts: readonly Part[]) {
       case "text":
         return { type: "text" as const, text: wellFormed(p.text) };
       case "image":
-        return { type: "image" as const, image: p.data, mediaType: p.mediaType };
+        return { type: "file" as const, data: p.data, mediaType: p.mediaType };
       case "pdf":
         return { type: "file" as const, data: p.data, mediaType: "application/pdf" };
+      case "video": {
+        const file = { type: "file" as const, data: p.data, mediaType: p.mediaType };
+        if (!p.clip) return file;
+        const { startS, endS, fps } = p.clip;
+        const processing = { type: "static", startOffset: startS, endOffset: endS, fps };
+        return { ...file, providerOptions: { google: { processing } } };
+      }
       default:
         return { type: "file" as const, data: p.data, mediaType: p.mediaType };
     }
@@ -93,11 +126,16 @@ function input(
   };
 }
 
-function failure(what: string, err: unknown, signal: AbortSignal | undefined): unknown {
+function failure(
+  what: string,
+  err: unknown,
+  signal: AbortSignal | undefined,
+  secrets: readonly string[],
+): unknown {
   if (signal?.aborted) return err;
   if (APICallError.isInstance(err)) {
     if (err.statusCode === undefined) return transport(what, err);
-    const detail = err.message.slice(0, 300);
+    const detail = redact(err.message, secrets).slice(0, 300);
     return statusError(
       `${what}: HTTP ${err.statusCode} ${detail}`,
       err.statusCode,
@@ -121,19 +159,20 @@ export function sdkModel(o: SdkModelOptions): Model {
       const started = performance.now();
       const timeout = AbortSignal.timeout(limitMs);
       const abortSignal = req.signal ? AbortSignal.any([req.signal, timeout]) : timeout;
+      const clip = clipped(req) && o.clipModel !== undefined;
       let result: Awaited<ReturnType<typeof generateText>>;
       try {
         result = await generateText({
-          model: o.model,
+          model: clip && o.clipModel ? o.clipModel : o.model,
           ...input(o.provider, req),
           maxOutputTokens:
             Math.max(req.maxTokens ?? DEFAULT_MAX_TOKENS, FLOOR_TOKENS) + (o.thinking ?? 0),
-          ...effortOptions(o.provider, req.effort),
+          ...vendorOptions(o.provider, req, clip),
           maxRetries: 0,
           abortSignal,
         });
       } catch (err) {
-        throw failure(id, err, req.signal);
+        throw failure(id, err, req.signal, o.secret ? [o.secret] : []);
       }
       const u = result.usage;
       const tokens: Usage = {};
@@ -147,6 +186,17 @@ export function sdkModel(o: SdkModelOptions): Model {
       const stop = result.rawFinishReason ?? result.finishReason;
       if (result.finishReason === "length")
         throw new Cut(`${id} stopped at its output cap (${stop})`, result.text, usage);
+      // A failed Interactions run ("error") with nothing said is the vendor stopping too.
+      if (
+        result.finishReason === "content-filter" ||
+        (result.finishReason === "error" && !result.text)
+      )
+        throw new Filtered(
+          `${id} stopped the answer itself (${stop})`,
+          String(stop),
+          result.text,
+          usage,
+        );
       if (!result.text) throw new Error(`${id}: no text in the reply (stop ${stop})`);
       return {
         text: result.text,

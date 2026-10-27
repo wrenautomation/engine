@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Refused, Transient } from "./errors.js";
 import { fakeModel } from "./fake.js";
-import { fleetKeys, rotating } from "./keys.js";
+import { fallback, fleetKeys, rotating } from "./keys.js";
 import { modelOf } from "./model.js";
 
 describe("fleetKeys", () => {
@@ -76,5 +76,58 @@ describe("rotating", () => {
     const m = rotating([failing(() => new Error("bad prompt"), calls, "a"), fakeModel("ok")]);
     await expect(m.complete("x")).rejects.toThrow("bad prompt");
     expect(calls).toEqual(["a"]);
+  });
+});
+
+describe("rotating, refused memory", () => {
+  it("a refused key is passed over on later calls", async () => {
+    const calls: string[] = [];
+    const m = rotating([
+      failing(() => new Refused("suspended", 403), calls, "dead"),
+      fakeModel("ok"),
+    ]);
+    for (let i = 0; i < 4; i++) expect((await m.complete("x")).text).toBe("ok");
+    expect(calls).toEqual(["dead"]);
+  });
+  it("when every key is refused, the whole ring is tried again", async () => {
+    const calls: string[] = [];
+    const m = rotating([
+      failing(() => new Refused("bad", 401), calls, "a"),
+      failing(() => new Refused("bad", 401), calls, "b"),
+    ]);
+    await expect(m.complete("x")).rejects.toBeInstanceOf(Refused);
+    await expect(m.complete("x")).rejects.toBeInstanceOf(Refused);
+    expect(calls.length).toBe(4);
+  });
+});
+
+describe("fallback", () => {
+  it("each call starts at the first model and moves down past a busy one", async () => {
+    let busy = true;
+    const calls: string[] = [];
+    const first = modelOf({
+      id: "first",
+      provider: "p",
+      complete: async () => {
+        calls.push("first");
+        if (busy) throw new Transient("busy", { status: 429 });
+        return await fakeModel("from first").complete("x");
+      },
+    });
+    const m = fallback([first, fakeModel("from second")]);
+    expect((await m.complete("x")).text).toBe("from second");
+    busy = false;
+    expect((await m.complete("x")).text).toBe("from first");
+    expect(calls).toEqual(["first", "first"]);
+  });
+  it("takes only the part kinds every model takes", () => {
+    const text = modelOf({ id: "t", provider: "p", complete: async () => ({}) as never });
+    const media = modelOf({
+      id: "v",
+      provider: "p",
+      takes: new Set(["text", "video"]),
+      complete: async () => ({}) as never,
+    });
+    expect([...fallback([media, text]).takes]).toEqual(["text"]);
   });
 });

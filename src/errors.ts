@@ -3,7 +3,9 @@
  * a dropped connection). `Refused`: this key is bad (401, 402, 403); the key ring moves on.
  * `InputRejected`: the vendor refused this input (400, 413, 422); record it and go on.
  * `Unsupported`: the model cannot take a part it was given. `Cut`: the output cap stopped the
- * answer; the text so far and its tokens come with it. Each is checked by shape too (`isCut`):
+ * answer; the text so far and its tokens come with it. `Filtered`: the vendor stopped the answer
+ * itself (a safety or recitation filter, a failed run); `stop` says which, and asking in other
+ * words may pass. Each is checked by shape too (`isCut`):
  * a host may hold two copies of this package while its pins catch up.
  */
 import type { PartKind, Usage } from "./types.js";
@@ -61,11 +63,27 @@ export class Cut extends Error {
   }
 }
 
+export class Filtered extends Error {
+  /** The vendor's stop reason (`RECITATION`, `SAFETY`, `refusal`). */
+  readonly stop: string;
+  readonly partial: string;
+  readonly usage: Usage | undefined;
+  constructor(message: string, stop: string, partial: string, usage?: Usage) {
+    super(message);
+    this.name = "Filtered";
+    this.stop = stop;
+    this.partial = partial;
+    this.usage = usage;
+  }
+}
+
 const named = (err: unknown, name: string): err is Error =>
   err instanceof Error && err.name === name;
 
 export const isCut = (err: unknown): err is Cut =>
   named(err, "Cut") && typeof (err as Cut).partial === "string";
+export const isFiltered = (err: unknown): err is Filtered =>
+  named(err, "Filtered") && typeof (err as Filtered).stop === "string";
 export const isTransient = (err: unknown): err is Transient => named(err, "Transient");
 export const isRefused = (err: unknown): err is Refused => named(err, "Refused");
 export const isInputRejected = (err: unknown): err is InputRejected => named(err, "InputRejected");
@@ -108,6 +126,10 @@ export const httpError = (what: string, res: Response, detail?: string): Error =
     res.status,
     res.headers.get("retry-after"),
   );
+
+/** `text` with each secret (an API key) put out: a vendor may echo the key in its message. */
+export const redact = (text: string, secrets: readonly string[] = []): string =>
+  secrets.reduce((t, s) => (s.length >= 8 ? t.split(s).join("[key]") : t), text);
 
 /** A fetch that threw (the network, a timeout): always transient. */
 export const transport = (what: string, err: unknown): Transient =>

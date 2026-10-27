@@ -1,6 +1,6 @@
 {
   "name": "@wrenautomation/models",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "One door to every model: a Model takes text, image, video, audio and PDF parts, answers with text, tokens and USD, and parses an answer to a zod shape. Adapters for Anthropic, Gemini, Cohere, any OpenAI-compatible server and a shell command (claude -p); ears for speech to text; one price table; one key ring.",
   "repository": {
     "type": "git",

@@ -5,7 +5,15 @@
  */
 export * from "./errors.js";
 export { fakeModel, scriptedModel } from "./fake.js";
-export { cursor, type EnvMap, fleetKeys, overRing, type RotateOptions, rotating } from "./keys.js";
+export {
+  cursor,
+  type EnvMap,
+  fallback,
+  fleetKeys,
+  overRing,
+  type RotateOptions,
+  rotating,
+} from "./keys.js";
 export { askWith, asRequest, checkParts, modelOf, promptText, TEXT_ONLY } from "./model.js";
 export { NoAnswer, parseAnswer, wellFormed } from "./parse.js";
 export { addUsage, priced } from "./prices.js";

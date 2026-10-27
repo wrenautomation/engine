@@ -82,6 +82,13 @@ export const MODEL_PRICES: readonly ModelPrice[] = [
     tiers: [{ upTo: null, rate: { input: 0.15, output: 0.6, cacheRead: 0.075 } }],
   },
   {
+    // Introductory to 2026-12-31; from 2027-01-01 $1.50 in, $7.50 out.
+    model: "gemini-3.8-flash",
+    name: "Gemini 3.8 Flash",
+    vendor: "google",
+    tiers: [{ upTo: null, rate: { input: 0.75, output: 3.75 } }],
+  },
+  {
     model: "gemini-3.5-flash",
     name: "Gemini 3.5 Flash",
     vendor: "google",

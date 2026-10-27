@@ -72,16 +72,53 @@ export const cursor = () => {
   return () => n++;
 };
 
-/** One model over several keys (one model per key), by `overRing`. */
+/**
+ * One model over several keys (one model per key), by `overRing`. A key refused once (401, 402,
+ * 403: suspended, revoked) is passed over on later calls; when every key has been refused, the
+ * whole ring is tried again so the error is a live one.
+ */
 export function rotating(models: readonly Model[], o: RotateOptions = {}): Model {
   const first = models[0];
   if (!first) throw new Error("rotating needs at least one model");
   if (models.length === 1 && (o.passes ?? 1) <= 1) return first;
   const next = cursor();
+  const dead = new Set<Model>();
+  const call = (req: Parameters<Model["complete"]>[0]) => async (m: Model) => {
+    try {
+      return await m.complete(req);
+    } catch (err) {
+      if (isRefused(err)) dead.add(m);
+      throw err;
+    }
+  };
   return modelOf({
     id: first.id,
     provider: first.provider,
     takes: first.takes,
-    complete: (req) => overRing(models, (m) => m.complete(req), next, o),
+    complete: (req) => {
+      const live = models.filter((m) => !dead.has(m));
+      return overRing(live.length ? live : models, call(req), next, o);
+    },
+  });
+}
+
+/**
+ * Models in order of preference (`gemini-3.8-flash`, then `gemini-3.5-flash`): each call starts at
+ * the first and moves down past a busy or refused one. The reply's `model` names who answered.
+ */
+export function fallback(models: readonly Model[], o: RotateOptions = {}): Model {
+  const first = models[0];
+  if (!first) throw new Error("fallback needs at least one model");
+  const takes = new Set(
+    models.flatMap((m) => [...m.takes]).filter((k) => models.every((m) => m.takes.has(k))),
+  );
+  return modelOf({
+    id: first.id,
+    provider: first.provider,
+    takes,
+    complete: (req) => {
+      const next = cursor();
+      return overRing(models, (m) => m.complete(req), next, o);
+    },
   });
 }

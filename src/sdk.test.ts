@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { Cut, InputRejected, Refused, Transient } from "./errors.js";
-import { anthropic, compatible, gateway, gatewayBase } from "./providers.js";
+import { Cut, Filtered, InputRejected, Refused, Transient } from "./errors.js";
+import {
+  anthropic,
+  compatible,
+  gateway,
+  gatewayBase,
+  gemini,
+  geminiLiveKeys,
+} from "./providers.js";
 
 type Seen = { url: string; body: Record<string, unknown>; headers: Headers };
 
@@ -191,5 +198,106 @@ describe("gateway and compatible vendors", () => {
     );
     const paid = compatible("openrouter", { key: "o", model: "openai/gpt-oss-120b", fetch });
     expect((await paid.complete("x")).usage).toMatchObject({ usd: 0.15 });
+  });
+});
+
+const generated = (o: { text?: string; finish?: string } = {}) =>
+  json({
+    candidates: [
+      {
+        content: { role: "model", parts: o.text === "" ? [] : [{ text: o.text ?? "seen" }] },
+        finishReason: o.finish ?? "STOP",
+      },
+    ],
+    usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 10 },
+  });
+
+const YOUTUBE = new URL("https://www.youtube.com/watch?v=abc");
+
+describe("gemini", () => {
+  it("a whole video goes to generateContent with low resolution", async () => {
+    const w = wire(() => generated());
+    const m = gemini({ key: "k-0000000001", fetch: w.fetch });
+    const r = await m.complete({
+      prompt: [
+        { type: "video", data: YOUTUBE, mediaType: "video/mp4" },
+        { type: "text", text: "what is shown" },
+      ],
+      resolution: "low",
+    });
+    expect(r.text).toBe("seen");
+    expect(w.seen[0]?.url).toContain(":generateContent");
+    const body = w.seen[0]?.body as { generationConfig?: { mediaResolution?: string } };
+    expect(body.generationConfig?.mediaResolution).toBe("MEDIA_RESOLUTION_LOW");
+    expect(r.usage.usd).toBe(0);
+  });
+
+  it("a clipped video goes to Interactions with its offsets, unstored", async () => {
+    const w = wire(() =>
+      json({
+        id: "i1",
+        status: "completed",
+        steps: [{ type: "model_output", content: [{ type: "text", text: "at 0:05 a cat" }] }],
+        usage: { total_input_tokens: 365, total_output_tokens: 8 },
+      }),
+    );
+    const m = gemini({ key: "k-0000000001", fetch: w.fetch });
+    const r = await m.complete({
+      prompt: [
+        {
+          type: "video",
+          data: YOUTUBE,
+          mediaType: "video/mp4",
+          clip: { startS: 5, endS: 12, fps: 0.5 },
+        },
+        { type: "text", text: "what is said" },
+      ],
+      resolution: "low",
+    });
+    expect(r.text).toBe("at 0:05 a cat");
+    expect(r.usage.input).toBe(365);
+    expect(w.seen[0]?.url).toMatch(/\/interactions$/);
+    const body = JSON.stringify(w.seen[0]?.body);
+    expect(body).toContain('"start_offset":"5s"');
+    expect(body).toContain('"end_offset":"12s"');
+    expect(body).toContain('"store":false');
+  });
+
+  it("a recitation stop is Filtered, so the caller can ask in other words", async () => {
+    const w = wire(() => generated({ text: "", finish: "RECITATION" }));
+    const m = gemini({ key: "k-0000000001", fetch: w.fetch });
+    const err = await m.complete("quote the lyrics").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Filtered);
+    expect((err as Filtered).stop).toBe("RECITATION");
+  });
+
+  it("a key the vendor echoes is put out of the error", async () => {
+    const key = "AIzaSyFAKE-not-a-real-key-000000";
+    const w = wire(() =>
+      json(
+        {
+          error: {
+            code: 403,
+            message: `Permission denied: Consumer 'api_key:${key}' has been suspended.`,
+            status: "PERMISSION_DENIED",
+          },
+        },
+        403,
+      ),
+    );
+    const err = await gemini({ key, fetch: w.fetch })
+      .complete("hi")
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Refused);
+    expect(String((err as Error).message)).not.toContain(key);
+    expect(String((err as Error).message)).toContain("[key]");
+  });
+
+  it("geminiLiveKeys keeps the keys the API takes", async () => {
+    const fetch = (async (_: string | URL | Request, init?: RequestInit) =>
+      new Headers(init?.headers).get("x-goog-api-key") === "live"
+        ? json({ models: [] })
+        : json({ error: { code: 403 } }, 403)) as typeof globalThis.fetch;
+    expect(await geminiLiveKeys(["dead", "live", "dead2"], { fetch })).toEqual(["live"]);
   });
 });

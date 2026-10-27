@@ -8,10 +8,17 @@ import type { ZodType } from "zod";
 /** What a part holds: bytes (base64 or raw) or a URL the vendor fetches itself. */
 export type Source = Uint8Array | string | URL;
 
+/** A stretch of a video, in seconds from its start; `fps` samples frames (Gemini's default is 1). */
+export interface Clip {
+  startS: number;
+  endS: number;
+  fps?: number;
+}
+
 export type Part =
   | { type: "text"; text: string }
   | { type: "image"; data: Source; mediaType: string }
-  | { type: "video"; data: Source; mediaType: string }
+  | { type: "video"; data: Source; mediaType: string; clip?: Clip }
   | { type: "audio"; data: Source; mediaType: string }
   | { type: "pdf"; data: Source };
 
@@ -27,6 +34,8 @@ export interface Request {
   /** A ceiling against a runaway answer, never the length: the prompt says how long. */
   maxTokens?: number;
   effort?: Effort;
+  /** How finely images and video are sampled. Gemini reads it (low is a quarter of the tokens); others ignore it. */
+  resolution?: "low" | "medium" | "high";
   /** What the call is for (`triage`, `drafts`). No vendor sees it; meters group by it. */
   purpose?: string;
   signal?: AbortSignal;

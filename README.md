@@ -10,7 +10,7 @@ a new price goes here, never in the caller. No guard enforces this; this file an
 
 | Import | Does | Runs in |
 |---|---|---|
-| `@wrenautomation/models` | `Model`, `Part`, `Usage`; `anthropic`, `gemini`, `cohere`, `compatible` (Groq, OpenRouter, Mistral, Cerebras, OpenAI), `gateway`; `rotating` key rings; `fakeModel`, `scriptedModel`; the errors | Node, Workers |
+| `@wrenautomation/models` | `Model`, `Part`, `Usage`; `anthropic`, `gemini`, `cohere`, `compatible` (Groq, OpenRouter, Mistral, Cerebras, OpenAI), `gateway`; `rotating` key rings, `fallback` model order, `geminiLiveKeys`; `fakeModel`, `scriptedModel`; the errors | Node, Workers |
 | `@wrenautomation/models/hear` | speech to text: `groqEar`, `cohereEar`, `compatibleEar` (any `/audio/transcriptions` server) | Node, Workers |
 | `@wrenautomation/models/prices` | one price table: `MODEL_PRICES`, `SPEECH_PRICES`, `priceUsd`, `priced`, `speechUsd`, `addUsage`, `pricesText` | Node, Workers |
 | `@wrenautomation/models/command` | a shell command as a model (`commandModel`), Claude Code on the subscription (`claudeCode`) | Node |
@@ -19,7 +19,7 @@ a new price goes here, never in the caller. No guard enforces this; this file an
 ## Use
 
 ```ts
-import { anthropic, gemini } from "@wrenautomation/models";
+import { anthropic, fallback, gemini } from "@wrenautomation/models";
 import { z } from "zod";
 
 const claude = anthropic({ key: [key1, key2], model: "sonnet" });
@@ -34,7 +34,22 @@ const reply = await eyes.complete({
   ],
   effort: "low",
 });
+
+// A stretch of a YouTube video, sampled at one frame per 2 s, at low resolution.
+const clip = await eyes.complete({
+  prompt: [
+    { type: "video", data: new URL(youtubeUrl), mediaType: "video/mp4", clip: { startS: 60, endS: 90, fps: 0.5 } },
+    { type: "text", text: "What is said and shown?" },
+  ],
+  resolution: "low",
+});
+
+// Newest model first; each call starts at the top and moves down past a busy or refused one.
+const reader = fallback([gemini({ key, model: "gemini-3.8-flash" }), gemini({ key })], { passes: 4 });
 ```
+
+Gemini reads a clipped video through its Interactions API (the generateContent route has no clip
+field in the SDK), with `store: false`. Every other request goes to generateContent.
 
 Spec strings: `fake`, `claude-code[:model]`, `anthropic[:haiku|sonnet|opus|id]`, `gateway[:alias]`,
 `gemini[:id]`, `cohere[:id]`, `groq|openrouter|mistral|cerebras|openai[:id]`, `command:<shell command>`.
@@ -52,10 +67,12 @@ name, so a host that holds two copies of this package still sorts them.
 | `InputRejected` | 400, 413, 422 | change the request |
 | `Unsupported` | a part kind the model does not take | pick another model; parts are never dropped |
 | `Cut` | the output cap stopped the answer | `partial` holds the text so far, `usage` its cost |
+| `Filtered` | the vendor stopped the answer itself (Gemini's `RECITATION`, `SAFETY`, a failed run) | `stop` says which; ask in other words |
 | `NoAnswer` | `ask` found no object of the shape after its repairs | `issues` says why |
 
-A key ring moves past a refused or busy key at once. When every key is busy, it waits 2 s, then
-doubles up to 30 s, for `passes` passes (default 1). Retries inside the SDK are off.
+A key ring moves past a refused or busy key at once, and passes over a refused key on later calls. When every key is busy, it waits 2 s, then
+doubles up to 30 s, for `passes` passes (default 1). Retries inside the SDK are off. An error never carries the key: a vendor that echoes it (Gemini
+does, on a suspended key) has it put out as `[key]`.
 
 ## Prices
 
