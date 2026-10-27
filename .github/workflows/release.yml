@@ -2,8 +2,9 @@
 # and npm checks the signature (trusted publishing), which also attaches provenance.
 #
 # npm's trusted publisher for the package points at this repository and this workflow
-# file (set 2026-10-26 by autobrowse `npm POST /packages/{package}/trust`). The very
-# first publish was a manual `npm publish`; every one after it is a tag.
+# file (set 2026-10-27 by autobrowse `npm POST /packages/{package}/trust`, when scribe
+# became falcon). The very first publish of a name is a manual `npm publish`; every one
+# after it is a tag.
 name: release
 on:
   push: { tags: ["v*"] }

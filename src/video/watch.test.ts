@@ -306,7 +306,6 @@ describe.skipIf(!hasFfmpeg)("watch", () => {
     expect(w.cuts[0]).toBeLessThan(2.2);
     expect(w.frames.map((f) => f.at)).toEqual([0, 2]);
     expect(w.frames.map((f) => f.text)).toEqual(["caption 0:00", "caption 0:02"]);
-    expect(w.info).toBeUndefined();
     expect(w.gemini).toBeUndefined();
 
     const speech = log.find((c) => c.url.endsWith("/v2/audio/transcriptions"));

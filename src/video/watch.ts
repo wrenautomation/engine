@@ -12,7 +12,6 @@ import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { askShown, INLINE_MAX, SHOWN, shrink } from "./gemini.js";
-import type { VideoInfo } from "./index.js";
 import { clock, runFor, TOOL_MS } from "./tools.js";
 
 const COHERE = "https://api.cohere.com";
@@ -34,20 +33,6 @@ const FRAME_EVERY_S = 2;
 /** A longer video gets its frames further apart, not more of them. */
 const MAX_FRAMES = 300;
 
-/** What yt-dlp's `-j` prints for a download; only what the readers use. */
-export interface VideoMeta
-  extends Pick<
-    VideoInfo,
-    "id" | "title" | "channel" | "upload_date" | "webpage_url" | "duration" | "thumbnail"
-  > {
-  extractor_key?: string;
-  description?: string;
-  uploader?: string;
-  width?: number;
-  height?: number;
-}
-
-/** One frame's read. `text` is null when the model returned no line for it ("not read"), "" when it saw no text. */
 export interface Frame {
   /** Seconds into the video, from the ffmpeg frame grid. */
   at: number;
@@ -71,16 +56,12 @@ export interface Watched {
   frames: Frame[];
   /** Gemini's read of the screen, when a key worked. */
   gemini?: string;
-  /** yt-dlp's metadata; only for a URL. */
-  info?: VideoMeta;
 }
 
 export interface WatchOptions {
   cohereKeys: readonly string[];
   /** Optional: their read of the screen is added when one still works. */
   geminiKeys?: readonly string[];
-  /** The yt-dlp command (split on spaces: `uvx yt-dlp`); needed for a URL. */
-  ytDlp?: string;
   ffmpeg?: string;
   /** The PySceneDetect command (split on spaces: `uvx scenedetect`); set, its cuts come too (`cutsBy`). */
   sceneDetect?: string;
@@ -484,30 +465,6 @@ async function geminiScreen(
 
 // -- the core -----------------------------------------------------------------------------
 
-/** yt-dlp's download of a reel or video: 540p on the short side, remuxed to mp4. */
-export async function download(
-  url: string,
-  ytDlp: string,
-  dir: string,
-): Promise<{ file: string; info: VideoMeta }> {
-  const [cmd, ...pre] = ytDlp.split(/\s+/) as [string, ...string[]];
-  const { stdout } = await runFor(
-    cmd,
-    [
-      ...pre,
-      ...["-j", "--no-simulate", "--no-warnings", "--no-playlist"],
-      // `res` is the short side, so a vertical reel gets 540x960, not its 1080x1920.
-      ...["-S", "res:540", "-f", "bv*+ba/b", "--remux-video", "mp4"],
-      ...["-o", join(dir, "video.%(ext)s"), url],
-    ],
-    TOOL_MS,
-    { maxBuffer: 256 * 1024 * 1024 },
-  );
-  const file = (await readdir(dir)).find((f) => f.endsWith(".mp4"));
-  if (!file) throw new Error(`${url}: yt-dlp wrote no mp4`);
-  return { file: join(dir, file), info: JSON.parse(stdout) as VideoMeta };
-}
-
 /** `Promise.all` that lets every promise finish before it throws the first failure: nothing still writes into the work directory when it goes. */
 async function allSettled<T extends unknown[]>(ps: { [K in keyof T]: Promise<T[K]> }): Promise<T> {
   const done = await Promise.allSettled(ps);
@@ -515,7 +472,7 @@ async function allSettled<T extends unknown[]>(ps: { [K in keyof T]: Promise<T[K
   return done.map((r) => (r as PromiseFulfilledResult<unknown>).value) as T;
 }
 
-/** Watch a video: a URL yt-dlp fetches, or a file on disk. */
+/** Watch a video file on disk (a URL is fetched first by weaver's `watch`). */
 export async function watch(input: string, opts: WatchOptions): Promise<Watched> {
   if (!opts.cohereKeys.length)
     throw new Error(`${input}: needs COHERE keys to read the speech and the screen`);
@@ -523,15 +480,12 @@ export async function watch(input: string, opts: WatchOptions): Promise<Watched>
   const fetchFn = opts.fetchFn ?? fetch;
   const dir = await mkdtemp(join(tmpdir(), "watch-"));
   try {
-    let file = resolve(input);
-    let info: VideoMeta | undefined;
-    if (/^https?:\/\//.test(input))
-      ({ file, info } = await download(input, opts.ytDlp ?? "yt-dlp", dir));
+    const file = resolve(input);
     const facts = await probe(file, ffmpeg).catch((err: Error) => {
       throw new Error(`${input}: ffprobe could not read it (${err.message.split("\n")[0]})`);
     });
     if (!facts.picture) throw new Error(`${input}: no picture to watch`);
-    const durationS = facts.durationS || info?.duration || 0;
+    const durationS = facts.durationS;
     const every = Math.max(opts.everyS ?? FRAME_EVERY_S, Math.ceil(durationS / MAX_FRAMES));
     const call = { fetchFn, ...(opts.pause ? { pause: opts.pause } : {}) };
     const psd = async (d: SceneDetector) =>
@@ -566,7 +520,6 @@ export async function watch(input: string, opts: WatchOptions): Promise<Watched>
       speech: s,
       frames: f,
       ...(g ? { gemini: g } : {}),
-      ...(info ? { info } : {}),
     };
   } finally {
     await rm(dir, { recursive: true, force: true });

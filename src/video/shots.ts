@@ -114,7 +114,7 @@ export async function labelShots(
   },
 ): Promise<ShotLabels[]> {
   const ffmpeg = o.ffmpeg ?? "ffmpeg";
-  const dir = await mkdtemp(join(tmpdir(), "scribe-shots-"));
+  const dir = await mkdtemp(join(tmpdir(), "falcon-shots-"));
   const none: ShotLabels = { type: null, move: null, in: null };
   try {
     const out: ShotLabels[] = [];

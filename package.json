@@ -1,10 +1,10 @@
 {
-  "name": "@wrenautomation/scribe",
-  "version": "0.2.0",
-  "description": "Pages, files and videos in; text and quoted facts out. Polite fetching, robots, HTML and PDF to text, video watching with ffmpeg and a vision model, and a study core whose every claim quotes a page.",
+  "name": "@wrenautomation/falcon",
+  "version": "0.3.0",
+  "description": "Files, markup and media in; text and quoted facts out. HTML and PDF to text, a page to title, text and links, video watching with ffmpeg and a vision model, captions and audio to markdown, and a study core whose every claim quotes a page. Fetching is weaver's.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/wrenautomation/scribe.git"
+    "url": "git+https://github.com/wrenautomation/falcon.git"
   },
   "license": "PolyForm-Shield-1.0.0",
   "files": [
@@ -22,10 +22,6 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./fetch": {
-      "types": "./dist/fetch/index.d.ts",
-      "import": "./dist/fetch/index.js"
-    },
     "./text": {
       "types": "./dist/text/index.d.ts",
       "import": "./dist/text/index.js"
@@ -40,7 +36,7 @@
     }
   },
   "bin": {
-    "scribe": "dist/app/cli.js"
+    "falcon": "dist/app/cli.js"
   },
   "packageManager": "pnpm@9.15.0",
   "engines": {
@@ -60,7 +56,6 @@
     "commander": "15.0.0",
     "entities": "8.1.0",
     "htmlparser2": "12.0.0",
-    "robots-parser": "3.0.1",
     "unpdf": "1.8.1",
     "zod": "4.6.5"
   },

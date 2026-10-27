@@ -7,7 +7,7 @@
  */
 
 import { Parser } from "htmlparser2";
-import { decodeHtml } from "../text/entities.js";
+import { decodeHtml } from "./entities.js";
 
 const SKIP_CONTENT: ReadonlySet<string> = new Set([
   "script",
