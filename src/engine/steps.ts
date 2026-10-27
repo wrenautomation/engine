@@ -78,15 +78,33 @@ function gather<T>(settled: PromiseSettledResult<T>[]): {
   return { values, transient };
 }
 
-/** `calls` a few at a time, in order. */
+/**
+ * `call` a few at a time, in order; `keep` gets each batch's answers (null where the call
+ * failed) before the next batch starts, so what one item wrote is on record whatever the next
+ * does. The first Transient comes back; the first other error is thrown once its batch is kept.
+ */
 async function batched<I, O>(
   items: I[],
   call: (item: I) => Promise<O>,
-): Promise<PromiseSettledResult<O>[]> {
-  const out: PromiseSettledResult<O>[] = [];
-  for (let i = 0; i < items.length; i += PARALLEL)
-    out.push(...(await Promise.allSettled(items.slice(i, i + PARALLEL).map(call))));
-  return out;
+  keep: (item: I, out: O) => Promise<void>,
+): Promise<{ transient: Transient | null }> {
+  let transient: Transient | null = null;
+  for (let i = 0; i < items.length; i += PARALLEL) {
+    const batch = items.slice(i, i + PARALLEL);
+    const settled = await Promise.allSettled(batch.map(call));
+    let failed: unknown;
+    let anyFailed = false;
+    for (const [j, r] of settled.entries()) {
+      if (r.status === "fulfilled") await keep(batch[j] as I, r.value);
+      else if (r.reason instanceof Transient) transient ??= r.reason;
+      else if (!anyFailed) {
+        anyFailed = true;
+        failed = r.reason;
+      }
+    }
+    if (anyFailed) throw failed;
+  }
+  return { transient };
 }
 
 export const planStep: StepFn = async (ctx, state) => {
@@ -251,17 +269,15 @@ export const readStep: StepFn = async (ctx, state) => {
     }
     return null;
   };
-  const got = gather(await batched(hits, openOne));
   let read = 0;
-  for (const [i, g] of got.values.entries()) {
-    if (!g) continue;
-    const h = hits[i] as HitRecord;
+  await batched(hits, openOne, async (h, g) => {
+    if (!g) return;
     await ctx.write(
       { type: "document", ...g.doc, hit: h.id },
       { from: g.source.from ?? "tool", by: g.source.by ?? g.source.name },
     );
     read++;
-  }
+  });
   if (transient && !read) throw transient;
   return { ok: true, note: `${read} of ${hits.length} hits read` };
 };
@@ -289,22 +305,21 @@ export const extractStep: StepFn = async (ctx, state) => {
     const model = ctx.modelOn(id) as Model;
     return { out: await ctx.deps.extractor.extract(doc, { text: ask.text, known }, model), model };
   };
-  const got = gather(await batched(docs, extractOne));
   let proposed = 0;
   let dropped = 0;
   let done = 0;
-  for (const [i, g] of got.values.entries()) {
-    if (!g) continue;
-    const id = (docs[i] as DocumentRecord).id;
+  // Each document's findings and verdict land as its batch settles: a document whose extract
+  // fails costs only itself. The verdict is the checkpoint: the documents without one are
+  // extracted on the next try.
+  const got = await batched(docs, extractOne, async (d, g) => {
     const who = { from: "ai" as const, by: g.model.id };
-    for (const f of g.out.findings) await ctx.write({ type: "finding", ...f, document: id }, who);
+    for (const f of g.out.findings) await ctx.write({ type: "finding", ...f, document: d.id }, who);
     const { quality, gap } = g.out.verdict;
-    await ctx.write({ type: "verdict", document: id, quality, ...(gap ? { gap } : {}) }, who);
+    await ctx.write({ type: "verdict", document: d.id, quality, ...(gap ? { gap } : {}) }, who);
     proposed += g.out.findings.length;
     dropped += g.out.dropped.length;
     done++;
-  }
-  // The verdict is the checkpoint: the documents without one are extracted on the next try.
+  });
   if (got.transient) throw got.transient;
   return {
     ok: true,

@@ -3,9 +3,8 @@
  * `yield` per source, `sources` on this machine. Every command prints JSON, so Claude Code
  * can drive it. The ledger is a folder (`--ledger`, WEAVER_LEDGER, default `./ledger`); a
  * writer names this terminal's file in it (`--writer`, WEAVER_WRITER, default the user name).
- * The model is `claude -p --output-format json` by default (Claude Code headless, raven's way:
- * any command that reads a prompt on stdin and prints the answer), `anthropic[:model]` for
- * Claude direct (ANTHROPIC_API_KEY), or `gateway[:alias]` for Wren's LLM gateway
+ * The model is `anthropic` by default (Claude Haiku direct, ANTHROPIC_API_KEY; `anthropic:sonnet`,
+ * `anthropic:opus` or an id), `gateway[:alias]` for Wren's LLM gateway
  * (WREN_LLM_GATEWAY_URL and WREN_LLM_GATEWAY_TOKEN). A host with its own ledger, sources or
  * model passes them in `EngineCliDeps`; wren's `research` command is these commands over
  * Postgres. A run that stops on a transient failure (a 429, a 5xx, a dropped connection) is
@@ -55,7 +54,9 @@ import {
 import { anthropicModel } from "./anthropic-model.js";
 import { gatewayModel } from "./gateway-model.js";
 
-const DEFAULT_MODEL = "claude -p --output-format json";
+const DEFAULT_MODEL = "anthropic";
+/** Claude Code headless, raven's way: a command that reads the prompt on stdin. */
+const CLAUDE_CODE = "claude -p --output-format json";
 /** Resumes `run` makes on its own after a transient failure. */
 export const RESUMES = 5;
 /** The longest pause before a resume, whatever `retry-after` said. */
@@ -68,11 +69,14 @@ const MAX_RESUME_WAIT_MS = 300_000;
 export function modelOf(spec: string, printed: NodeJS.ProcessEnv): Model {
   const a = /^anthropic(?::(.+))?$/.exec(spec);
   if (a) {
-    if (!printed.ANTHROPIC_API_KEY) throw new Error("--model anthropic needs ANTHROPIC_API_KEY");
+    if (!printed.ANTHROPIC_API_KEY)
+      throw new Error(
+        "--model anthropic needs ANTHROPIC_API_KEY (the Mac's is in the model keys file)",
+      );
     return anthropicModel({ apiKey: printed.ANTHROPIC_API_KEY, ...(a[1] ? { model: a[1] } : {}) });
   }
   const m = /^gateway(?::(.+))?$/.exec(spec);
-  if (!m) return commandModel(spec, spec === DEFAULT_MODEL ? "claude-code" : spec);
+  if (!m) return commandModel(spec, spec === CLAUDE_CODE ? "claude-code" : spec);
   if (!printed.WREN_LLM_GATEWAY_URL) throw new Error("--model gateway needs WREN_LLM_GATEWAY_URL");
   return gatewayModel({
     url: printed.WREN_LLM_GATEWAY_URL,
@@ -135,7 +139,13 @@ export function sourcesHere(
   warn: (line: string) => void = (l) => console.error(l),
 ): Sources {
   const out: Source[] = [];
-  if (printed.SEARXNG_URL) out.push(searxng({ url: printed.SEARXNG_URL }));
+  if (printed.SEARXNG_URL)
+    out.push(
+      searxng({
+        url: printed.SEARXNG_URL,
+        ...(printed.SEARXNG_TOKEN ? { token: printed.SEARXNG_TOKEN } : {}),
+      }),
+    );
   const exaKeys = keys(printed, "EXA_API_KEY");
   if (exaKeys.length) out.push(exa({ keys: exaKeys }));
   out.push(ytdlpSource({ ytDlp, geminiKeys: keys(printed, "GEMINI_API_KEY") }));
@@ -212,7 +222,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     )
     .option(
       "--model <command>",
-      "anthropic[:model], gateway[:alias], or a command (stdin: prompt, stdout: answer)",
+      "anthropic[:model], gateway[:alias], or a command (stdin: prompt, stdout: answer; `claude -p --output-format json` is Claude Code)",
       process.env.WEAVER_MODEL ?? DEFAULT_MODEL,
     )
     .option("--no-model", "no model: your queries only, every hit read, nothing extracted")

@@ -1,4 +1,7 @@
-/** SearXNG: a self-hosted metasearch, `GET $url/search?q=&format=json`. Free. */
+/**
+ * SearXNG: a self-hosted metasearch, `GET $url/search?q=&format=json`. Free. `token` goes as a
+ * bearer for an instance behind an authenticating proxy (Wren's, on the VPS).
+ */
 import type { Source } from "../engine/ports.js";
 import { httpError, transport } from "../engine/transient.js";
 
@@ -9,7 +12,12 @@ interface SearxResult {
   publishedDate?: string | null;
 }
 
-export function searxng(o: { url: string; fetchFn?: typeof fetch; n?: number }): Source {
+export function searxng(o: {
+  url: string;
+  token?: string;
+  fetchFn?: typeof fetch;
+  n?: number;
+}): Source {
   const fetchFn = o.fetchFn ?? fetch;
   const base = o.url.replace(/\/$/, "");
   return {
@@ -20,7 +28,10 @@ export function searxng(o: { url: string; fetchFn?: typeof fetch; n?: number }):
       const u = new URL(`${base}/search`);
       u.searchParams.set("q", q.site ? `site:${q.site} ${q.terms}` : q.terms);
       u.searchParams.set("format", "json");
-      const res = await fetchFn(u, { signal: AbortSignal.timeout(30_000) }).catch((err) => {
+      const res = await fetchFn(u, {
+        signal: AbortSignal.timeout(30_000),
+        ...(o.token ? { headers: { authorization: `Bearer ${o.token}` } } : {}),
+      }).catch((err) => {
         throw transport("searxng", err);
       });
       if (!res.ok) throw httpError("searxng", res);

@@ -41,12 +41,13 @@ COHERE_API_KEY=... npx weaver read https://www.instagram.com/reel/...     # watc
 npx weaver list 'ytsearch10:cold email' --to 10                           # hits as JSON, no downloads
 ```
 
-The engine's commands print JSON, so Claude Code can drive them. The model is `claude -p
---output-format json` by default (Claude Code headless: the prompt on stdin, the answer and its
-cost out), `--model anthropic[:haiku|sonnet|opus|id]` for Claude direct (`ANTHROPIC_API_KEY`),
+The engine's commands print JSON, so Claude Code can drive them. The model is `anthropic` by
+default (Claude Haiku direct, `ANTHROPIC_API_KEY`; `--model anthropic:sonnet|opus|id` for another),
 `--model gateway[:alias]` for Wren's LLM gateway (`WREN_LLM_GATEWAY_URL`,
-`WREN_LLM_GATEWAY_TOKEN`), or any command that reads a prompt on stdin. Sources come from the
-environment: `SEARXNG_URL`, `EXA_API_KEY` (or `_1..n`), `GEMINI_API_KEY` for videos without
+`WREN_LLM_GATEWAY_TOKEN`), or any command that reads a prompt on stdin and prints the answer
+(`claude -p --output-format json` is Claude Code headless). Sources come from the environment:
+`SEARXNG_URL` (and `SEARXNG_TOKEN`, a bearer, for an instance behind a proxy), `EXA_API_KEY`
+(or `_1..n`), `GEMINI_API_KEY` for videos without
 captions, `WEAVER_CONTACT` for the fetcher (no contact, no page opens), `AUTOBROWSE_URL` and
 `AUTOBROWSE_TOKEN` for the ladder. The ledger folder is `--ledger` or `WEAVER_LEDGER`
 (default `./ledger`); `--writer` or `WEAVER_WRITER` names your file in it.
@@ -67,7 +68,10 @@ npx weaver sources                                                             #
 dropped connection) is tried three times with a pause, every attempt a `spend` record; a step
 that still cannot go on writes no `done`, and `run` waits and resumes it, five times at most,
 before it exits 2. Searches, reads and extracts fan out (four reads or extracts at a time);
-their records land in order, and a step run again skips what its records show done.
+each document's records land as its batch settles, and a step run again skips what its records
+show done. An extract that fails for good (the model's answer would not parse, a 400) stops the
+step with its findings so far on record and `run` exits 2: `--resume` asks only for the
+documents without a verdict.
 
 ## Library
 

@@ -313,6 +313,36 @@ describe("runner", () => {
     expect(second.state.spends.filter((x) => x.op === "search")).toHaveLength(2);
   });
 
+  it("keeps what an extract batch wrote when one document's extract fails for good", async () => {
+    const a = answers;
+    const broken: typeof claimExtractor = {
+      ...claimExtractor,
+      extract: (doc, ...rest) => {
+        if (doc.url.endsWith("/three")) throw new Error("boom");
+        return claimExtractor.extract(doc, ...rest);
+      },
+    };
+    const d = {
+      ...deps(scriptedModel([a.plan1, a.triage1, a.extractOne], "m")),
+      extractor: broken,
+    };
+    const first = await run(d, { ask: { text: "repeat clients", kind: "web" }, planFile });
+    expect(first.finished).toBe(false);
+    expect(first.note).toBe("boom");
+    expect(first.state.next).toEqual({ round: 1, step: "extract" });
+    expect(first.state.findings.map((f) => f.text)).toEqual([
+      "38% of placements came from repeat clients.",
+    ]);
+    expect(first.state.verdicts).toHaveLength(1);
+    const second = await run(
+      { ...d, extractor: claimExtractor, model: scriptedModel([a.extractThree, a.stop], "m") },
+      { resume: first.run, planFile },
+    );
+    expect(second.finished).toBe(true);
+    expect(second.state.verdicts.map((v) => v.document)).toHaveLength(2);
+    expect(second.state.findings).toHaveLength(1);
+  });
+
   it("lets a Transient through when a step got nothing, with no done, so a resume runs the step again", async () => {
     const a = answers;
     let calls = 0;
