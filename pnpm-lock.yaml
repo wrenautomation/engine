@@ -9,14 +9,23 @@ importers:
   .:
     dependencies:
       '@wrenautomation/falcon':
-        specifier: 0.3.0
-        version: 0.3.0
+        specifier: 0.4.1
+        version: 0.4.1
+      '@wrenautomation/raven':
+        specifier: 0.2.0
+        version: 0.2.0
       commander:
         specifier: 15.0.0
         version: 15.0.0
       robots-parser:
         specifier: 3.0.1
         version: 3.0.1
+      ulid:
+        specifier: 3.0.2
+        version: 3.0.2
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
     devDependencies:
       '@biomejs/biome':
         specifier: 2.5.14
@@ -218,8 +227,13 @@ packages:
   '@vitest/spy@5.0.1':
     resolution: {integrity: sha512-rbto/mF/SGERxEgYOek7Xm6B9b+y+mVoo+f4b2LymYO8zM1b7uB5nHuhVMTP2hxdzgxvGiZYGxGIaMvL5y180Q==}
 
-  '@wrenautomation/falcon@0.3.0':
-    resolution: {integrity: sha512-g+32v1MTGzgsRfwcpth85Jq00tHt7z/+EU2E6TGDVbgYMKiVjy+Iq2t2AAG8YV9S9PElOrahH6mBIJ+6sWC4sg==}
+  '@wrenautomation/falcon@0.4.1':
+    resolution: {integrity: sha512-up6GGlu/hIQJiZ9dfY8fEar5vjouv28IYAq+lDn+VPYa2zMbT1eb8+tMOeHD7V6egOqbWRqDu6v4J0B+hX5GFw==}
+    engines: {node: '>=24'}
+    hasBin: true
+
+  '@wrenautomation/raven@0.2.0':
+    resolution: {integrity: sha512-R83ea8uYeMIB1dOc2sOoLiLBlRXsFIP+1zR63g8XlmH/C8UhMZjEvkWB3sj22RLxI59nnYM3SYv8Yze8uELd9w==}
     engines: {node: '>=24'}
     hasBin: true
 
@@ -417,6 +431,10 @@ packages:
   typescript@5.9.3:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
+    hasBin: true
+
+  ulid@3.0.2:
+    resolution: {integrity: sha512-yu26mwteFYzBAot7KVMqFGCVpsF6g8wXfJzQUHvu1no3+rRRSFcSV2nKeYvNPLD2J4b08jYBDhHUjeH0ygIl9w==}
     hasBin: true
 
   undici-types@6.21.0:
@@ -642,7 +660,7 @@ snapshots:
 
   '@vitest/spy@5.0.1': {}
 
-  '@wrenautomation/falcon@0.3.0':
+  '@wrenautomation/falcon@0.4.1':
     dependencies:
       commander: 15.0.0
       entities: 8.1.0
@@ -651,6 +669,11 @@ snapshots:
       zod: 4.6.5
     transitivePeerDependencies:
       - '@napi-rs/canvas'
+
+  '@wrenautomation/raven@0.2.0':
+    dependencies:
+      commander: 15.0.0
+      zod: 4.6.5
 
   assertion-error@2.0.1: {}
 
@@ -810,6 +833,8 @@ snapshots:
       picomatch: 4.0.7
 
   typescript@5.9.3: {}
+
+  ulid@3.0.2: {}
 
   undici-types@6.21.0: {}
 

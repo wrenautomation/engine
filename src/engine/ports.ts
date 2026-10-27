@@ -1,0 +1,74 @@
+/**
+ * The ports the runner is given, as one plain `deps` object. A source is one file that answers
+ * `search` (hits for a query) or `open` (a hit read whole) or both; the registry holds them by
+ * name and the plan's allow-list picks per run. The model is raven's, the extractor falcon's,
+ * the ledger weaver's. Nothing here reaches the network: the adapters in `src/sources` do.
+ */
+import type { Document, Extractor } from "@wrenautomation/falcon/document";
+import type { HitViewIn, Model, PlanFile, Proposal } from "@wrenautomation/raven";
+import type { Ids } from "../ledger/ids.js";
+import type { Ledger } from "../ledger/ledger.js";
+import type { CostKind, From, HitRecord, QueryRecord } from "../ledger/records.js";
+
+export interface Source {
+  name: string;
+  kind: "search" | "open" | "both";
+  cost: CostKind;
+  /** Who the records it writes are from. A person pasting URLs is `human`; the default is `tool`. */
+  from?: From;
+  /** Who its records are by: the person behind a paste. The default is the source's name. */
+  by?: string;
+  /** Hits as the source shows them for free. Throw on failure: the runner writes the spend. */
+  search?(query: QueryRecord): Promise<HitViewIn[]>;
+  /** The hit read whole, or null when this source does not open that kind of hit. */
+  open?(hit: HitRecord): Promise<Document | null>;
+}
+
+export type Sources = Map<string, Source>;
+
+export const registry = (...sources: Source[]): Sources => new Map(sources.map((s) => [s.name, s]));
+
+/** The allow-list's sources, in its order. A name no source answers to fails the run at its start. */
+export function pick(sources: Sources, names: readonly string[]): Source[] {
+  const missing = names.filter((n) => !sources.has(n));
+  if (missing.length) throw new Error(`no source named ${missing.join(", ")}`);
+  return names.map((n) => sources.get(n) as Source);
+}
+
+export interface Deps {
+  sources: Sources;
+  ledger: Ledger;
+  /** null: no model. The plan is the proposals given; every hit is read; nothing is extracted. */
+  model: Model | null;
+  extractor: Extractor;
+  clock: () => Date;
+  ids: Ids;
+  /** `by` on the records the runner itself writes. */
+  runner: string;
+}
+
+export interface RunOptions {
+  /** Absent on a resume: the first snapshot has it. */
+  ask?: { text: string; kind: PlanFile["kind"]; known?: string[]; site?: string };
+  /** The ledger's tuned plan file for the ask's kind; raven's default when absent. */
+  planFile?: PlanFile;
+  /** Queries from people or other models, merged with the model's in round 1. */
+  proposals?: readonly Proposal[];
+  /** Narrows the plan file's sources for this run. */
+  sources?: readonly string[];
+  /** An earlier run to continue. */
+  resume?: string;
+  /** A run id for a new run; `deps.ids()` when absent. */
+  run?: string;
+  /** Called after each step, for a progress line. */
+  onStep?: (event: StepEvent) => void;
+}
+
+export interface StepEvent {
+  run: string;
+  round: number;
+  step: string;
+  ok: boolean;
+  note?: string;
+  ms: number;
+}

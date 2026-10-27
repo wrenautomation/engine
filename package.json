@@ -1,7 +1,7 @@
 {
   "name": "@wrenautomation/weaver",
-  "version": "0.1.1",
-  "description": "The web in, documents out. Polite HTTP fetching with robots and a fetch ladder up to a browser; YouTube, any other video and podcasts read from a URL through yt-dlp and @wrenautomation/falcon; what a channel or search holds. The source interface, runner and ledger of Wren's research engine come next.",
+  "version": "0.2.0",
+  "description": "The web in, documents out. Polite HTTP fetching with robots and a fetch ladder up to a browser; YouTube, any other video and podcasts read from a URL through yt-dlp and @wrenautomation/falcon; what a channel or search holds. The sources, runner and ledger of Wren's research engine: `weaver run` takes an ask through plan, fetch, triage, read, extract and review, every record in a folder.",
   "license": "PolyForm-Shield-1.0.0",
   "repository": {
     "type": "git",
@@ -21,9 +21,21 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./engine": {
+      "types": "./dist/engine/index.d.ts",
+      "import": "./dist/engine/index.js"
+    },
     "./fetch": {
       "types": "./dist/fetch/index.d.ts",
       "import": "./dist/fetch/index.js"
+    },
+    "./ledger": {
+      "types": "./dist/ledger/index.d.ts",
+      "import": "./dist/ledger/index.js"
+    },
+    "./sources": {
+      "types": "./dist/sources/index.d.ts",
+      "import": "./dist/sources/index.js"
     },
     "./video": {
       "types": "./dist/video/index.d.ts",
@@ -48,9 +60,12 @@
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
-    "@wrenautomation/falcon": "0.3.0",
+    "@wrenautomation/falcon": "0.4.1",
+    "@wrenautomation/raven": "0.2.0",
     "commander": "15.0.0",
-    "robots-parser": "3.0.1"
+    "robots-parser": "3.0.1",
+    "ulid": "3.0.2",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

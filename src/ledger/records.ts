@@ -1,0 +1,163 @@
+/**
+ * The records a ledger holds: one JSON object per line, append only. Every record has the same
+ * envelope (`type`, `id`, `run`, `round`, `step`, `at`, `from`, `by`) and then its own fields;
+ * raven's and falcon's shapes are spread in with the envelope's fields taken out, so a record
+ * has one `by`. A correction is a new record that points at the old one, never an edit.
+ *
+ * One rule for the lake: a top-level key keeps one JSON type across every record type, so
+ * DuckDB's `read_json` unifies the files without a cast.
+ */
+import {
+  Document as FalconDocument,
+  Finding as FalconFinding,
+} from "@wrenautomation/falcon/document";
+import {
+  Ask,
+  Budget,
+  HitView,
+  Edge as RavenEdge,
+  Query as RavenQuery,
+  Snapshot as RavenSnapshot,
+  z,
+} from "@wrenautomation/raven";
+
+/** Who wrote a record: a model, a person, or a tool (a source adapter, the runner). */
+export const From = z.enum(["ai", "human", "tool"]);
+export type From = z.infer<typeof From>;
+
+/** The runner's steps, in order. Raven's `Edge.to` names one of the first five. */
+export const Step = z.enum(["plan", "fetch", "triage", "read", "extract", "review"]);
+export type Step = z.infer<typeof Step>;
+export const STEPS = Step.options;
+
+export const RECORD_TYPES = [
+  "query",
+  "hit",
+  "document",
+  "finding",
+  "call",
+  "spend",
+  "snapshot",
+  "edge",
+  "done",
+] as const;
+export const RecordType = z.enum(RECORD_TYPES);
+export type RecordType = z.infer<typeof RecordType>;
+
+/** What every record carries. `step` is absent on a record written outside a run's steps (a call by hand). */
+export const Envelope = z.object({
+  id: z.string().min(1),
+  run: z.string().min(1),
+  round: z.number().int().positive(),
+  step: Step.optional(),
+  /** ISO time from the writer's clock. */
+  at: z.string().min(1),
+  from: From,
+  by: z.string().min(1),
+});
+export type Envelope = z.infer<typeof Envelope>;
+
+/** One thing to look for, as raven planned it. */
+export const QueryRecord = Envelope.extend({ type: z.literal("query") }).extend(
+  RavenQuery.omit({ from: true, by: true }).shape,
+);
+export type QueryRecord = z.infer<typeof QueryRecord>;
+
+/** What a source returned for a query, before any read. One per canonical URL per fetch step. */
+export const HitRecord = Envelope.extend({ type: z.literal("hit") })
+  .extend(HitView.shape)
+  .extend({
+    /** The canonical URL: what dedupe compares. */
+    key: z.string().min(1),
+    /** The query records it answered. */
+    queries: z.array(z.string()),
+  });
+export type HitRecord = z.infer<typeof HitRecord>;
+
+/** A hit read whole. */
+export const DocumentRecord = Envelope.extend({ type: z.literal("document") })
+  .extend(FalconDocument.shape)
+  .extend({ hit: z.string().min(1) });
+export type DocumentRecord = z.infer<typeof DocumentRecord>;
+
+/** One fact drawn from a document, with its proof. */
+export const FindingRecord = Envelope.extend({ type: z.literal("finding") })
+  .extend(FalconFinding.shape)
+  .extend({ document: z.string().min(1) });
+export type FindingRecord = z.infer<typeof FindingRecord>;
+
+/**
+ * The call: keep or drop, on a hit (read or skip) or a finding, with why. The latest call on a
+ * record is its state. A person's call and a model's are the same row with a different `from`.
+ */
+export const CallRecord = Envelope.extend({
+  type: z.literal("call"),
+  on: z.string().min(1),
+  verdict: z.enum(["keep", "drop"]),
+  why: z.string(),
+});
+export type CallRecord = z.infer<typeof CallRecord>;
+
+export const CostKind = z.enum(["free", "metered", "browser"]);
+export type CostKind = z.infer<typeof CostKind>;
+
+/** One use of a source or a model: what it was asked, whether it answered, what it cost. */
+export const SpendRecord = Envelope.extend({
+  type: z.literal("spend"),
+  /** The source's name, or the model's id. */
+  source: z.string().min(1),
+  op: z.enum(["search", "open", "ask"]),
+  /** The query's terms, the URL opened, or the prompt's first line. */
+  about: z.string(),
+  /** The record it was about: the query searched, the hit opened, the document extracted. */
+  on: z.string().optional(),
+  ok: z.boolean(),
+  error: z.string().optional(),
+  cost: CostKind,
+  ms: z.number().nonnegative(),
+  usd: z.number().nonnegative().optional(),
+  tokens: z.object({ input: z.number().optional(), output: z.number().optional() }).optional(),
+});
+export type SpendRecord = z.infer<typeof SpendRecord>;
+
+/** What the plan step was given for one round: the ask, the allow-list, the budget, raven's snapshot. */
+export const SnapshotRecord = Envelope.extend({ type: z.literal("snapshot") })
+  .extend(RavenSnapshot.omit({ at: true }).shape)
+  .extend({ ask: Ask, sources: z.array(z.string()), budget: Budget });
+export type SnapshotRecord = z.infer<typeof SnapshotRecord>;
+
+/** The edge taken after a round. */
+export const EdgeRecord = Envelope.extend({ type: z.literal("edge") }).extend(
+  RavenEdge.omit({ from: true, by: true }).shape,
+);
+export type EdgeRecord = z.infer<typeof EdgeRecord>;
+
+/** A step finished (`ok`) or gave up (`ok: false`, `note` says why). Resume reads these. */
+export const DoneRecord = Envelope.extend({
+  type: z.literal("done"),
+  step: Step,
+  ok: z.boolean(),
+  note: z.string().optional(),
+});
+export type DoneRecord = z.infer<typeof DoneRecord>;
+
+export const LedgerRecord = z.discriminatedUnion("type", [
+  QueryRecord,
+  HitRecord,
+  DocumentRecord,
+  FindingRecord,
+  CallRecord,
+  SpendRecord,
+  SnapshotRecord,
+  EdgeRecord,
+  DoneRecord,
+]);
+export type LedgerRecord = z.infer<typeof LedgerRecord>;
+
+/** A record of one type. */
+export type RecordOf<T extends RecordType> = Extract<LedgerRecord, { type: T }>;
+
+/** Time, then id: two writers' clocks can tie. */
+export function byTime(a: Pick<Envelope, "at" | "id">, b: Pick<Envelope, "at" | "id">): number {
+  return a.at < b.at ? -1 : a.at > b.at ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}

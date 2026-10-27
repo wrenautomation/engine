@@ -14,8 +14,20 @@ Two doors:
 | `@wrenautomation/weaver/video` | `readYoutube` (captions and chapters by yt-dlp, plus Gemini's read of the screen), `readYoutubeByUrl` (Gemini alone, no download), `readVideo` (any other video: yt-dlp, then falcon's `watch`), `readAudio` (a podcast by its audio URL, then falcon's `hearAudio`), `watch` over a URL or a file, `flatPlaylist` (what a profile, channel or search holds), `download` |
 
 Every reader returns falcon's one `VideoRead` shape. What turns a page or a file into text is
-falcon's (`@wrenautomation/falcon`). What searches by a source interface, runs a plan and keeps
-the ledger comes next (phase 3.5c of wren's research engine design).
+falcon's (`@wrenautomation/falcon`).
+
+Three more doors run the research engine (wren's `designs/2026-10-26-research-engine.md`):
+
+| Import | Does |
+|---|---|
+| `@wrenautomation/weaver/engine` | `Source` (a name, `search` and/or `open`, a cost), `registry` and the plan's allow-list, `run(deps, options)`: plan, fetch, triage, read, extract, review, round after round until raven's edge says stop; `fold` rebuilds a run's state from its records, so a run resumes from the step it stopped on |
+| `@wrenautomation/weaver/sources` | `searxng`, `exa` (search), `youtube` (search and read, yt-dlp), `fetcher` (open, the polite fetcher), `ladder` (open, autobrowse's fetch ladder up to a browser), `paste` (a person's URLs), `ledger` (hits earlier runs saw) |
+| `@wrenautomation/weaver/ledger` | the records (`query`, `hit`, `document`, `finding`, `call`, `spend`, `snapshot`, `edge`, `done`), `FilesLedger` (a folder: `runs/<run>/<writer>.jsonl`, `plans/<kind>.json`), `MemoryLedger`, yield rows per source, person, channel and kind |
+
+Every record carries `from` (ai, human or tool) and `by` (a model id, a source, a person). A
+person's pasted URL, a person's keep or drop, are the same records as the model's. The plan
+file in `plans/<kind>.json` beside the ledger (prompts, sources, budget) is where a run learns:
+copy raven's default (`npx raven plans web`), tune it, keep it there.
 
 ## CLI
 
@@ -29,6 +41,29 @@ COHERE_API_KEY=... npx weaver read https://www.instagram.com/reel/...     # watc
 npx weaver list 'ytsearch10:cold email' --to 10                           # hits as JSON, no downloads
 ```
 
+The engine's commands print JSON, so Claude Code can drive them. The model is `claude -p
+--output-format json` by default (Claude Code headless: the prompt on stdin, the answer and its
+cost out), or `--model gateway[:alias]` for Wren's LLM gateway (`WREN_LLM_GATEWAY_URL`,
+`WREN_LLM_GATEWAY_TOKEN`), or any command that reads a prompt on stdin. Sources come from the
+environment: `SEARXNG_URL`, `EXA_API_KEY` (or `_1..n`), `GEMINI_API_KEY` for videos without
+captions, `WEAVER_CONTACT` for the fetcher (no contact, no page opens), `AUTOBROWSE_URL` and
+`AUTOBROWSE_TOKEN` for the ladder. The ledger folder is `--ledger` or `WEAVER_LEDGER`
+(default `./ledger`); `--writer` or `WEAVER_WRITER` names your file in it.
+
+```sh
+WEAVER_CONTACT=you@example.com npx weaver run "how do staffing firms win repeat clients" --known "referrals convert"
+npx weaver run "..." --kind video --propose "cold email teardown" --by will   # your queries, merged with the model's
+npx weaver run "..." --url https://a.example/report https://b.example/post    # pages you want read, first
+npx weaver run --resume 01M5YS...                                              # from the step it stopped on
+npx weaver trace 01M5YS... --type finding spend                                # the run's records, JSON lines
+npx weaver drop 01M5YT... -r "the quote is a forecast, not a result"           # a call in your name
+npx weaver yield --source exa                                                  # hits, reads, proposed, kept
+npx weaver sources                                                             # what this machine can run
+```
+
+`run` exits 2 when the run stopped on a step that gave up (no model, no source, a block):
+`--resume` continues it once the cause is fixed.
+
 ## Library
 
 ```ts
@@ -38,6 +73,23 @@ import { readPage } from "@wrenautomation/falcon/text";
 const fetcher = new PoliteFetcher(userAgent("you@example.com"));
 const res = await fetcher.get(url);
 const page = readPage(res.text, res.url);
+```
+
+The engine, with your own model and sources:
+
+```ts
+import { claimExtractor } from "@wrenautomation/falcon/document";
+import { registry, run } from "@wrenautomation/weaver/engine";
+import { FilesLedger, ulids } from "@wrenautomation/weaver/ledger";
+import { exa, fetcherSource } from "@wrenautomation/weaver/sources";
+
+const ledger = new FilesLedger("./ledger", "will");
+const sources = registry(exa({ keys }), fetcherSource({ fetcher }));
+const result = await run(
+  { sources, ledger, model, extractor: claimExtractor, clock: () => new Date(), ids: ulids(), runner: "will" },
+  { ask: { text: "how do staffing firms win repeat clients", kind: "web", known: [] }, planFile },
+);
+result.state.findings; // each with its proof: a quote on a page the run read
 ```
 
 ## Develop

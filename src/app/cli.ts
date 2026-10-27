@@ -3,7 +3,8 @@
  * `weaver`: the library from a shell. `fetch <url>` prints a page as text, `read <url>` a video
  * as one markdown document, `list <target>` what a profile, channel or search holds. A file on
  * disk is falcon's (`npx falcon text|page|watch`). Keys come from the environment:
- * COHERE_API_KEY (or COHERE_API_KEY_1..n), GEMINI_API_KEY.
+ * COHERE_API_KEY (or COHERE_API_KEY_1..n), GEMINI_API_KEY. The engine's commands (`run`,
+ * `trace`, `keep`, `drop`, `yield`, `sources`) are in `engine-cli.ts`.
  */
 import { readPage } from "@wrenautomation/falcon/text";
 import type { VideoRead } from "@wrenautomation/falcon/video";
@@ -11,21 +12,11 @@ import { Command } from "commander";
 import { PoliteFetcher, userAgent } from "../fetch/fetcher.js";
 import { flatPlaylist } from "../video/list.js";
 import { readVideo, readYoutube } from "../video/read.js";
+import { addEngineCommands, keys } from "./engine-cli.js";
 
-/** `NAME`, then `NAME_1`, `NAME_2`, ... in order: a fleet of keys for one vendor. */
-function keys(env: NodeJS.ProcessEnv, name: string): string[] {
-  const out: string[] = [];
-  const one = env[name];
-  if (one) out.push(one);
-  for (let i = 1; ; i++) {
-    const k = env[`${name}_${i}`];
-    if (!k) break;
-    out.push(k);
-  }
-  return out;
-}
-
-const program = new Command().name("weaver").description("pages and videos on the web as text");
+const program = new Command()
+  .name("weaver")
+  .description("pages and videos on the web as text; the research engine's runner and ledger");
 
 program
   .command("fetch <url>")
@@ -97,6 +88,8 @@ program
       o.from || o.to ? { start: o.from ?? 1, end: o.to ?? Number.MAX_SAFE_INTEGER } : undefined;
     console.log(JSON.stringify(await flatPlaylist(o.ytDlp, target, range), null, 2));
   });
+
+addEngineCommands(program);
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   console.error(err instanceof Error ? err.message : String(err));
