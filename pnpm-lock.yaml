@@ -12,8 +12,8 @@ importers:
         specifier: 0.4.1
         version: 0.4.1
       '@wrenautomation/raven':
-        specifier: 0.2.0
-        version: 0.2.0
+        specifier: 0.2.1
+        version: 0.2.1
       commander:
         specifier: 15.0.0
         version: 15.0.0
@@ -232,8 +232,8 @@ packages:
     engines: {node: '>=24'}
     hasBin: true
 
-  '@wrenautomation/raven@0.2.0':
-    resolution: {integrity: sha512-R83ea8uYeMIB1dOc2sOoLiLBlRXsFIP+1zR63g8XlmH/C8UhMZjEvkWB3sj22RLxI59nnYM3SYv8Yze8uELd9w==}
+  '@wrenautomation/raven@0.2.1':
+    resolution: {integrity: sha512-cbYLCNVZWsn7xaNDe6eBuaESvIy/GGjeR99cxhEAm81dZJ6M725KxSWL3cvdumHKszNnIO2bddqh/bGWMJJXxw==}
     engines: {node: '>=24'}
     hasBin: true
 
@@ -670,7 +670,7 @@ snapshots:
     transitivePeerDependencies:
       - '@napi-rs/canvas'
 
-  '@wrenautomation/raven@0.2.0':
+  '@wrenautomation/raven@0.2.1':
     dependencies:
       commander: 15.0.0
       zod: 4.6.5
