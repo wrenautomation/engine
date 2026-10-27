@@ -40,9 +40,31 @@ describe("anthropicModel", () => {
     expect(new Headers(seen[0]?.init?.headers).get("authorization")).toContain("k");
     expect(JSON.parse(String(seen[0]?.init?.body))).toMatchObject({
       model: "claude-haiku-5-5",
-      max_tokens: 4096,
+      max_tokens: 8192,
       messages: [{ role: "user", content: "decide" }],
     });
+  });
+  it("says so when the cap cut the answer", async () => {
+    const model = anthropicModel({
+      apiKey: "k",
+      maxTokens: 50,
+      fetchFn: async () =>
+        reply({
+          id: "msg_2",
+          type: "message",
+          role: "assistant",
+          model: "claude-haiku-5-5",
+          content: [{ type: "text", text: '{"findings": [{"text": "half a' }],
+          stop_reason: "max_tokens",
+          stop_sequence: null,
+          usage: { input_tokens: 12, output_tokens: 50 },
+        }),
+    });
+    const err = await model.ask("extract", z.object({})).catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(Transient);
+    expect((err as Error).message).toBe(
+      "anthropic claude-haiku-5-5: the answer was cut at 50 output tokens (max_tokens 50)",
+    );
   });
   it("turns a 429 with retry-after into a Transient, a 400 into a plain error", async () => {
     const at = (status: number, headers: Record<string, string> = {}) =>

@@ -3,6 +3,8 @@
  * raven's shape, the usage the API reports. The SDK's own retries are off: the runner owns
  * retries, so a 429, a 529, a 5xx or a dropped connection comes out as `Transient` with the
  * `retry-after` the API sent. `haiku`, `sonnet` and `opus` name the current Claude 5.5 ids.
+ * The output cap is 8192 tokens: an extract of a long document with its quotes passed 4096,
+ * and an answer the cap cut is an error that says so, not a parse failure.
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { type Model, parseAnswer } from "@wrenautomation/raven";
@@ -16,6 +18,8 @@ export const ANTHROPIC_ALIASES: Readonly<Record<string, string>> = {
 
 /** `haiku` (the default), `sonnet`, `opus`, or a model id as is. */
 export const anthropicId = (spec = "haiku"): string => ANTHROPIC_ALIASES[spec] ?? spec;
+
+export const MAX_TOKENS = 8192;
 
 export function anthropicModel(o: {
   apiKey: string;
@@ -36,7 +40,7 @@ export function anthropicModel(o: {
       try {
         res = await client.messages.create({
           model,
-          max_tokens: o.maxTokens ?? 4096,
+          max_tokens: o.maxTokens ?? MAX_TOKENS,
           messages: [{ role: "user", content: prompt }],
         });
       } catch (err) {
@@ -47,6 +51,10 @@ export function anthropicModel(o: {
         .map((b) => b.text)
         .join("");
       if (!text) throw new Error(`anthropic ${model}: empty answer (${res.stop_reason})`);
+      if (res.stop_reason === "max_tokens")
+        throw new Error(
+          `anthropic ${model}: the answer was cut at ${res.usage.output_tokens} output tokens (max_tokens ${o.maxTokens ?? MAX_TOKENS})`,
+        );
       return {
         value: parseAnswer(text, shape),
         usage: { input: res.usage.input_tokens, output: res.usage.output_tokens },
