@@ -1,7 +1,7 @@
 {
   "name": "@wrenautomation/falcon",
-  "version": "0.3.1",
-  "description": "Files, markup and media in; text and quoted facts out. HTML and PDF to text, a page to title, text and links, video watching with ffmpeg and a vision model, captions and audio to markdown, and a study core whose every claim quotes a page. Fetching is weaver's.",
+  "version": "0.4.0",
+  "description": "Files, markup and media in; text and quoted facts out. HTML and PDF to text, a page to title, text and links, video watching with ffmpeg and a vision model, captions and audio to markdown, a study core whose every claim quotes a page, and the research engine's document side: Document, Finding and Proof, readers by media, the claim extractor. Fetching is weaver's.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/wrenautomation/falcon.git"
@@ -33,6 +33,10 @@
     "./study": {
       "types": "./dist/study/index.d.ts",
       "import": "./dist/study/index.js"
+    },
+    "./document": {
+      "types": "./dist/document/index.d.ts",
+      "import": "./dist/document/index.js"
     }
   },
   "bin": {

@@ -12,6 +12,7 @@ Three doors:
 | `@wrenautomation/falcon/text` | `htmlText`, `pdfText`, `decodeHtml`; `readPage` (HTML to title, text, links, mailtos, tels) |
 | `@wrenautomation/falcon/video` | `watch` a video file: ffmpeg cuts and frames, Cohere speech and on-screen text, Gemini's read of the screen when a key works; shot labels. `captionsBody` renders a caption track per chapter, `hearAudio` transcribes an audio file by clips; both feed the one `VideoRead` shape weaver's readers return |
 | `@wrenautomation/falcon/study` | a study whose every claim quotes a page: query planning, the claim gate, which pages to read, drafts that cite claims, the markdown report |
+| `@wrenautomation/falcon/document` | the research engine's document side: `Document`, `Finding`, `Proof` (zod), readers by media (`html`, `pdf`, `text`; add `video`, `audio`), `claimExtractor` (findings that quote the document, through the same gate), the `Model` seam it takes |
 
 Everything is a pure function of what you pass: bytes, text, a file path, keys.
 What fetches a page or a video is weaver's (`@wrenautomation/weaver`: polite HTTP, robots, the
