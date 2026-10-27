@@ -1,11 +1,12 @@
 /**
  * The filter before the read: for each hit, read or skip, from what the hit shows for free.
  * Hits dedupe by url and keep every source that returned them. The model picks; the read budget
- * caps it; a hit the model did not name is a skip, written down as one.
+ * caps it; a hit the model did not name is a skip, written down as one. The model writes a why
+ * on a read only: a skip's why is fixed text, so the answer pays for the reads alone.
  */
 import { fill, type Model } from "./model.js";
 import { defaultPlanFile } from "./plans/index.js";
-import { lines, renderHits, renderYield } from "./render.js";
+import { lines, renderHits, renderSteer, renderYield } from "./render.js";
 import {
   HitView,
   type HitViewIn,
@@ -17,8 +18,13 @@ import {
 } from "./types.js";
 
 const TriageAnswer = z.object({
-  hits: z.array(z.object({ url: z.string(), read: z.boolean(), why: z.string() })),
+  hits: z.array(
+    z.object({ url: z.string(), read: z.boolean(), why: z.string().nullable().optional() }),
+  ),
 });
+
+/** What a skip says: the model named it and passed. */
+export const SKIPPED = "skipped by the model";
 
 /** One hit per url, sources merged, order of first sight. */
 export function dedupeHits(hits: readonly HitViewIn[]): HitView[] {
@@ -48,6 +54,7 @@ export function triagePrompt(
     n: String(plan.budget.reads),
     ask: plan.ask.text,
     site: plan.ask.site ?? "",
+    steer: renderSteer(plan.ask.steer),
     known: lines(plan.ask.known),
     yield: renderYield(yieldRows),
     hits: renderHits(hits),
@@ -74,10 +81,10 @@ export async function triage(
     const a = said.get(h.url);
     const base = { url: h.url, from: "ai" as const, by: model.id };
     if (!a) return { ...base, read: false, why: "not named by the model" };
-    if (!a.read) return { ...base, read: false, why: a.why };
+    if (!a.read) return { ...base, read: false, why: a.why?.trim() || SKIPPED };
     if (reads >= plan.budget.reads)
       return { ...base, read: false, why: `over the read budget (${plan.budget.reads})` };
     reads++;
-    return { ...base, read: true, why: a.why };
+    return { ...base, read: true, why: a.why?.trim() || "read" };
   });
 }

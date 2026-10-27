@@ -10,8 +10,8 @@ Three calls, one record each:
 
 | Call | In | Out |
 |---|---|---|
-| `plan` | an ask (text, kind, what is known), proposals from people or other models, yield rows from earlier runs | a `Plan`: typed queries, each with `why`, `from` (ai or human) and `by` (model id, plan file or person), the sources it may use, the budget, and a snapshot of what raven was given |
-| `triage` | hits as a source shows them for free (title, channel, length, date, snippet, which sources returned it) | read or skip per hit, with why; the read budget caps it |
+| `plan` | an ask (text, kind, what is known, what the person says: `steer`, rendered first in every prompt), proposals from people or other models, yield rows from earlier runs | a `Plan`: typed queries, each with `why`, `from` (ai or human) and `by` (model id, plan file or person), the sources it may use, the budget, and a snapshot of what raven was given |
+| `triage` | hits as a source shows them for free (title, channel, length, date, snippet, which sources returned it) | read or skip per hit; the model writes a why on a read only (a skip's is fixed text); the read budget caps it |
 | `review` | what a round came to (counts, found lines, the extractor's verdict and gap per read, notes) | the edge: `stop`, `again` (a new round from plan) or `back` (rerun one step), with why |
 
 Ask kinds: `web`, `video`, `channel`, `person`, `site`. Each has a default plan file
@@ -29,6 +29,7 @@ killed and the call fails with why.
 ```sh
 npm i @wrenautomation/raven
 npx raven plan "how do staffing firms win repeat clients" --known "referrals convert"
+npx raven plan "..." --steer "numbers only, skip vendor pages"   # what you say to the model, first in every prompt
 npx raven plan "..." --kind video --propose "cold email teardown" --by will      # yours merge with the model's
 npx raven triage --plan plan.json --hits hits.json
 npx raven review --round round.json

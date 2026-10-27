@@ -5,7 +5,7 @@
  */
 import { fill, type Model } from "./model.js";
 import { defaultPlanFile } from "./plans/index.js";
-import { lines, renderYield } from "./render.js";
+import { lines, renderSteer, renderYield } from "./render.js";
 import {
   type Ask,
   type Plan,
@@ -31,6 +31,7 @@ export function proposePrompt(
     year: String(now.getUTCFullYear()),
     ask: ask.text,
     site: ask.site ?? "",
+    steer: renderSteer(ask.steer),
     known: lines(ask.known),
     yield: renderYield(yieldRows),
   });

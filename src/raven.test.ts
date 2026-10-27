@@ -3,13 +3,14 @@ import { commandModel, fill, parseAnswer, readOutput, scriptedModel } from "./mo
 import { mergeProposals, plan, proposePrompt } from "./plan.js";
 import { defaultPlanFile, PLAN_KINDS } from "./plans/index.js";
 import { review, reviewPrompt } from "./review.js";
-import { dedupeHits, triage } from "./triage.js";
-import { type Ask, type Plan, PlanFile, type Proposal, Round, z } from "./types.js";
+import { dedupeHits, SKIPPED, triage, triagePrompt } from "./triage.js";
+import { Ask, type Plan, PlanFile, type Proposal, Round, z } from "./types.js";
 
 const ask: Ask = {
   text: "how do staffing firms win repeat clients",
   kind: "web",
   known: ["referrals convert"],
+  steer: [],
 };
 
 describe("model seam", () => {
@@ -128,7 +129,7 @@ describe("merge", () => {
     expect(p.snapshot).toEqual({
       at: "2026-10-27T00:00:00.000Z",
       known: ["referrals convert"],
-      planFile: { id: "raven/web", version: 2 },
+      planFile: { id: "raven/web", version: 3 },
       model: "m1",
       yieldRows: 0,
     });
@@ -154,6 +155,46 @@ describe("merge", () => {
     expect(text).toContain("source=exa hits=9 reads=3 proposed=5 kept=2");
     expect(text).toContain("2026");
     expect(text).not.toMatch(/\{\w+\}/);
+    expect(text).not.toContain("The person says");
+  });
+
+  it("renders what the person says first in every prompt, only when there is something", () => {
+    const steered: Ask = { ...ask, steer: ["numbers only", "skip vendor pages"] };
+    const block = "The person says:\n- numbers only\n- skip vendor pages\nKnown already";
+    expect(proposePrompt(steered, defaultPlanFile("web"), [], new Date())).toContain(block);
+    const p: Plan = {
+      ask: steered,
+      round: 1,
+      queries: [],
+      sources: [],
+      budget: { queries: 3, reads: 1, rounds: 2 },
+      snapshot: {
+        at: "",
+        known: [],
+        planFile: { id: "raven/web", version: 3 },
+        model: "m1",
+        yieldRows: 0,
+      },
+    };
+    expect(
+      triagePrompt([{ url: "https://a.example", sources: [] }], p, defaultPlanFile("web"), []),
+    ).toContain(block);
+    const r: Round = {
+      ask: steered,
+      round: 1,
+      budget: p.budget,
+      hits: 0,
+      reads: 0,
+      proposed: 0,
+      kept: 0,
+      found: [],
+      notes: [],
+      verdicts: [],
+    };
+    expect(reviewPrompt(r, defaultPlanFile("web"))).toContain(
+      "The person says:\n- numbers only\n- skip vendor pages\nRound 1",
+    );
+    expect(Ask.parse({ text: "x", kind: "web" }).steer).toEqual([]);
   });
 });
 
@@ -207,6 +248,30 @@ describe("triage", () => {
       [false, "not named by the model"],
     ]);
     expect(await triage([], p, model)).toEqual([]);
+  });
+
+  it("takes a skip without why as the model's skip, and a read without one as a read", async () => {
+    const model = scriptedModel([
+      {
+        hits: [
+          { url: "https://a.example", read: false },
+          { url: "https://b.example", read: true, why: "  " },
+        ],
+      },
+    ]);
+    const out = await triage(
+      [
+        { url: "https://a.example", sources: [] },
+        { url: "https://b.example", sources: [] },
+      ],
+      p,
+      model,
+    );
+    expect(out.map((t) => [t.read, t.why])).toEqual([
+      [false, SKIPPED],
+      [true, "read"],
+    ]);
+    expect(defaultPlanFile("web").triage).toContain('A skip has no "why"');
   });
 });
 

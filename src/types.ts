@@ -19,6 +19,8 @@ export const Ask = z.object({
   kind: AskKind,
   /** Facts already in hand, one line each: the planner looks past them. */
   known: z.array(z.string()).default([]),
+  /** What the person said along the way, one line each: every prompt renders it first. */
+  steer: z.array(z.string()).default([]),
   /** Only for kind `site`, or when a query must stay on one host. */
   site: z.string().optional(),
 });
@@ -128,6 +130,7 @@ export type HitViewIn = z.input<typeof HitView>;
 export const Triage = z.object({
   url: z.string(),
   read: z.boolean(),
+  /** The model's line on a read; a skip's is fixed text, so the model writes none. */
   why: z.string(),
   from: From,
   by: z.string(),

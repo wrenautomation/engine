@@ -56,6 +56,12 @@ withModel(
     .option("-k, --kind <kind>", `one of ${PLAN_KINDS.join(", ")}`, "web")
     .option("--site <host>", "keep every query on one host (kind site)")
     .option("--known <line>", "a fact already in hand; repeat", more, [] as string[])
+    .option(
+      "--steer <line>",
+      "what you say to the model, rendered first; repeat",
+      more,
+      [] as string[],
+    )
     .option("--propose <terms>", "a query of your own; repeat", more, [] as string[])
     .option("--by <name>", "who proposed the --propose queries", who())
     .option("--plan-file <path>", "a tuned plan file (JSON) instead of the default")
@@ -69,6 +75,7 @@ withModel(
       kind: string;
       site?: string;
       known: string[];
+      steer: string[];
       propose: string[];
       by: string;
       planFile?: string;
@@ -78,7 +85,13 @@ withModel(
     },
   ) => {
     const kind = AskKind.parse(o.kind);
-    const ask = { text, kind, known: o.known, ...(o.site ? { site: o.site } : {}) };
+    const ask = {
+      text,
+      kind,
+      known: o.known,
+      steer: o.steer,
+      ...(o.site ? { site: o.site } : {}),
+    };
     const proposals: Proposal[] = o.propose.length
       ? [
           {

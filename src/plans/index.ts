@@ -7,13 +7,13 @@ import { type AskKind, type PlanFile, PlanFile as PlanFileShape } from "../types
 const SHAPE_QUERIES = `Return ONLY a JSON object, no prose, exactly this shape:
 {"queries": [{"terms": "...", "why": "..."}]}`;
 const SHAPE_HITS = `Return ONLY a JSON object, no prose, exactly this shape:
-{"hits": [{"url": "...", "read": true, "why": "..."}]}`;
+{"hits": [{"url": "...", "read": true, "why": "..."}, {"url": "...", "read": false}]}`;
 const SHAPE_EDGE = `Return ONLY a JSON object, no prose, exactly this shape:
 {"next": "stop", "why": "..."}
 where "next" is "stop", "again" (a new round from plan) or "back" (rerun one step of this round, named in "to": "plan", "fetch", "triage", "read" or "extract").`;
 
 const CONTEXT = `Ask: {ask}
-Known already (look past these):
+{steer}Known already (look past these):
 {known}
 What yielded before (hits, reads, proposed, kept):
 {yield}`;
@@ -21,7 +21,7 @@ What yielded before (hits, reads, proposed, kept):
 const TRIAGE_RULES = `- One entry per hit, with its url as given. Mark "read": true for at most {n}.
 - Read a hit when what it shows for free (title, snippet, channel, length, date) says it holds what the ask needs and is not known already.
 - A hit returned by more than one source is a good sign, not a duplicate.
-- "why" is one short line a person reads to agree or not.`;
+- "why" on a read only: one short line a person reads to agree or not. A skip has no "why".`;
 
 const REVIEW = `You decide what happens after one round of research.
 
@@ -35,7 +35,7 @@ Rules:
 - "why" is one short line a person reads to agree or not.
 
 Ask: {ask}
-Round {round} of at most {rounds}. Hits {hits}, reads {reads}, findings proposed {proposed}, kept {kept}.
+{steer}Round {round} of at most {rounds}. Hits {hits}, reads {reads}, findings proposed {proposed}, kept {kept}.
 Found:
 {found}
 Read (quality: rich, thin, off or empty; then the gap, what the ask still lacks):
@@ -46,7 +46,7 @@ Notes:
 const web: PlanFile = {
   id: "raven/web",
   kind: "web",
-  version: 2,
+  version: 3,
   propose: `You plan web searches for one research ask.
 
 ${SHAPE_QUERIES}
@@ -78,7 +78,7 @@ Hits:
 const video: PlanFile = {
   id: "raven/video",
   kind: "video",
-  version: 2,
+  version: 3,
   propose: `You plan video searches for one research ask: talks, walkthroughs, interviews and reviews on YouTube and podcast feeds.
 
 ${SHAPE_QUERIES}
@@ -110,7 +110,7 @@ Hits:
 const channel: PlanFile = {
   id: "raven/channel",
   kind: "channel",
-  version: 2,
+  version: 3,
   propose: `You plan searches that find the people and channels worth following for one research ask: creators, newsletters, podcasts, forums.
 
 ${SHAPE_QUERIES}
@@ -140,7 +140,7 @@ Hits:
 const person: PlanFile = {
   id: "raven/person",
   kind: "person",
-  version: 2,
+  version: 3,
   propose: `You plan searches about one person or company for one research ask: what they do, what they said, what others say about them.
 
 ${SHAPE_QUERIES}
@@ -172,7 +172,7 @@ Hits:
 const site: PlanFile = {
   id: "raven/site",
   kind: "site",
-  version: 2,
+  version: 3,
   propose: `You plan searches inside one website for one research ask. Every query runs on {site} only.
 
 ${SHAPE_QUERIES}

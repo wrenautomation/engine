@@ -4,6 +4,10 @@ import type { HitView, YieldRow } from "./types.js";
 export const lines = (xs: readonly string[], none = "(nothing)"): string =>
   xs.length ? xs.map((x) => `- ${x}`).join("\n") : none;
 
+/** "The person says:" and their lines, or nothing: a prompt pays for the heading only when there is one. */
+export const renderSteer = (steer: readonly string[] | undefined): string =>
+  steer?.length ? `The person says:\n${lines(steer)}\n` : "";
+
 /** One line per row, the keys it has first: `source=exa channel=... hits=12 reads=4 proposed=9 kept=3`. */
 export function renderYield(rows: readonly YieldRow[]): string {
   if (!rows.length) return "(no history yet)";

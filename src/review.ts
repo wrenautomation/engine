@@ -5,7 +5,7 @@
  */
 import { fill, type Model } from "./model.js";
 import { defaultPlanFile } from "./plans/index.js";
-import { lines } from "./render.js";
+import { lines, renderSteer } from "./render.js";
 import { type Edge, type PlanFile, type Round, Step, type Verdict, z } from "./types.js";
 
 const EdgeAnswer = z.object({
@@ -19,6 +19,7 @@ const verdictLine = (v: Verdict): string => `${v.url}: ${v.quality}${v.gap ? `. 
 export function reviewPrompt(round: Round, planFile: PlanFile): string {
   return fill(planFile.review, {
     ask: round.ask.text,
+    steer: renderSteer(round.ask.steer),
     round: String(round.round),
     rounds: String(round.budget.rounds),
     hits: String(round.hits),
