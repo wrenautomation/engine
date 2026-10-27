@@ -1,6 +1,6 @@
 {
   "name": "@wrenautomation/weaver",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "The web in, documents out. Polite HTTP fetching with robots and a fetch ladder up to a browser; YouTube, any other video and podcasts read from a URL through yt-dlp and @wrenautomation/falcon; what a channel or search holds. The source interface, runner and ledger of Wren's research engine come next.",
   "license": "PolyForm-Shield-1.0.0",
   "repository": {
