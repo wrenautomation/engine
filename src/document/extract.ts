@@ -46,7 +46,7 @@ Return ONLY a JSON object, no prose, exactly this shape:
 
 Rules:
 - At most {max} findings, the most useful first. Only findings that serve the ask and are not known already.
-- text: one plain sentence a person would say out loud, at most {words} words. Specific: a number, a named practice, a stated cause. Say who says it ("A 2025 survey of 400 firms found ...", "The speaker says ...").
+- text: one plain sentence a person would say out loud, at most {words} words. Specific: a number, a named practice, a stated cause. State the fact itself, never "The document says" or "The page notes". Name the source only when it carries weight ("A 2025 survey of 400 firms found ...", "IANA says ...").
 - quote: the exact words from the document that the finding rests on, copied character for character, 5 to 60 words.
 - Every number in the text must appear in the quote.
 - A company's marketing about itself is not a fact about the market.
