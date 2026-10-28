@@ -55,7 +55,8 @@ weaver plan "how do staffing firms win repeat clients" --known "referrals conver
 weaver brief 01M5YS...                              # the ask, budget, sources, what is open, hits, findings, cost
 weaver search 01M5YS... "staffing repeat client rate" --why "the ask's words"       # one query, then every searcher
 echo '[{"terms":"...","why":"..."},{"terms":"...","why":"..."}]' | weaver search 01M5YS...   # a batch
-weaver search 01M5YS... < tree.json                 # a query tree: {facets: [{name, why, tries: [[{terms, why}], [...]]}]}
+weaver search 01M5YS... < tree.json                 # a query tree, one tier: {facets: [{name, why, tries: [[{terms, why}], [...]]}]}
+weaver search 01M5YS... < tree.json                 # after triage, the same file: the next try of each facet still thin in kept hits
 weaver add call 01M5YS... 01M5YT... keep --why "a survey with numbers"               # triage: a hit kept
 weaver add call 01M5YS... 01M5YU... drop --why "a vendor page"
 weaver open 01M5YS... 01M5YT... --url https://a.example/report --why "numbers"      # keep these, read every kept hit
@@ -91,13 +92,17 @@ the person's: `--human [name]`). Every `add` takes `--why` where a decision need
 
 A round's search is a tree when the agent gives one: facets (the sides a researcher covers: a
 number, a how, a who, a counter-view, a primary source; the plan file's `tree` guide names them),
-each with tries in order, each try a list of queries. `search` runs every facet's first try in
-one fetch, then the next try of each facet still thin (fewer new hits than the guide's `thin`,
-3 by default), until every facet has enough or runs out of tries. A page a second query brings
-back is a `found` record on the first hit, never a second hit; `brief.hits.uncalled` lists each
-hit with the facets that found it, most first, and `brief.tree` shows every try with what it
-wrote. A facet whose every try wrote nothing is a gap; a single thin try is not. A guide facet
-no query served is named in the note. `learn --thin <n>` or `--tree <file>` tunes the guide.
+each with tries in order, each try a list of queries. `search` runs one tier per call, in one
+fetch: the first call, every facet's first try; each call after, the next try of each facet
+with fewer kept hits than the guide's `thin` (3 by default). A facet at `thin` is done; a facet
+with hits no call has named waits for triage; a facet out of tries and still thin is a gap,
+written once. The yield a try falls through on is what triage kept, never what a searcher
+returned: every searcher returns a page. `--all` runs every facet's next try, whatever triage
+kept. A page a second query brings back is a `found` record on the first hit, never a second
+hit, and it counts as kept for every facet that reached it. `brief.hits.uncalled` lists each
+hit with the facets that found it, most first; `brief.tree` shows every try with what it wrote,
+`kept` and `uncalled` per facet. A guide facet no query served is named in the note.
+`learn --thin <n>` or `--tree <file>` tunes the guide.
 
 The agent reads for itself: `show <run> <document>` prints a document's stored text, `add
 finding` writes what it read behind the same quote gate, `add check` its own check. `extract` and

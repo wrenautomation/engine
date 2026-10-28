@@ -46,9 +46,17 @@ records show done.
    counter-view, a primary source; add a facet the ask needs), each with 2 or 3 tries in the
    order you expect to work: the plain words first, then a narrower angle (a site, a year, a
    synonym the trade uses, a forum, a filing). Each query's why says what it would prove. Show
-   the tree to the person before you run it. `search` runs every first try, then the next try
-   of each facet that stayed thin, and prints `tree`: what each try wrote, which facets reached
-   enough, which guide facets you did not cover. The budget is a guard rail, not a cap.
+   the tree to the person before you run it. `search < tree.json` runs one tier: the first
+   time, every facet's first try. After you triage, the same command with the same file runs
+   the next try of each facet with fewer kept hits than the guide's `thin` (3); a facet at
+   `thin` is done, a facet out of tries is a gap, a facet with uncalled hits waits. So the
+   tree falls through on what you kept, never on what a searcher returned (a searcher always
+   returns a page). `--all` runs every facet's next try at once. `tree` in the output shows
+   each try, what it wrote, `kept`, `uncalled`, and which guide facets you did not cover. A
+   trade word that sits on both sides of a market ("agency", "coach", "setter") pulls the
+   other side: put a buyer marker in the terms ("coaches who hired", not "appointment
+   setting"), and read the first tries' titles in `brief` before you write the next. The
+   budget is a guard rail, not a cap.
 
    ```json
    {"facets": [
@@ -60,7 +68,8 @@ records show done.
    ]}
    ```
 2. **Triage.** `brief` lists `hits.uncalled` with title, snippet and `facets`: the facets whose
-   queries found it, most first. A page two facets found is worth a look first. Call every one:
+   queries found it, most first. A page two facets found is worth a look first. Call every one
+   (the tree's next tier waits on it):
    keep what can hold a fact that answers the ask, drop the rest (vendor pages, listicles, a
    page the ask does not need). One why per call, short. A page you know of yourself: `open --url`.
 3. **Read.** `open`, then `show` each document and read it. Write each fact that answers the
