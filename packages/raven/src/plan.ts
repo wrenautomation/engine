@@ -3,7 +3,8 @@
  * or a second model are others, and all merge the same way. Human queries come first and never
  * count against the budget: someone chose them.
  */
-import { fill, type Model } from "./model.js";
+import type { Model } from "@wrenautomation/models";
+import { fill } from "./model.js";
 import { defaultPlanFile } from "./plans/index.js";
 import { lines, renderSteer, renderYield } from "./render.js";
 import {

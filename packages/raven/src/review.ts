@@ -3,7 +3,8 @@
  * rail, not a stop rule: when it is spent raven stops and says so; before that the model decides
  * and says why. The runner takes the edge; raven never loops.
  */
-import { fill, type Model } from "./model.js";
+import type { Model } from "@wrenautomation/models";
+import { fill } from "./model.js";
 import { defaultPlanFile } from "./plans/index.js";
 import { lines, renderSteer } from "./render.js";
 import { type Edge, type PlanFile, type Round, Step, type Verdict, z } from "./types.js";

@@ -4,7 +4,8 @@
  * caps it; a hit the model did not name is a skip, written down as one. The model writes a why
  * on a read only: a skip's why is fixed text, so the answer pays for the reads alone.
  */
-import { fill, type Model } from "./model.js";
+import type { Model } from "@wrenautomation/models";
+import { fill } from "./model.js";
 import { defaultPlanFile } from "./plans/index.js";
 import { lines, renderHits, renderSteer, renderYield } from "./render.js";
 import {

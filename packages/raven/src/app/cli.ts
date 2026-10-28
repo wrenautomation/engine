@@ -2,21 +2,23 @@
 /**
  * `raven`: the planner from a shell. `plan` turns an ask into queries, `triage` marks hits read
  * or skip, `review` picks the edge after a round, `plans` prints a default plan file to tune.
- * The model is a command that reads the prompt on stdin and prints the answer: `claude -p` by
- * default (RAVEN_MODEL or --model to change it), so Claude Code is the planner's model in any
- * terminal. Everything is JSON on stdout.
+ * The model is a spec from `@wrenautomation/models` (`claude-code` by default, `anthropic:sonnet`,
+ * `gateway`...) or any command that reads the prompt on stdin and prints the answer; RAVEN_MODEL
+ * or --model changes it. Everything is JSON on stdout.
  */
 import { readFileSync } from "node:fs";
 import { userInfo } from "node:os";
+import type { Model } from "@wrenautomation/models";
+import { commandModel } from "@wrenautomation/models/command";
+import { modelFromSpec, SPEC_NAMES } from "@wrenautomation/models/spec";
 import { Command } from "commander";
-import { commandModel, type Model } from "../model.js";
 import { plan } from "../plan.js";
 import { defaultPlanFile, PLAN_KINDS } from "../plans/index.js";
 import { review } from "../review.js";
 import { triage } from "../triage.js";
 import { AskKind, HitView, Plan, PlanFile, type Proposal, Round, YieldRow, z } from "../types.js";
 
-const DEFAULT_MODEL = "claude -p --output-format json";
+const DEFAULT_MODEL = "claude-code";
 
 const readJson = <T>(path: string, shape: z.ZodType<T>): T =>
   shape.parse(JSON.parse(readFileSync(path, "utf8")));
@@ -34,15 +36,19 @@ const who = (): string => {
 interface ModelOptions {
   model: string | false;
 }
-const modelOf = (o: ModelOptions): Model | null =>
-  o.model === false
-    ? null
-    : commandModel(o.model, o.model === DEFAULT_MODEL ? "claude-code" : o.model);
+/** A spec name (`claude-code`, `anthropic:sonnet`) goes to models; anything else is a command. */
+const modelOf = (o: ModelOptions): Model | null => {
+  if (o.model === false) return null;
+  const name = o.model.split(":")[0] ?? "";
+  return (SPEC_NAMES as readonly string[]).includes(name)
+    ? modelFromSpec(o.model)
+    : commandModel(o.model);
+};
 const withModel = (c: Command): Command =>
   c
     .option(
-      "--model <command>",
-      "a command: prompt on stdin, answer on stdout",
+      "--model <spec>",
+      "a models spec (claude-code, anthropic:sonnet, gateway) or a command: prompt on stdin, answer on stdout",
       process.env.RAVEN_MODEL ?? DEFAULT_MODEL,
     )
     .option("--no-model", "no model call: only what is given by hand");

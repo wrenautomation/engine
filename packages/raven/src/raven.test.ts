@@ -1,10 +1,11 @@
+import { scriptedModel } from "@wrenautomation/models";
 import { describe, expect, it } from "vitest";
-import { commandModel, fill, parseAnswer, readOutput, scriptedModel } from "./model.js";
+import { fill } from "./model.js";
 import { mergeProposals, plan, proposePrompt } from "./plan.js";
 import { defaultPlanFile, PLAN_KINDS } from "./plans/index.js";
 import { review, reviewPrompt } from "./review.js";
 import { dedupeHits, SKIPPED, triage, triagePrompt } from "./triage.js";
-import { Ask, type Plan, PlanFile, type Proposal, Round, z } from "./types.js";
+import { Ask, type Plan, PlanFile, type Proposal, Round } from "./types.js";
 
 const ask: Ask = {
   text: "how do staffing firms win repeat clients",
@@ -13,51 +14,7 @@ const ask: Ask = {
   steer: [],
 };
 
-describe("model seam", () => {
-  it("parses the first JSON object out of fences and prose", () => {
-    const shape = z.object({ queries: z.array(z.string()) });
-    expect(parseAnswer('Sure:\n```json\n{"queries":["a"]}\n```\nDone.', shape)).toEqual({
-      queries: ["a"],
-    });
-    expect(() => parseAnswer("no json here", shape)).toThrow(/no answer/);
-    expect(() => parseAnswer('{"queries": 1}', shape)).toThrow(/no answer/);
-  });
-
-  it("finds the object by brace balance: stray braces, nested objects and braces in strings", () => {
-    const shape = z.object({ hits: z.array(z.object({ url: z.string(), read: z.boolean() })) });
-    const text =
-      'Notes {not json} then {"meta": {"n": 1}, "hits": [{"url": "https://a/{x}", "read": true}]} and {"hits": []}';
-    expect(parseAnswer(text, shape)).toEqual({ hits: [{ url: "https://a/{x}", read: true }] });
-    expect(parseAnswer('{"a": "}"} {"hits": []}', shape)).toEqual({ hits: [] });
-  });
-
-  it("a command answers from stdout; a command that hangs is killed and the ask fails with why", async () => {
-    const shape = z.object({ ok: z.boolean() });
-    const echo = commandModel("cat", "cat");
-    expect(await echo.ask('{"ok": true}', shape)).toEqual({ value: { ok: true } });
-    const hung = commandModel("sleep 30", "sleep", 300);
-    await expect(hung.ask("x", shape)).rejects.toThrow(/no answer in 0s/);
-  });
-
-  it("reads Claude Code's JSON envelope for the text and the usage, else the text as is", () => {
-    const printed = JSON.stringify({
-      type: "result",
-      result: 'ok {"queries": ["a"]}',
-      total_cost_usd: 0.012,
-      usage: { input_tokens: 10, output_tokens: 5 },
-    });
-    expect(readOutput(printed)).toEqual({
-      text: 'ok {"queries": ["a"]}',
-      usage: { input: 10, output: 5, usd: 0.012 },
-    });
-    expect(readOutput('{"queries": ["a"]}')).toEqual({ text: '{"queries": ["a"]}' });
-  });
-
-  it("answers with a value and no usage from a scripted model", async () => {
-    const m = scriptedModel([{ a: 1 }]);
-    expect(await m.ask("p", z.object({ a: z.number() }))).toEqual({ value: { a: 1 } });
-  });
-
+describe("fill", () => {
   it("fills marks and leaves unknown ones", () => {
     expect(fill("{a} and {b}", { a: "x" })).toBe("x and {b}");
   });
