@@ -1,5 +1,6 @@
 /**
- * The engine from a shell: `run` an ask, `trace` a run, `keep` or `drop` a finding by hand,
+ * The engine from a shell: `run` an ask, `trace` a run, `keep` or `drop` a finding by hand, `steer`
+ * a run, say a `gap`, send it `back` to a step,
  * `yield` per source, `sources` on this machine. Every command prints JSON, so Claude Code
  * can drive it. The ledger is a folder (`--ledger`, WEAVER_LEDGER, default `./ledger`); a
  * writer names this terminal's file in it (`--writer`, WEAVER_WRITER, default the user name).
@@ -22,6 +23,7 @@ import {
   PLAN_KINDS,
   type PlanFile,
   type Proposal,
+  Step as RavenStep,
 } from "@wrenautomation/raven";
 import type { Command } from "commander";
 import { fold, registry, run, type Source, type Sources, type StepEvent } from "../engine/index.js";
@@ -213,7 +215,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
 
   common(program.command("run [ask]"))
     .description(
-      "run an ask through plan, fetch, triage, read, extract and review; prints the run as JSON",
+      "run an ask through plan, fetch, triage, read, extract, check and review; prints the run as JSON",
     )
     .option("--kind <kind>", `one of ${PLAN_KINDS.join(", ")}`, "web")
     .option("--known <line...>", "what is known already, one line each")
@@ -433,6 +435,52 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
         from: "human",
         by: o.writer,
         text,
+      };
+      await ledger.append(record);
+      console.log(JSON.stringify(record));
+    });
+
+  common(program.command("gap <run> <text>"))
+    .description("say what the run still lacks: the round's review and the next plan read it")
+    .action(async (runId: string, text: string, o: Common) => {
+      const ledger = ledgerOf(o);
+      const state = fold(runId, await ledger.trace(runId));
+      if (!state.records.length) throw new Error(`no run ${runId}`);
+      const record: LedgerRecord = {
+        type: "gap",
+        id: ulids()(),
+        run: runId,
+        round: state.round,
+        at: new Date().toISOString(),
+        from: "human",
+        by: o.writer,
+        note: text,
+      };
+      await ledger.append(record);
+      console.log(JSON.stringify(record));
+    });
+
+  common(program.command("back <run> <step>"))
+    .description(
+      "send the run back to one step of its round (plan, fetch, triage, read, extract); `run --resume` goes on from there",
+    )
+    .requiredOption("-r, --reason <why>", "why")
+    .action(async (runId: string, step: string, o: Common & { reason: string }) => {
+      const to = RavenStep.parse(step);
+      const ledger = ledgerOf(o);
+      const state = fold(runId, await ledger.trace(runId));
+      if (!state.records.length) throw new Error(`no run ${runId}`);
+      const record: LedgerRecord = {
+        type: "edge",
+        id: ulids()(),
+        run: runId,
+        round: state.round,
+        at: new Date().toISOString(),
+        from: "human",
+        by: o.writer,
+        next: "back",
+        to,
+        why: o.reason,
       };
       await ledger.append(record);
       console.log(JSON.stringify(record));

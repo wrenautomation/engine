@@ -96,6 +96,7 @@ withModel(
       kind,
       known: o.known,
       steer: o.steer,
+      open: [],
       ...(o.site ? { site: o.site } : {}),
     };
     const proposals: Proposal[] = o.propose.length

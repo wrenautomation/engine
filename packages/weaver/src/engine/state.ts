@@ -7,9 +7,11 @@ import { Plan } from "@wrenautomation/raven";
 import { latestCalls, ofType } from "../ledger/ledger.js";
 import {
   type CallRecord,
+  type CheckRecord,
   type DocumentRecord,
   type EdgeRecord,
   type FindingRecord,
+  type GapRecord,
   type HitRecord,
   type LedgerRecord,
   type QueryRecord,
@@ -48,6 +50,10 @@ export interface RunState {
   edges: EdgeRecord[];
   /** What the person said along the way, oldest first. */
   steers: SteerRecord[];
+  /** What a step or a person said a round lacks. */
+  gaps: GapRecord[];
+  /** The sample check's word on each finding it checked. */
+  checks: CheckRecord[];
   /** Keys of every hit in the run: a hit seen again in a later round is not a new record. */
   seen: Set<string>;
   /** The latest call on each hit and finding. */
@@ -99,6 +105,8 @@ export function fold(run: string, records: readonly LedgerRecord[]): RunState {
     spends: ofType(records, "spend"),
     edges: ofType(records, "edge"),
     steers: ofType(records, "steer"),
+    gaps: ofType(records, "gap"),
+    checks: ofType(records, "check"),
     seen: new Set(hits.map((h) => h.key)),
     called: latestCalls(records),
   };
@@ -151,6 +159,28 @@ export const toRead = (state: RunState, round: number): HitRecord[] => {
   return state.hits.filter(
     (h) => h.round === round && state.called.get(h.id) === "keep" && !read.has(h.id),
   );
+};
+
+/**
+ * The kept findings of a round to check, at most `n`, spread across documents: each document's
+ * first unchecked finding, then each one's second, and so on. A finding with no quote, or one
+ * checked already, is not in it. Findings come in record order, so the sample is the same on a rerun.
+ */
+export const toCheck = (state: RunState, round: number, n: number): FindingRecord[] => {
+  const checked = new Set(state.checks.map((c) => c.on));
+  const done = state.checks.filter((c) => c.round === round).length;
+  const byDoc = new Map<string, FindingRecord[]>();
+  for (const f of state.findings)
+    if (f.round === round && f.proof.quote && !checked.has(f.id) && kept(state, f))
+      byDoc.set(f.document, [...(byDoc.get(f.document) ?? []), f]);
+  const out: FindingRecord[] = [];
+  const lists = [...byDoc.values()];
+  for (let i = 0; out.length < n - done && lists.some((l) => i < l.length); i++)
+    for (const l of lists) {
+      const f = l[i];
+      if (f && out.length < n - done) out.push(f);
+    }
+  return out;
 };
 
 /** The documents of a round without a verdict: the extract step has not finished them. */

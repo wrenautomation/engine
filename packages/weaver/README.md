@@ -20,9 +20,9 @@ Three more doors run the research engine (wren's `designs/2026-10-26-research-en
 
 | Import | Does |
 |---|---|
-| `@wrenautomation/weaver/engine` | `Source` (a name, `search` and/or `open`, a cost), `registry` and the plan's allow-list, `run(deps, options)`: plan, fetch, triage, read, extract, review, round after round until raven's edge says stop; `fold` rebuilds a run's state from its records, so a run resumes from the step it stopped on; `Transient`, the failure worth another try; raven's `Model`, `Ask`, `PlanFile` and record shapes re-exported, so a host pins weaver alone |
+| `@wrenautomation/weaver/engine` | `Source` (a name, `search` and/or `open`, a cost), `registry` and the plan's allow-list, `run(deps, options)`: plan, fetch, triage, read, extract, check (a sample of findings against their documents), review, round after round until raven's edge says stop; `fold` rebuilds a run's state from its records, so a run resumes from the step it stopped on; `Transient`, the failure worth another try; raven's `Model`, `Ask`, `PlanFile` and record shapes re-exported, so a host pins weaver alone |
 | `@wrenautomation/weaver/sources` | `searxng`, `exa` (search), `youtube` (search and read, yt-dlp), `fetcher` (open, the polite fetcher), `ladder` (open, autobrowse's fetch ladder up to a browser), `paste` (a person's URLs), `ledger` (hits earlier runs saw) |
-| `@wrenautomation/weaver/ledger` | the records (`query`, `hit`, `document`, `finding`, `verdict`, `call`, `spend`, `snapshot`, `edge`, `done`), `FilesLedger` (a folder: `runs/<run>/<writer>.jsonl`, `plans/<kind>.json`), `MemoryLedger`, yield rows per source, person, channel and kind |
+| `@wrenautomation/weaver/ledger` | the records (`query`, `hit`, `document`, `finding`, `verdict`, `call`, `spend`, `snapshot`, `edge`, `done`, `steer`, `gap`, `check`), `FilesLedger` (a folder: `runs/<run>/<writer>.jsonl`, `plans/<kind>.json`), `MemoryLedger`, yield rows per source, person, channel and kind |
 
 Every record carries `from` (ai, human or tool) and `by` (a model id, a source, a person). A
 person's pasted URL, a person's keep or drop, are the same records as the model's. The plan
@@ -65,6 +65,8 @@ npx weaver run --resume 01M5YS... --url https://a.example/report             # f
 npx weaver run "..." --pause                                                   # stop after each round's review
 npx weaver steer 01M5YS... "numbers only; skip vendor pages"                   # what you say, first in every prompt after
 npx weaver run --resume 01M5YS... --pause                                      # the next round, steered
+npx weaver gap 01M5YS... "no UK numbers yet"                                   # what the run lacks: its review and next plan read it
+npx weaver back 01M5YS... fetch -r "searxng was down"                          # rerun one step of the round; then --resume
 npx weaver trace 01M5YS... --type finding spend                                # the run's records, JSON lines
 npx weaver drop 01M5YT... -r "the quote is a forecast, not a result"           # a call in your name
 npx weaver yield --source exa                                                  # hits, reads, proposed, kept
@@ -87,6 +89,17 @@ document, with those findings known (falcon's `Cut`; the `spend` carries both ca
 you (or a Claude Code session) read the trace, `keep` or `drop` findings, and `steer` the run
 with free text. Every `steer` record is rendered first in every prompt of the rounds after it,
 under "The person says:". `--resume` goes on.
+
+The steps talk in English records. A query every searcher answered with no new hit, and a kept
+hit no source could open, each write a `gap`; so does `weaver gap`. The round's review reads
+the gaps; the next round's plan reads them, and the review's why on `again`, under "The last
+round left open". `weaver back` writes a person's edge: the fold takes it like raven's.
+
+The check step reads a sample of the round's kept findings (`budget.checks`, 3 by default;
+spread across documents) against the text around each quote. The extract gate proves a quote is
+on the page; the check asks whether it backs the sentence. A finding that fails gets a `check`
+record and a drop call; `weaver keep` puts it back. The review sees every check, and a finding
+carries its document's date, so the review weighs age as the plan file's `age` line says.
 
 ## Library
 

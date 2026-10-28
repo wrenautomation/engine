@@ -43,7 +43,7 @@ const opener = (fail: Set<string> = new Set()): Source => ({
 const planFile = {
   ...defaultPlanFile("web"),
   sources: ["fake", "opener"],
-  budget: { queries: 4, reads: 3, rounds: 3 },
+  budget: { queries: 4, reads: 3, rounds: 3, checks: 0 },
 };
 
 const answers = {
@@ -168,12 +168,14 @@ describe("runner", () => {
       "1:triage:ok",
       "1:read:ok",
       "1:extract:ok",
+      "1:check:ok",
       "1:review:ok",
       "2:plan:ok",
       "2:fetch:ok",
       "2:triage:ok",
       "2:read:ok",
       "2:extract:ok",
+      "2:check:ok",
       "2:review:ok",
     ]);
     const s = out.state;
@@ -456,7 +458,9 @@ describe("runner", () => {
     expect(second.finished).toBe(true);
     expect(second.state.steers.map((x) => x.text)).toEqual(["skip vendor pages"]);
     const plan2 = prompts[5] ?? "";
-    expect(plan2).toContain("The person says:\n- numbers only\n- skip vendor pages\nKnown already");
+    expect(plan2).toContain(
+      "The person says:\n- numbers only\n- skip vendor pages\nThe last round left open (plan for these first):\n- thin\nKnown already",
+    );
     expect(second.state.snapshot?.ask.steer).toEqual(["numbers only", "skip vendor pages"]);
     const extract4 = prompts[7] ?? "";
     expect(extract4).toContain("The person says:\n- numbers only\n- skip vendor pages\n");
@@ -514,5 +518,139 @@ describe("runner", () => {
     expect(out.state.documents).toHaveLength(3);
     expect(out.state.calls.map((c) => c.verdict)).toEqual(["keep", "keep", "keep"]);
     expect(out.state.queries.map((q) => q.from)).toEqual(["human", "human"]);
+  });
+});
+
+describe("gaps, checks and age", () => {
+  const dated: Source = {
+    name: "dated",
+    kind: "open",
+    cost: "free",
+    open: async (h) => {
+      const text = pages[h.url];
+      if (!text) return null;
+      return {
+        url: h.url,
+        media: "text",
+        text,
+        ...(h.url.endsWith("one") ? { date: "2025-03-01" } : {}),
+      };
+    },
+  };
+  const search: Source = {
+    name: "fake",
+    kind: "search",
+    cost: "free",
+    search: async (q) =>
+      (
+        ({
+          a: ["https://a.example/one"],
+          d: ["https://a.example/three", "https://c.example/missing"],
+        }) as Record<string, string[]>
+      )[q.terms]?.map((url) => ({ url })) ?? [],
+  };
+  /** Answers by the prompt's kind, so parallel calls need no order. */
+  const routed = (prompts: string[]) =>
+    fakeModel((p) => {
+      prompts.push(p);
+      const a = p.startsWith("You plan")
+        ? { queries: ["a", "zzz", "d"].map((terms) => ({ terms, why: "w" })) }
+        : p.startsWith("You decide which search hits")
+          ? {
+              hits: [
+                "https://a.example/one",
+                "https://a.example/three",
+                "https://c.example/missing",
+              ].map((url) => ({ url, read: true, why: "y" })),
+            }
+          : p.startsWith("You pull facts") && p.includes("a.example/one")
+            ? {
+                findings: [
+                  {
+                    text: "38% of placements came from repeat clients.",
+                    quote: "38% of placements came from repeat clients",
+                  },
+                ],
+                quality: "rich",
+              }
+            : p.startsWith("You pull facts")
+              ? {
+                  findings: [
+                    {
+                      text: "Referrals cost half what ads cost.",
+                      quote: "referrals were cheaper than ads by a wide margin",
+                    },
+                  ],
+                  quality: "thin",
+                }
+              : p.startsWith("You check") && p.includes("Sentence: 38%")
+                ? { ok: true, why: "the quote says so" }
+                : p.startsWith("You check")
+                  ? { ok: false, why: "cheaper is not half" }
+                  : { next: "stop", why: "enough" };
+      return JSON.stringify(a);
+    }, "m");
+
+  it("writes gaps, checks a sample, drops what fails, and shows it all to the review", async () => {
+    const prompts: string[] = [];
+    const d: Deps = { ...deps(routed(prompts)), sources: registry(search, dated) };
+    const file = {
+      ...planFile,
+      sources: ["fake", "dated"],
+      budget: { ...planFile.budget, checks: 2 },
+    };
+    const out = await run(d, { ask: { text: "repeat clients", kind: "web" }, planFile: file });
+    const s = out.state;
+    expect(s.gaps.map((g) => [g.step, g.note])).toEqual([
+      ["fetch", 'query "zzz": no new hits'],
+      ["read", "no source could open https://c.example/missing"],
+    ]);
+    expect(s.findings.find((f) => f.text.startsWith("38%"))?.date).toBe("2025-03-01");
+    expect(s.checks.map((c) => c.ok)).toEqual([true, false]);
+    const failed = s.findings.find((f) => f.text.startsWith("Referrals"));
+    expect(s.called.get(failed?.id ?? "")).toBe("drop");
+    const review = prompts.find((p) => p.startsWith("You decide what happens")) ?? "";
+    expect(review).toContain(
+      "Found (the source's date in brackets when it gives one):\n- 38% of placements came from repeat clients. [2025-03-01]\nRead",
+    );
+    expect(review).toContain(
+      '- fetch: query "zzz": no new hits\n- read: no source could open https://c.example/missing',
+    );
+    expect(review).toContain("- failed: Referrals cost half what ads cost. (cheaper is not half)");
+    expect(review).toContain("- Age: Prices, tools and numbers that move");
+  });
+
+  it("takes a person's back edge after a stop, and a rerun repeats no gap and no check", async () => {
+    const prompts: string[] = [];
+    const d: Deps = { ...deps(routed(prompts)), sources: registry(search, dated) };
+    const file = {
+      ...planFile,
+      sources: ["fake", "dated"],
+      budget: { ...planFile.budget, checks: 2 },
+    };
+    const first = await run(d, { ask: { text: "repeat clients", kind: "web" }, planFile: file });
+    expect(first.state.next).toBeNull();
+    await d.ledger.append({
+      type: "edge",
+      id: "human-back",
+      run: first.run,
+      round: 1,
+      at: d.clock().toISOString(),
+      from: "human",
+      by: "will",
+      next: "back",
+      to: "fetch",
+      why: "try the searches again",
+    });
+    expect(fold(first.run, await d.ledger.trace(first.run)).next).toEqual({
+      round: 1,
+      step: "fetch",
+    });
+    const second = await run(d, { resume: first.run, planFile: file });
+    expect(second.state.next).toBeNull();
+    expect(second.state.gaps).toHaveLength(2);
+    expect(second.state.checks).toHaveLength(2);
+    expect(prompts.filter((p) => p.startsWith("You check"))).toHaveLength(2);
+    expect(prompts.filter((p) => p.startsWith("You decide what happens"))).toHaveLength(2);
   });
 });

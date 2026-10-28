@@ -27,7 +27,7 @@ export const From = z.enum(["ai", "human", "tool"]);
 export type From = z.infer<typeof From>;
 
 /** The runner's steps, in order. Raven's `Edge.to` names one of the first five. */
-export const Step = z.enum(["plan", "fetch", "triage", "read", "extract", "review"]);
+export const Step = z.enum(["plan", "fetch", "triage", "read", "extract", "check", "review"]);
 export type Step = z.infer<typeof Step>;
 export const STEPS = Step.options;
 
@@ -43,6 +43,8 @@ export const RECORD_TYPES = [
   "edge",
   "done",
   "steer",
+  "gap",
+  "check",
 ] as const;
 export const RecordType = z.enum(RECORD_TYPES);
 export type RecordType = z.infer<typeof RecordType>;
@@ -83,10 +85,10 @@ export const DocumentRecord = Envelope.extend({ type: z.literal("document") })
   .extend({ hit: z.string().min(1) });
 export type DocumentRecord = z.infer<typeof DocumentRecord>;
 
-/** One fact drawn from a document, with its proof. */
+/** One fact drawn from a document, with its proof, and the document's date when it has one. */
 export const FindingRecord = Envelope.extend({ type: z.literal("finding") })
   .extend(FalconFinding.shape)
-  .extend({ document: z.string().min(1) });
+  .extend({ document: z.string().min(1), date: z.string().optional() });
 export type FindingRecord = z.infer<typeof FindingRecord>;
 
 /**
@@ -163,6 +165,31 @@ export type DoneRecord = z.infer<typeof DoneRecord>;
 export const SteerRecord = Envelope.extend({ type: z.literal("steer"), text: z.string().min(1) });
 export type SteerRecord = z.infer<typeof SteerRecord>;
 
+/**
+ * What a step or a person says the round lacks, in English: a query with no new hits, a hit no
+ * source could open, a person's word. The round's review reads every gap, and the next round's
+ * plan reads them as what was left open. `step` is the step that wrote it; a person's has none.
+ */
+export const GapRecord = Envelope.extend({
+  type: z.literal("gap"),
+  note: z.string().min(1),
+  /** The record it is about: the query, the hit. */
+  on: z.string().optional(),
+});
+export type GapRecord = z.infer<typeof GapRecord>;
+
+/**
+ * The sample check's word on one kept finding: does its quote back it? A finding that fails
+ * also gets a drop call, so it leaves what the run has found; a person's keep puts it back.
+ */
+export const CheckRecord = Envelope.extend({
+  type: z.literal("check"),
+  on: z.string().min(1),
+  ok: z.boolean(),
+  why: z.string(),
+});
+export type CheckRecord = z.infer<typeof CheckRecord>;
+
 export const LedgerRecord = z.discriminatedUnion("type", [
   QueryRecord,
   HitRecord,
@@ -175,6 +202,8 @@ export const LedgerRecord = z.discriminatedUnion("type", [
   EdgeRecord,
   DoneRecord,
   SteerRecord,
+  GapRecord,
+  CheckRecord,
 ]);
 export type LedgerRecord = z.infer<typeof LedgerRecord>;
 

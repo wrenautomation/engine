@@ -6,7 +6,7 @@
 import type { Model } from "@wrenautomation/models";
 import { fill } from "./model.js";
 import { defaultPlanFile } from "./plans/index.js";
-import { lines, renderSteer, renderYield } from "./render.js";
+import { lines, renderOpen, renderSteer, renderYield } from "./render.js";
 import {
   type Ask,
   type Plan,
@@ -33,6 +33,7 @@ export function proposePrompt(
     ask: ask.text,
     site: ask.site ?? "",
     steer: renderSteer(ask.steer),
+    open: renderOpen(ask.open),
     known: lines(ask.known),
     yield: renderYield(yieldRows),
   });

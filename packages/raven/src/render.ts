@@ -8,6 +8,13 @@ export const lines = (xs: readonly string[], none = "(nothing)"): string =>
 export const renderSteer = (steer: readonly string[] | undefined): string =>
   steer?.length ? `The person says:\n${lines(steer)}\n` : "";
 
+/** What the last round left open, under its heading, or nothing. */
+export const renderOpen = (open: readonly string[] | undefined): string =>
+  open?.length ? `The last round left open (plan for these first):\n${lines(open)}\n` : "";
+
+/** The plan file's word on age as one more rule line, or nothing. */
+export const renderAge = (age: string | undefined): string => (age ? `\n- Age: ${age}` : "");
+
 /** One line per row, the keys it has first: `source=exa channel=... hits=12 reads=4 proposed=9 kept=3`. */
 export function renderYield(rows: readonly YieldRow[]): string {
   if (!rows.length) return "(no history yet)";

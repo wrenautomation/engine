@@ -1,5 +1,6 @@
 import { promptText } from "@wrenautomation/models";
 import { describe, expect, it } from "vitest";
+import { checkFinding, checkPrompt, contextOf, WINDOW } from "./check.js";
 import {
   claimExtractor,
   claimPrompt,
@@ -207,5 +208,37 @@ describe("claim extractor", () => {
     expect(out.findings).toHaveLength(1);
     expect(out.dropped).toEqual([]);
     expect(out.verdict).toEqual({ quality: "thin" });
+  });
+});
+
+describe("sample check", () => {
+  const finding: Finding = {
+    kind: "claim",
+    text: "38% of placements came from repeat clients in 2025.",
+    proof: { url: doc.url, quote: "38% of placements came from repeat clients" },
+  };
+
+  it("sends the sentence, the quote and its context", () => {
+    const p = checkPrompt(finding, doc);
+    expect(p).toContain("Sentence: 38% of placements came from repeat clients in 2025.");
+    expect(p).toContain("Quote: 38% of placements came from repeat clients\n");
+    expect(p).toContain(`CONTEXT from ${doc.url}:\n${doc.text}`);
+  });
+
+  it("cuts the context to a window each side of the quote", () => {
+    const long = `${"a".repeat(WINDOW * 2)}QUOTE${"b".repeat(WINDOW * 2)}`;
+    expect(contextOf(long, "QUOTE")).toBe(`…${"a".repeat(WINDOW)}QUOTE${"b".repeat(WINDOW)}…`);
+  });
+
+  it("returns the model's word, and null on a finding with no quote", async () => {
+    expect(
+      await checkFinding(
+        finding,
+        doc,
+        scripted([{ ok: false, why: "  the year is  the survey's " }]),
+      ),
+    ).toEqual({ ok: false, why: "the year is the survey's", usage: { usd: 0.01 } });
+    const frame: Finding = { ...finding, proof: { url: doc.url, frame: "01:02" } };
+    expect(await checkFinding(frame, doc, scripted([]))).toBeNull();
   });
 });

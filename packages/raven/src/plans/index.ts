@@ -13,7 +13,7 @@ const SHAPE_EDGE = `Return ONLY a JSON object, no prose, exactly this shape:
 where "next" is "stop", "again" (a new round from plan) or "back" (rerun one step of this round, named in "to": "plan", "fetch", "triage", "read" or "extract").`;
 
 const CONTEXT = `Ask: {ask}
-{steer}Known already (look past these):
+{steer}{open}Known already (look past these):
 {known}
 What yielded before (hits, reads, proposed, kept):
 {yield}`;
@@ -21,7 +21,7 @@ What yielded before (hits, reads, proposed, kept):
 const TRIAGE_RULES = `- One entry per hit, with its url as given. Mark "read": true for at most {n}.
 - Read a hit when what it shows for free (title, snippet, channel, length, date) says it holds what the ask needs and is not known already.
 - A hit returned by more than one source is a good sign, not a duplicate.
-- "why" on a read only: one short line a person reads to agree or not. A skip has no "why".`;
+- "why" on a read only: one short line a person reads to agree or not. A skip has no "why".{age}`;
 
 const REVIEW = `You decide what happens after one round of research.
 
@@ -32,21 +32,27 @@ Rules:
 - "again" when the ask is still open and new queries could find more. The gaps say what is missing; say what to look for next in "why".
 - "again" too when the reads were mostly "thin" or "off": the queries found the wrong pages, so plan different ones.
 - "back" when one step of this round failed for a reason a rerun fixes (a source was down, reads timed out). Name the step in "to".
-- "why" is one short line a person reads to agree or not.
+- The gaps are what a step or the person said this round lacks: a query with no new hits, a page no source could open. Weigh them like the verdicts.
+- A check that failed means a finding's quote does not back it, and the finding was dropped. Many failed checks mean the reads were poor: say so in "why".{age}
+- "why" is one short line a person reads to agree or not. On "again" it is what the next plan reads first.
 
 Ask: {ask}
 {steer}Round {round} of at most {rounds}. Hits {hits}, reads {reads}, findings proposed {proposed}, kept {kept}.
-Found:
+Found (the source's date in brackets when it gives one):
 {found}
 Read (quality: rich, thin, off or empty; then the gap, what the ask still lacks):
 {verdicts}
+Gaps (the step or the person, then what is missing):
+{gaps}
+Checked (a sample of the kept findings, each against its document):
+{checks}
 Notes:
 {notes}`;
 
 const web: PlanFile = {
   id: "raven/web",
   kind: "web",
-  version: 3,
+  version: 4,
   propose: `You plan web searches for one research ask.
 
 ${SHAPE_QUERIES}
@@ -72,13 +78,14 @@ Hits:
 {hits}`,
   review: REVIEW,
   sources: ["searxng", "exa", "google"],
-  budget: { queries: 3, reads: 6, rounds: 3 },
+  budget: { queries: 3, reads: 6, rounds: 3, checks: 3 },
+  age: "Prices, tools and numbers that move: prefer the last two years. A principle or a method can be old.",
 };
 
 const video: PlanFile = {
   id: "raven/video",
   kind: "video",
-  version: 3,
+  version: 4,
   propose: `You plan video searches for one research ask: talks, walkthroughs, interviews and reviews on YouTube and podcast feeds.
 
 ${SHAPE_QUERIES}
@@ -104,13 +111,14 @@ Hits:
 {hits}`,
   review: REVIEW,
   sources: ["youtube", "podcasts"],
-  budget: { queries: 3, reads: 4, rounds: 2 },
+  budget: { queries: 3, reads: 4, rounds: 2, checks: 3 },
+  age: "Tools and platforms: prefer the last two years. A talk on a principle can be old.",
 };
 
 const channel: PlanFile = {
   id: "raven/channel",
   kind: "channel",
-  version: 3,
+  version: 4,
   propose: `You plan searches that find the people and channels worth following for one research ask: creators, newsletters, podcasts, forums.
 
 ${SHAPE_QUERIES}
@@ -134,13 +142,14 @@ Hits:
 {hits}`,
   review: REVIEW,
   sources: ["searxng", "youtube", "exa"],
-  budget: { queries: 3, reads: 6, rounds: 2 },
+  budget: { queries: 3, reads: 6, rounds: 2, checks: 3 },
+  age: "A channel that has not posted in the last year counts for little.",
 };
 
 const person: PlanFile = {
   id: "raven/person",
   kind: "person",
-  version: 3,
+  version: 4,
   propose: `You plan searches about one person or company for one research ask: what they do, what they said, what others say about them.
 
 ${SHAPE_QUERIES}
@@ -166,13 +175,14 @@ Hits:
 {hits}`,
   review: REVIEW,
   sources: ["searxng", "exa", "linkedin", "google"],
-  budget: { queries: 4, reads: 6, rounds: 2 },
+  budget: { queries: 4, reads: 6, rounds: 2, checks: 3 },
+  age: "What they do now: prefer the latest pages. Their history can be old.",
 };
 
 const site: PlanFile = {
   id: "raven/site",
   kind: "site",
-  version: 3,
+  version: 4,
   propose: `You plan searches inside one website for one research ask. Every query runs on {site} only.
 
 ${SHAPE_QUERIES}
@@ -197,7 +207,8 @@ Hits:
 {hits}`,
   review: REVIEW,
   sources: ["sitemap", "searxng", "fetch"],
-  budget: { queries: 4, reads: 8, rounds: 2 },
+  budget: { queries: 4, reads: 8, rounds: 2, checks: 3 },
+  age: "When two pages of the site disagree, the later one counts.",
 };
 
 const DEFAULTS: Record<AskKind, PlanFile> = { web, video, channel, person, site };
@@ -206,5 +217,9 @@ const DEFAULTS: Record<AskKind, PlanFile> = { web, video, channel, person, site 
 export function defaultPlanFile(kind: AskKind): PlanFile {
   return PlanFileShape.parse(structuredClone(DEFAULTS[kind]));
 }
+
+/** The plan file's word on age; a stored file from before version 4 takes its kind's default. */
+export const ageOf = (planFile: PlanFile): string | undefined =>
+  planFile.age ?? DEFAULTS[planFile.kind].age;
 
 export const PLAN_KINDS = Object.keys(DEFAULTS) as AskKind[];

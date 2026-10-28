@@ -21,6 +21,8 @@ export const Ask = z.object({
   known: z.array(z.string()).default([]),
   /** What the person said along the way, one line each: every prompt renders it first. */
   steer: z.array(z.string()).default([]),
+  /** What the last round left open, one line each: its review's why, its gaps. The planner looks there first. */
+  open: z.array(z.string()).default([]),
   /** Only for kind `site`, or when a query must stay on one host. */
   site: z.string().optional(),
 });
@@ -54,13 +56,16 @@ export const Budget = z.object({
   reads: z.number().int().positive(),
   /** Rounds before `review` must stop. */
   rounds: z.number().int().positive(),
+  /** Kept findings per round that a model checks against their document: a sample spread across the documents. 0: none. */
+  checks: z.number().int().nonnegative().default(3),
 });
 export type Budget = z.infer<typeof Budget>;
 
 /**
  * The recipe for one ask kind: the prompts, the sources it may use, the budget. Versioned and
  * tuned like an SOP, stored beside the ledger. `{name}` marks in a prompt are filled from the
- * ask: `{ask}`, `{known}`, `{yield}`, `{n}`, `{year}`, `{site}`.
+ * ask: `{ask}`, `{known}`, `{yield}`, `{n}`, `{year}`, `{site}`, `{open}`, `{age}`; the review's
+ * also `{gaps}` and `{checks}`.
  */
 export const PlanFile = z.object({
   id: z.string().min(1),
@@ -75,6 +80,8 @@ export const PlanFile = z.object({
   /** Source names a run may use, in order of preference. A run can narrow the list, never widen it. */
   sources: z.array(z.string()),
   budget: Budget,
+  /** How much a source's age counts for this kind, one sentence: filled as `{age}`. Never a cutoff. */
+  age: z.string().optional(),
 });
 export type PlanFile = z.infer<typeof PlanFile>;
 
@@ -160,6 +167,10 @@ export const Round = z.object({
   notes: z.array(z.string()).default([]),
   /** The extractor's verdict on each document read this round: the planner sees what the reads were worth. */
   verdicts: z.array(Verdict).default([]),
+  /** What a step or a person said the round lacks, one line each, the step or the person first. */
+  gaps: z.array(z.string()).default([]),
+  /** The sample check: whether each checked finding's quote backs it, one line each. */
+  checks: z.array(z.string()).default([]),
 });
 export type Round = z.infer<typeof Round>;
 

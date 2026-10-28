@@ -3,6 +3,7 @@
  * parses them back), the reader registry by media, the claim extractor, and the model seam an
  * extractor takes. Who fetched a document and who kept a finding is weaver's and the ledger's.
  */
+export * from "./check.js";
 export * from "./extract.js";
 export * from "./model.js";
 export * from "./readers.js";

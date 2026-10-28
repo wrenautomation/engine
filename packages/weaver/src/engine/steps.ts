@@ -7,19 +7,31 @@
  * from where its records say it got to: a search with an ok spend, a hit with a document, a
  * document with a verdict, are not done twice.
  */
+
+import { checkFinding, type Document } from "@wrenautomation/falcon/document";
 import { isTransient, type Model, type Transient } from "@wrenautomation/models";
 import { dedupeHits, defaultPlanFile, plan, review, triage } from "@wrenautomation/raven";
 import type {
   DocumentRecord,
   Envelope,
   From,
+  GapRecord,
   HitRecord,
   LedgerRecord,
   Step,
 } from "../ledger/records.js";
 import { canonical } from "./canonical.js";
 import { type Deps, pick, type RunOptions, type Source } from "./ports.js";
-import { found, planOf, type RunState, toExtract, toRead, uncalledHits } from "./state.js";
+import {
+  found,
+  kept,
+  planOf,
+  type RunState,
+  toCheck,
+  toExtract,
+  toRead,
+  uncalledHits,
+} from "./state.js";
 
 export interface StepContext {
   deps: Deps;
@@ -56,6 +68,18 @@ export type StepFn = (ctx: StepContext, state: RunState) => Promise<StepResult>;
 export const PARALLEL = 4;
 
 const tool = (by: string) => ({ from: "tool" as const, by });
+
+/** A gap as a prompt line: the step that wrote it, or the person. */
+const gapLine = (g: GapRecord): string => `${g.step ?? g.by}: ${g.note}`;
+
+/** What round `round` left open: its review's why when it said again, and its gaps. */
+export const openAfter = (state: RunState, round: number): string[] => {
+  const edge = state.edges.filter((e) => e.round === round).at(-1);
+  return [
+    ...(edge?.next === "again" ? [edge.why] : []),
+    ...state.gaps.filter((g) => g.round === round).map(gapLine),
+  ];
+};
 
 const sourcesOf = (ctx: StepContext, state: RunState): Source[] =>
   pick(ctx.deps.sources, state.snapshot?.sources ?? []);
@@ -113,8 +137,9 @@ export const planStep: StepFn = async (ctx, state) => {
   const yieldRows = await ctx.deps.ledger.yield();
   const known = [...new Set([...(ask.known ?? []), ...found(state)])];
   const steer = [...new Set([...(ask.steer ?? []), ...state.steers.map((s) => s.text)])];
+  const open = ctx.round > 1 ? openAfter(state, ctx.round - 1) : [];
   const p = await plan({
-    ask: { ...ask, known, steer },
+    ask: { ...ask, known, steer, open },
     planFile,
     model: ctx.model,
     proposals: ctx.round === 1 ? (ctx.options.proposals ?? []) : [],
@@ -193,7 +218,30 @@ export const fetchStep: StepFn = async (ctx, state) => {
     }
   }
   if (transient && !answered) throw transient;
-  return { ok: true, note: `${written} new hits from ${calls} searches` };
+  // A query every searcher answered with no new hit is a gap: read from the records, so a
+  // rerun after a Transient neither repeats one nor writes one for a query it skipped.
+  const after = await ctx.deps.ledger.trace(ctx.run);
+  const okOn = new Set(
+    after
+      .filter((r) => r.type === "spend" && r.op === "search" && r.ok && r.round === ctx.round)
+      .map((r) => `${(r as { on?: string }).on}\u0000${(r as { source: string }).source}`),
+  );
+  const hitOn = new Set(after.flatMap((r) => (r.type === "hit" ? r.queries : [])));
+  const gapOn = new Set(after.flatMap((r) => (r.type === "gap" && r.on ? [r.on] : [])));
+  let empty = 0;
+  for (const q of queries) {
+    if (hitOn.has(q.id) || gapOn.has(q.id)) continue;
+    if (!searchers.every((s) => okOn.has(`${q.id}\u0000${s.name}`))) continue;
+    await ctx.write(
+      { type: "gap", on: q.id, note: `query "${q.terms}": no new hits` },
+      tool(ctx.deps.runner),
+    );
+    empty++;
+  }
+  return {
+    ok: true,
+    note: `${written} new hits from ${calls} searches${empty ? `, ${empty} queries with none` : ""}`,
+  };
 };
 
 export const triageStep: StepFn = async (ctx, state) => {
@@ -254,8 +302,15 @@ export const readStep: StepFn = async (ctx, state) => {
   if (hits.length && !openers.length)
     return { ok: false, note: "no open source in the allow-list" };
   let transient: Transient | null = null;
-  /** The openers in order; the first document wins. A Transient from one leaves the next its turn. */
-  const openOne = async (h: HitRecord) => {
+  /**
+   * The openers in order; the first document wins. A Transient from one leaves the next its
+   * turn. No document: `missed` when every opener said no, so the hit is a gap; a Transient
+   * leaves it to the next try.
+   */
+  const openOne = async (
+    h: HitRecord,
+  ): Promise<{ doc: Document; source: Source } | { missed: boolean }> => {
+    let missed = true;
     for (const s of openers) {
       try {
         const doc = await ctx.invoke(s, "open", h.url, h.id, () =>
@@ -265,13 +320,24 @@ export const readStep: StepFn = async (ctx, state) => {
       } catch (err) {
         if (!isTransient(err)) throw err;
         transient ??= err;
+        missed = false;
       }
     }
-    return null;
+    return { missed };
   };
+  const gapOn = new Set(state.gaps.map((g) => g.on));
   let read = 0;
+  let missed = 0;
   await batched(hits, openOne, async (h, g) => {
-    if (!g) return;
+    if (!("doc" in g)) {
+      if (!g.missed || gapOn.has(h.id)) return;
+      await ctx.write(
+        { type: "gap", on: h.id, note: `no source could open ${h.url}` },
+        tool(ctx.deps.runner),
+      );
+      missed++;
+      return;
+    }
     await ctx.write(
       { type: "document", ...g.doc, hit: h.id },
       { from: g.source.from ?? "tool", by: g.source.by ?? g.source.name },
@@ -279,7 +345,10 @@ export const readStep: StepFn = async (ctx, state) => {
     read++;
   });
   if (transient && !read) throw transient;
-  return { ok: true, note: `${read} of ${hits.length} hits read` };
+  return {
+    ok: true,
+    note: `${read} of ${hits.length} hits read${missed ? `, ${missed} no source could open` : ""}`,
+  };
 };
 
 export const extractStep: StepFn = async (ctx, state) => {
@@ -321,7 +390,11 @@ export const extractStep: StepFn = async (ctx, state) => {
   // extracted on the next try.
   const got = await batched(docs, extractOne, async (d, g) => {
     const who = { from: "ai" as const, by: g.model.id };
-    for (const f of g.out.findings) await ctx.write({ type: "finding", ...f, document: d.id }, who);
+    for (const f of g.out.findings)
+      await ctx.write(
+        { type: "finding", ...f, document: d.id, ...(d.date ? { date: d.date } : {}) },
+        who,
+      );
     const { quality, gap } = g.out.verdict;
     await ctx.write({ type: "verdict", document: d.id, quality, ...(gap ? { gap } : {}) }, who);
     proposed += g.out.findings.length;
@@ -336,6 +409,40 @@ export const extractStep: StepFn = async (ctx, state) => {
   };
 };
 
+/**
+ * The sample check: a few kept findings, spread across the round's documents, each read by a
+ * model against its document. A finding whose quote does not back it gets a check record and a
+ * drop call; one that holds gets a check record. The share that fails is the review's read on
+ * the extract. A check record is the checkpoint: a rerun checks only the rest of the sample.
+ */
+export const checkStep: StepFn = async (ctx, state) => {
+  const p = planOf(state, ctx.round);
+  const findings = toCheck(state, ctx.round, p.budget.checks);
+  if (!findings.length) return { ok: true, note: "nothing to check" };
+  if (!ctx.model) return { ok: true, note: "no model: no checks" };
+  const docs = new Map(state.documents.map((d) => [d.id, d]));
+  const checkOne = async (f: (typeof findings)[number]) => {
+    const d = docs.get(f.document);
+    if (!d) throw new Error(`finding ${f.id}: no document ${f.document}`);
+    const model = ctx.modelOn(f.id) as Model;
+    return { out: await checkFinding(f, d, model), model };
+  };
+  let ok = 0;
+  let failed = 0;
+  const got = await batched(findings, checkOne, async (f, g) => {
+    if (!g.out) return;
+    const who = { from: "ai" as const, by: g.model.id };
+    await ctx.write({ type: "check", on: f.id, ok: g.out.ok, why: g.out.why }, who);
+    if (g.out.ok) ok++;
+    else {
+      await ctx.write({ type: "call", on: f.id, verdict: "drop", why: g.out.why }, who);
+      failed++;
+    }
+  });
+  if (got.transient) throw got.transient;
+  return { ok: true, note: `${ok + failed} checked, ${failed} not backed by their quote` };
+};
+
 export const reviewStep: StepFn = async (ctx, state) => {
   const p = planOf(state, ctx.round);
   const inRound = <T extends { round: number }>(r: T) => r.round === ctx.round;
@@ -343,6 +450,10 @@ export const reviewStep: StepFn = async (ctx, state) => {
   const reads = state.documents.filter(inRound).length;
   const proposed = state.findings.filter(inRound).length;
   const foundNow = found(state, ctx.round);
+  const dated = state.findings
+    .filter((f) => inRound(f) && kept(state, f))
+    .map((f) => (f.date ? `${f.text} [${f.date}]` : f.text));
+  const textOf = new Map(state.findings.map((f) => [f.id, f.text]));
   const urlOf = new Map(state.documents.map((d) => [d.id, d.url]));
   const round = {
     ask: p.ask,
@@ -352,7 +463,7 @@ export const reviewStep: StepFn = async (ctx, state) => {
     reads,
     proposed,
     kept: foundNow.length,
-    found: foundNow,
+    found: dated,
     verdicts: state.verdicts.filter(inRound).map((v) => ({
       url: urlOf.get(v.document) ?? v.document,
       quality: v.quality,
@@ -365,6 +476,10 @@ export const reviewStep: StepFn = async (ctx, state) => {
           .map((s) => `${s.source} ${s.op} failed: ${s.error ?? "?"}`),
       ),
     ],
+    gaps: state.gaps.filter(inRound).map(gapLine),
+    checks: state.checks
+      .filter(inRound)
+      .map((c) => `${c.ok ? "ok" : "failed"}: ${textOf.get(c.on) ?? c.on} (${c.why})`),
   };
   const edge = ctx.model
     ? await review(round, ctx.model, {
@@ -389,5 +504,6 @@ export const STEP_TABLE: Record<Step, StepFn> = {
   triage: triageStep,
   read: readStep,
   extract: extractStep,
+  check: checkStep,
   review: reviewStep,
 };

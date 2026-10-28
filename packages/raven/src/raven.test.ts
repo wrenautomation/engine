@@ -12,6 +12,7 @@ const ask: Ask = {
   kind: "web",
   known: ["referrals convert"],
   steer: [],
+  open: [],
 };
 
 describe("fill", () => {
@@ -86,7 +87,7 @@ describe("merge", () => {
     expect(p.snapshot).toEqual({
       at: "2026-10-27T00:00:00.000Z",
       known: ["referrals convert"],
-      planFile: { id: "raven/web", version: 3 },
+      planFile: { id: "raven/web", version: 4 },
       model: "m1",
       yieldRows: 0,
     });
@@ -124,7 +125,7 @@ describe("merge", () => {
       round: 1,
       queries: [],
       sources: [],
-      budget: { queries: 3, reads: 1, rounds: 2 },
+      budget: { queries: 3, reads: 1, rounds: 2, checks: 3 },
       snapshot: {
         at: "",
         known: [],
@@ -147,6 +148,8 @@ describe("merge", () => {
       found: [],
       notes: [],
       verdicts: [],
+      gaps: [],
+      checks: [],
     };
     expect(reviewPrompt(r, defaultPlanFile("web"))).toContain(
       "The person says:\n- numbers only\n- skip vendor pages\nRound 1",
@@ -161,7 +164,7 @@ describe("triage", () => {
     round: 1,
     queries: [],
     sources: ["searxng"],
-    budget: { queries: 3, reads: 1, rounds: 2 },
+    budget: { queries: 3, reads: 1, rounds: 2, checks: 3 },
     snapshot: {
       at: "",
       known: [],
@@ -236,7 +239,7 @@ describe("review", () => {
   const round: Round = {
     ask,
     round: 1,
-    budget: { queries: 3, reads: 6, rounds: 2 },
+    budget: { queries: 3, reads: 6, rounds: 2, checks: 3 },
     hits: 10,
     reads: 4,
     proposed: 6,
@@ -247,7 +250,37 @@ describe("review", () => {
       { url: "https://a.example/survey", quality: "rich", gap: "no cost per hire" },
       { url: "https://b.example/ad", quality: "off" },
     ],
+    gaps: ['fetch: query "staffing repeat clients": no new hits', "william: no UK numbers yet"],
+    checks: ["ok: referrals convert. The quote says so."],
   };
+
+  it("shows the gaps, the checks and the kind's word on age", () => {
+    const p = reviewPrompt(round, defaultPlanFile("web"));
+    expect(p).toContain(
+      'Gaps (the step or the person, then what is missing):\n- fetch: query "staffing repeat clients": no new hits\n- william: no UK numbers yet',
+    );
+    expect(p).toContain("- ok: referrals convert. The quote says so.");
+    expect(p).toContain("- Age: Prices, tools and numbers that move");
+  });
+
+  it("parses a version 3 plan file: checks default to 3, age to its kind's", () => {
+    const { age: _age, ...v3 } = defaultPlanFile("web");
+    const old = PlanFile.parse({ ...v3, version: 3, budget: { queries: 3, reads: 6, rounds: 3 } });
+    expect(old.budget.checks).toBe(3);
+    expect(reviewPrompt(round, { ...old, review: "{age}" })).toContain("- Age: Prices");
+  });
+
+  it("puts what the last round left open before what is known", () => {
+    const p = proposePrompt(
+      { ...ask, open: ["no cost per hire"] },
+      defaultPlanFile("web"),
+      [],
+      new Date(),
+    );
+    expect(p).toContain(
+      "The last round left open (plan for these first):\n- no cost per hire\nKnown already",
+    );
+  });
 
   it("shows the verdicts, one line per read, and parses a round without them", () => {
     const p = reviewPrompt(round, defaultPlanFile("web"));

@@ -5,8 +5,8 @@
  */
 import type { Model } from "@wrenautomation/models";
 import { fill } from "./model.js";
-import { defaultPlanFile } from "./plans/index.js";
-import { lines, renderSteer } from "./render.js";
+import { ageOf, defaultPlanFile } from "./plans/index.js";
+import { lines, renderAge, renderSteer } from "./render.js";
 import { type Edge, type PlanFile, type Round, Step, type Verdict, z } from "./types.js";
 
 const EdgeAnswer = z.object({
@@ -29,6 +29,9 @@ export function reviewPrompt(round: Round, planFile: PlanFile): string {
     kept: String(round.kept),
     found: lines(round.found),
     notes: lines(round.notes, "(none)"),
+    gaps: lines(round.gaps, "(none)"),
+    checks: lines(round.checks, "(none)"),
+    age: renderAge(ageOf(planFile)),
     verdicts: lines(round.verdicts.map(verdictLine), "(none)"),
   });
 }
