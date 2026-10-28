@@ -1,6 +1,6 @@
 {
   "name": "@wrenautomation/weaver",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "description": "The web in, documents out. Polite HTTP fetching with robots and a fetch ladder up to a browser; YouTube, any other video and podcasts read from a URL through yt-dlp and @wrenautomation/falcon; what a channel or search holds. The sources, runner and ledger of Wren's research engine: `weaver run` takes an ask through plan, fetch, triage, read, extract, check and review, every record in a folder.",
   "license": "PolyForm-Strict-1.0.0",
   "repository": {
