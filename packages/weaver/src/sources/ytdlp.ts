@@ -5,6 +5,7 @@
  */
 import type { Document } from "@wrenautomation/falcon/document";
 import type { VideoRead } from "@wrenautomation/falcon/video";
+import type { Model } from "@wrenautomation/models";
 import { youtubeId } from "../engine/canonical.js";
 import type { Source } from "../engine/ports.js";
 import { flatPlaylist, type YtDlpEntry } from "../video/list.js";
@@ -36,7 +37,11 @@ export const entryHit = (e: YtDlpEntry) => {
 
 export function ytdlpSource(o: {
   ytDlp: string;
-  geminiKeys?: readonly string[];
+  /**
+   * The model that reads what a video shows, made on first open (`geminiVideo` checks its keys
+   * over the network): listing sources costs no call.
+   */
+  video?: () => Promise<Model | null>;
   n?: number;
   /** For tests: stand-ins for the two yt-dlp calls. */
   list?: typeof flatPlaylist;
@@ -44,6 +49,11 @@ export function ytdlpSource(o: {
 }): Source {
   const list = o.list ?? flatPlaylist;
   const read = o.read ?? readYoutube;
+  let video: Promise<Model | null> | undefined;
+  const videoModel = (make: () => Promise<Model | null>) => {
+    video ??= make();
+    return video;
+  };
   return {
     name: "youtube",
     kind: "both",
@@ -63,7 +73,7 @@ export function ytdlpSource(o: {
       return videoDocument(
         await read(h.url, {
           ytDlp: o.ytDlp,
-          ...(o.geminiKeys ? { geminiKeys: o.geminiKeys } : {}),
+          ...(o.video ? { video: await videoModel(o.video) } : {}),
         }),
       );
     },

@@ -11,7 +11,7 @@ Two doors:
 | Import | Does |
 |---|---|
 | `@wrenautomation/weaver/fetch` | `PoliteFetcher` (one request at a time per host, a contact in the User-Agent, retries on 429 and 5xx, a byte cap), `robots` in warn mode, `fetchLadder` (plain GET up to a browser through a `LadderClient`) |
-| `@wrenautomation/weaver/video` | `readYoutube` (captions and chapters by yt-dlp, plus Gemini's read of the screen), `readYoutubeByUrl` (Gemini alone, no download), `readVideo` (any other video: yt-dlp, then falcon's `watch`), `readAudio` (a podcast by its audio URL, then falcon's `hearAudio`), `watch` over a URL or a file, `flatPlaylist` (what a profile, channel or search holds), `download` |
+| `@wrenautomation/weaver/video` | `readYoutube` (captions and chapters by yt-dlp, plus a video model's read of the screen in clips), `readYoutubeByUrl` (the video model alone, no download), `readVideo` (any other video: yt-dlp, then falcon's `watch`), `readAudio` (a podcast by its audio URL, then falcon's `hearAudio`), `watch` over a URL or a file, `flatPlaylist` (what a profile, channel or search holds), `download` |
 
 Every reader returns falcon's one `VideoRead` shape. What turns a page or a file into text is
 falcon's (`@wrenautomation/falcon`).

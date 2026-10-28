@@ -1,14 +1,28 @@
 /**
- * Gemini, as the video readers ask it: key and model rotation, the on-screen ask, and the 360p copy
- * that fits inline. Own file so `watch.ts` and the SOP reader both import it.
+ * Gemini, as the video readers ask it: the reader over a key ring, one read of media with the
+ * paraphrase retry, the on-screen ask, and the 360p copy that fits inline. Every call goes through
+ * `@wrenautomation/models`.
  */
 import { readFile } from "node:fs/promises";
+import {
+  fallback,
+  gemini,
+  geminiLiveKeys,
+  isCut,
+  isFiltered,
+  type Model,
+  type Part,
+} from "@wrenautomation/models";
 import { clock, runFor, TOOL_MS } from "./tools.js";
 
-const GEMINI = (model: string) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-// Rotated per try: a busy (503) or reciting model hands the ask to the next.
-const GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"];
+/** Newest first: a busy or refused model hands the call to the next. */
+export const GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"];
+/** One call gives up after this long: a stalled socket would wait out undici's 5 minutes. */
+const CALL_MS = 180_000;
+/** One read, every model, key and pass together, gives up after this long. */
+export const READ_MS = 360_000;
+/** The answer's ceiling: a 10-minute clip's text runs long. A cut answer keeps what it said. */
+export const READ_TOKENS = 32_000;
 
 /**
  * What to read off the frames; shared by YouTube clips and downloaded videos. Gemini won't repeat
@@ -17,86 +31,57 @@ const GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash
 export const SHOWN = (start: number, paraphrase: boolean) =>
   `Transcribe in full, verbatim, every document, list, table, slide, template or other text the speaker shows on screen in this clip, each under a [h:mm:ss] heading of the video time it appears (the clip starts at ${clock(start)}). For every image, screenshot, chart, diagram or UI on screen, extract the information it carries, not what it looks like: the text in it, setting names and their values, numbers, prices, limits, labels, before and after states, and what is highlighted, circled, crossed out, ticked or pointed at. Write each as a line starting with its [h:mm:ss] then [visual], stating the fact as a reader would use it ("Instantly warmup settings: daily limit 10, slow ramp on, +1 per day, reply rate 95%"), not "a screenshot of the settings page". Skip visuals that carry no information (decoration, layout, gestures, transitions) and repeats of anything already captured. Skip the speaker's face, chat windows, b-roll and stock footage, and anything already shown earlier in the clip.${paraphrase ? " Where a shown passage is published text (a post, article, page), give its first line word for word, then every point it makes in your own words." : ""}`;
 
-let nextKey = 0;
-
-/** One Gemini call gives up after this long: a stalled socket would wait out undici's 5 minutes, per try. */
-const GEMINI_CALL_MS = 180_000;
-/** One ask, its retries and backoffs together, gives up after this long. */
-const GEMINI_ASK_MS = 360_000;
-
 /**
- * One Gemini call. Keys rotate on 429/403, a busy flash (503) hands to lite, backing off 2s
- * doubling to 1 min. A call that stalls or drops is a refusal too. After 24 refusals, or
- * `askMs` (6 minutes), it returns `unread` with the last one.
+ * The video reader on a Gemini key ring: `GEMINI_MODELS` in turn, each over every key that still
+ * works, three passes while they only say "later". Null when no key works: a revoked fleet must
+ * not get a 14 MB inline body posted to each key.
  */
-export async function askGemini(
-  body: unknown,
+export async function geminiVideo(
   keys: readonly string[],
-  fetchFn: typeof fetch,
-  label: string,
-  limits: { callMs?: number; askMs?: number; pause?: (ms: number) => Promise<void> } = {},
-): Promise<{ text: string } | { unread: string }> {
-  const until = Date.now() + (limits.askMs ?? GEMINI_ASK_MS);
-  const pause = limits.pause ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  let last = "";
-  let wait = 2000;
-  let recited = 0;
-  for (let i = 0; i < 24 && Date.now() < until; i++) {
-    const key = keys[nextKey++ % keys.length] as string;
-    const model = GEMINI_MODELS[i % GEMINI_MODELS.length] as string;
-    let res: Response;
-    let json: {
-      candidates?: { finishReason?: string; content?: { parts?: { text?: string }[] } }[];
-      error?: { message?: string };
-    };
-    try {
-      res = await fetchFn(GEMINI(model), {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-goog-api-key": key },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(limits.callMs ?? GEMINI_CALL_MS),
-      });
-      json = (await res.json()) as typeof json;
-    } catch (err) {
-      last = `${model} ${err instanceof Error ? err.message : String(err)}`;
-      await pause(wait);
-      wait = Math.min(wait * 2, 60_000);
-      continue;
-    }
-    const text = (json.candidates?.[0]?.content?.parts ?? [])
-      .map((p) => p.text ?? "")
-      .join("")
-      .trim();
-    if (text) return { text };
-    const reason = json.candidates?.[0]?.finishReason;
-    // Recitation is per model and try, not per key: no backoff, and three strikes go back to the caller.
-    if (reason === "RECITATION") {
-      if (++recited === 3) return { unread: "RECITATION" };
-      continue;
-    }
-    // A 200 with no text (blocked, cut off) is a refusal too: try the next key and model.
-    last = res.ok
-      ? `${model} empty, ${reason ?? "no candidate"}`
-      : `${model} HTTP ${res.status} ${json.error?.message ?? ""}`.trim();
-    if (!res.ok && ![401, 402, 403, 429, 500, 503].includes(res.status))
-      throw new Error(`gemini ${label}: ${last}`);
-    await pause(wait);
-    wait = Math.min(wait * 2, 60_000);
-  }
-  return { unread: last || "timed out" };
+  o: { fetch?: typeof fetch } = {},
+): Promise<Model | null> {
+  const live = await geminiLiveKeys(keys, o);
+  if (!live.length) return null;
+  const wire = o.fetch ? { fetch: o.fetch } : {};
+  return fallback(
+    GEMINI_MODELS.map((model) => gemini({ key: live, model, limitMs: CALL_MS, ...wire })),
+    { passes: 3 },
+  );
 }
 
-/** The on-screen ask, asked again as a paraphrase when Gemini won't recite. */
-export async function askShown(
-  body: (paraphrase: boolean) => unknown,
-  keys: readonly string[],
-  fetchFn: typeof fetch,
-  label: string,
-): Promise<{ text: string } | { unread: string }> {
-  const r = await askGemini(body(false), keys, fetchFn, label);
-  return "unread" in r && r.unread === "RECITATION"
-    ? askGemini(body(true), keys, fetchFn, label)
-    : r;
+/**
+ * One read of media: the parts, then the ask. An answer the output cap cut keeps what it said. A
+ * Filtered stop (RECITATION: Gemini won't repeat text it knows from the web) is asked once more
+ * with `paraphrase`, on the same model list from the top: a fallback does not rotate on Filtered,
+ * since the next model knows the same web. A plain string ask has no paraphrase; Filtered throws.
+ */
+export async function readMedia(
+  model: Model,
+  media: readonly Part[],
+  ask: string | ((paraphrase: boolean) => string),
+  o: { resolution?: "low" | "medium" | "high" } = {},
+): Promise<string> {
+  const once = async (paraphrase: boolean) => {
+    try {
+      const r = await model.complete({
+        prompt: [...media, { type: "text", text: typeof ask === "string" ? ask : ask(paraphrase) }],
+        maxTokens: READ_TOKENS,
+        signal: AbortSignal.timeout(READ_MS),
+        ...(o.resolution ? { resolution: o.resolution } : {}),
+      });
+      return r.text.trim();
+    } catch (err) {
+      if (isCut(err)) return err.partial.trim();
+      throw err;
+    }
+  };
+  try {
+    return await once(false);
+  } catch (err) {
+    if (!isFiltered(err) || typeof ask === "string") throw err;
+    console.warn(`${model.id}: stopped (${err.stop}); asking for a paraphrase`);
+    return once(true);
+  }
 }
 
 // Gemini takes 20 MB a request inline, and base64 adds a third.

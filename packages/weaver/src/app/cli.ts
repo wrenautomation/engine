@@ -7,7 +7,7 @@
  * `trace`, `keep`, `drop`, `yield`, `sources`) are in `engine-cli.ts`.
  */
 import { readPage } from "@wrenautomation/falcon/text";
-import type { VideoRead } from "@wrenautomation/falcon/video";
+import { cohereEye, cohereSpeech, geminiVideo, type VideoRead } from "@wrenautomation/falcon/video";
 import { Command } from "commander";
 import { PoliteFetcher, userAgent } from "../fetch/fetcher.js";
 import { flatPlaylist } from "../video/list.js";
@@ -62,15 +62,21 @@ program
   .option("--ffmpeg <path>", "the ffmpeg binary", "ffmpeg")
   .option("--yt-dlp <cmd>", "the yt-dlp command", "yt-dlp")
   .action(async (url: string, o: { json?: boolean; ffmpeg: string; ytDlp: string }) => {
-    const geminiKeys = keys(process.env, "GEMINI_API_KEY");
+    const video = await geminiVideo(keys(process.env, "GEMINI_API_KEY"));
     let read: VideoRead;
     if (/^https?:\/\/(www\.|m\.)?(youtube\.com|youtu\.be)\//.test(url))
-      read = await readYoutube(url, { ytDlp: o.ytDlp, geminiKeys });
+      read = await readYoutube(url, { ytDlp: o.ytDlp, video });
     else {
       const cohereKeys = keys(process.env, "COHERE_API_KEY");
       if (!cohereKeys.length)
         throw new Error("read needs COHERE_API_KEY for a video with no captions");
-      read = await readVideo(url, { ytDlp: o.ytDlp, ffmpeg: o.ffmpeg, cohereKeys, geminiKeys });
+      read = await readVideo(url, {
+        ytDlp: o.ytDlp,
+        ffmpeg: o.ffmpeg,
+        eye: cohereEye(cohereKeys),
+        ear: cohereSpeech(cohereKeys),
+        video,
+      });
     }
     console.log(o.json ? JSON.stringify(read, null, 2) : renderRead(read));
   });

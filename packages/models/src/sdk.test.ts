@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Cut, Filtered, InputRejected, Refused, Transient } from "./errors.js";
+import { fallback } from "./keys.js";
 import {
   anthropic,
   compatible,
@@ -232,18 +233,12 @@ describe("gemini", () => {
     expect(r.usage.usd).toBe(0);
   });
 
-  it("a clipped video goes to Interactions with its offsets, unstored", async () => {
-    const w = wire(() =>
-      json({
-        id: "i1",
-        status: "completed",
-        steps: [{ type: "model_output", content: [{ type: "text", text: "at 0:05 a cat" }] }],
-        usage: { total_input_tokens: 365, total_output_tokens: 8 },
-      }),
-    );
+  it("a clipped video goes to generateContent with its offsets as videoMetadata", async () => {
+    const w = wire(() => generated({ text: "at 0:05 a cat" }));
     const m = gemini({ key: "k-0000000001", fetch: w.fetch });
     const r = await m.complete({
       prompt: [
+        { type: "video", data: YOUTUBE, mediaType: "video/mp4" },
         {
           type: "video",
           data: YOUTUBE,
@@ -255,12 +250,15 @@ describe("gemini", () => {
       resolution: "low",
     });
     expect(r.text).toBe("at 0:05 a cat");
-    expect(r.usage.input).toBe(365);
-    expect(w.seen[0]?.url).toMatch(/\/interactions$/);
-    const body = JSON.stringify(w.seen[0]?.body);
-    expect(body).toContain('"start_offset":"5s"');
-    expect(body).toContain('"end_offset":"12s"');
-    expect(body).toContain('"store":false');
+    expect(w.seen[0]?.url).toContain(":generateContent");
+    const body = w.seen[0]?.body as {
+      contents: { parts: { videoMetadata?: unknown }[] }[];
+      generationConfig?: { mediaResolution?: string };
+    };
+    const [whole, clip] = body.contents[0]?.parts ?? [];
+    expect(whole?.videoMetadata).toBeUndefined();
+    expect(clip?.videoMetadata).toEqual({ startOffset: "5s", endOffset: "12s", fps: 0.5 });
+    expect(body.generationConfig?.mediaResolution).toBe("MEDIA_RESOLUTION_LOW");
   });
 
   it("a recitation stop is Filtered, so the caller can ask in other words", async () => {
@@ -299,5 +297,27 @@ describe("gemini", () => {
         ? json({ models: [] })
         : json({ error: { code: 403 } }, 403)) as typeof globalThis.fetch;
     expect(await geminiLiveKeys(["dead", "live", "dead2"], { fetch })).toEqual(["live"]);
+  });
+});
+
+describe("a caller's time limit", () => {
+  it("ends a fallback at once: no other key or model is asked after the caller gives up", async () => {
+    let asked = 0;
+    const stalls = ((_url: string, init: RequestInit) => {
+      asked++;
+      return new Promise((_, reject) =>
+        init.signal?.addEventListener("abort", () => reject(init.signal?.reason)),
+      );
+    }) as unknown as typeof fetch;
+    const m = fallback(
+      ["gemini-a", "gemini-b"].map((model) =>
+        gemini({ key: ["k-0000000001", "k-0000000002"], model, fetch: stalls }),
+      ),
+      { passes: 3, sleep: async () => {} },
+    );
+    const began = Date.now();
+    await expect(m.complete({ prompt: "hi", signal: AbortSignal.timeout(50) })).rejects.toThrow();
+    expect(Date.now() - began).toBeLessThan(2_000);
+    expect(asked).toBe(1);
   });
 });

@@ -1,15 +1,15 @@
 /**
  * Shot labels by vision (designs/2026-10-25-competitor-analyzer.md, Read): for each shot of a film,
- * frames at its start, middle and end, and one just before it starts, go to Cohere's vision
- * model, which picks the shot's type, camera move and way in from closed sets the caller gives.
+ * frames at its start, middle and end, and one just before it starts, go to a vision model
+ * (`cohereEye`), which picks the shot's type, camera move and way in from closed sets the caller gives.
  * An answer outside a set is null, never guessed. The caller decides which labels it trusts: a
  * label ships only once it matches a hand seed at 80% or better (`labelMatch`).
  */
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { isTransient, type Model } from "@wrenautomation/models";
 import { runFor, TOOL_MS } from "./tools.js";
-import { COHERE_VISION_MODEL, cohereChat } from "./watch.js";
 
 /** The labels asked, each with its closed set. */
 export const LABELS = ["type", "move", "in"] as const;
@@ -25,19 +25,20 @@ export interface ShotSpan {
 
 /** Calls at a time: the vision model's per-minute limit refuses 3 at once on a film. */
 const AT_ONCE = 1;
-/** A per-minute cap: wait it out this long, at most `CAP_WAITS` times a shot. */
+/** A per-minute cap with no `retry-after`: wait it out this long, at most `CAP_WAITS` times a shot. */
 const CAP_WAIT_MS = 61_000;
 const CAP_WAITS = 3;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** `fn`, again after a minute each time Cohere's per-minute cap refuses it. */
+/** `fn`, again after the vendor's wait (a minute when it names none) each time it says "later". */
 async function waitOutCap<T>(fn: () => Promise<T>, pause: (ms: number) => Promise<void>) {
   for (let i = 0; ; i++) {
     try {
       return await fn();
     } catch (err) {
-      if (i >= CAP_WAITS || !/HTTP 429/.test(String(err))) throw err;
-      await pause(CAP_WAIT_MS);
+      if (i >= CAP_WAITS || !isTransient(err)) throw err;
+      const until = err.retryAfter ? Date.parse(err.retryAfter) - Date.now() : Number.NaN;
+      await pause(Number.isNaN(until) ? CAP_WAIT_MS : Math.max(0, Math.min(until, CAP_WAIT_MS)));
     }
   }
 }
@@ -106,10 +107,11 @@ export async function labelShots(
   shots: readonly ShotSpan[],
   sets: LabelSets,
   o: {
-    cohereKeys: readonly string[];
+    /** Takes images (`cohereEye`). */
+    eye: Model;
     ffmpeg?: string;
     bright?: boolean;
-    fetchFn?: typeof fetch;
+    /** For tests: stands in for the wait on a per-minute cap. */
     pause?: (ms: number) => Promise<void>;
   },
 ): Promise<ShotLabels[]> {
@@ -144,30 +146,13 @@ export async function labelShots(
     const jpegs = await Promise.all(
       times.map((at, k) => frameAt(file, at, join(dir, `${n}-${k}.jpg`), ffmpeg, o.bright ?? true)),
     );
-    const answer = await cohereChat(
-      o.cohereKeys,
-      {
-        model: COHERE_VISION_MODEL,
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: labelAsk(sets, s.t <= 0) },
-              ...jpegs.map((b) => ({
-                type: "image_url",
-                image_url: { url: `data:image/jpeg;base64,${b.toString("base64")}` },
-              })),
-            ],
-          },
-        ],
-      },
-      {
-        label: `shot ${n + 1}`,
-        ...(o.fetchFn ? { fetchFn: o.fetchFn } : {}),
-        ...(o.pause ? { pause: o.pause } : {}),
-      },
-    );
-    return parseLabels(answer, sets);
+    const { text } = await o.eye.complete({
+      prompt: [
+        { type: "text", text: labelAsk(sets, s.t <= 0) },
+        ...jpegs.map((b) => ({ type: "image" as const, data: b, mediaType: "image/jpeg" })),
+      ],
+    });
+    return parseLabels(text, sets);
   }
 }
 

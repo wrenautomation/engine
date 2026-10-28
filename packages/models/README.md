@@ -11,7 +11,7 @@ a new price goes here, never in the caller. No guard enforces this; this file an
 | Import | Does | Runs in |
 |---|---|---|
 | `@wrenautomation/models` | `Model`, `Part`, `Usage`; `anthropic`, `gemini`, `cohere`, `compatible` (Groq, OpenRouter, Mistral, Cerebras, OpenAI), `gateway`; `rotating` key rings, `fallback` model order, `geminiLiveKeys`; `fakeModel`, `scriptedModel`; the errors | Node, Workers |
-| `@wrenautomation/models/hear` | speech to text: `groqEar`, `cohereEar`, `compatibleEar` (any `/audio/transcriptions` server) | Node, Workers |
+| `@wrenautomation/models/hear` | speech to text: `groqEar`, `cohereEar`, `compatibleEar` (any `/audio/transcriptions` server); `fakeEar` | Node, Workers |
 | `@wrenautomation/models/prices` | one price table: `MODEL_PRICES`, `SPEECH_PRICES`, `priceUsd`, `priced`, `speechUsd`, `addUsage`, `pricesText` | Node, Workers |
 | `@wrenautomation/models/command` | a shell command as a model (`commandModel`), Claude Code on the subscription (`claudeCode`) | Node |
 | `@wrenautomation/models/spec` | a model from a setting string: `modelFromSpec("anthropic:sonnet", env)` | Node |
@@ -48,8 +48,9 @@ const clip = await eyes.complete({
 const reader = fallback([gemini({ key, model: "gemini-3.8-flash" }), gemini({ key })], { passes: 4 });
 ```
 
-Gemini reads a clipped video through its Interactions API (the generateContent route has no clip
-field in the SDK), with `store: false`. Every other request goes to generateContent.
+Gemini reads a clipped video on generateContent: `withClips` adds the `videoMetadata` field the SDK
+does not send. The Interactions API also reads a stretch, but on free keys its flash quota is spent
+at once (seen 2026-10-27; flash-lite answered).
 
 Spec strings: `fake`, `claude-code[:model]`, `anthropic[:haiku|sonnet|opus|id]`, `gateway[:alias]`,
 `gemini[:id]`, `cohere[:id]`, `groq|openrouter|mistral|cerebras|openai[:id]`, `command:<shell command>`.

@@ -14,7 +14,7 @@ import { Cut, Filtered, redact, statusError, Transient, transport } from "./erro
 import { modelOf } from "./model.js";
 import { wellFormed } from "./parse.js";
 import { priced } from "./prices.js";
-import type { Effort, Model, Part, PartKind, Request, Usage } from "./types.js";
+import type { Clip, Effort, Model, Part, PartKind, Request, Usage } from "./types.js";
 
 /** The ceiling when a request names none. A long extract with quotes passed 4096 on a live run. */
 export const DEFAULT_MAX_TOKENS = 8192;
@@ -30,10 +30,10 @@ export interface SdkModelOptions {
   modelId: string;
   model: LanguageModel;
   /**
-   * Where a request with a clipped video goes. Gemini's generateContent has no clip field through
-   * the SDK; its Interactions API takes one.
+   * The model for a request with a clipped video, given each video part's clip in prompt order.
+   * Gemini's: generateContent with `videoMetadata`, a field the SDK does not send (`withClips`).
    */
-  clipModel?: LanguageModel;
+  clipModel?: (clips: readonly (Clip | undefined)[]) => LanguageModel;
   takes: ReadonlySet<PartKind>;
   /** Tokens added to every ceiling for a model that thinks inside its output budget. */
   thinking?: number;
@@ -60,28 +60,25 @@ const GEMINI_RESOLUTION = {
   high: "MEDIA_RESOLUTION_HIGH",
 } as const;
 
-/** Effort and resolution as the vendor's options. `clip`: the Gemini Interactions route. */
-function vendorOptions(provider: string, req: Request, clip: boolean) {
+/** Effort and resolution as the vendor's options. */
+function vendorOptions(provider: string, req: Request) {
   if (provider === "anthropic")
     return req.effort ? { providerOptions: { anthropic: { effort: req.effort } } } : {};
   if (provider !== "google") return {};
   const level = req.effort ? GEMINI_LEVEL[req.effort] : undefined;
-  // Interactions stores each exchange unless told not to; nothing here reads one back.
-  const google = clip
-    ? {
-        store: false,
-        ...(level ? { thinkingLevel: level } : {}),
-        ...(req.resolution ? { mediaResolution: req.resolution } : {}),
-      }
-    : {
-        ...(level ? { thinkingConfig: { thinkingLevel: level } } : {}),
-        ...(req.resolution ? { mediaResolution: GEMINI_RESOLUTION[req.resolution] } : {}),
-      };
+  const google = {
+    ...(level ? { thinkingConfig: { thinkingLevel: level } } : {}),
+    ...(req.resolution ? { mediaResolution: GEMINI_RESOLUTION[req.resolution] } : {}),
+  };
   return Object.keys(google).length ? { providerOptions: { google } } : {};
 }
 
-const clipped = (req: Request) =>
-  typeof req.prompt !== "string" && req.prompt.some((p) => p.type === "video" && p.clip);
+/** Each video part's clip, in prompt order; null when no part has one. */
+function clipsOf(req: Request): (Clip | undefined)[] | null {
+  if (typeof req.prompt === "string") return null;
+  const clips = req.prompt.flatMap((p) => (p.type === "video" ? [p.clip] : []));
+  return clips.some(Boolean) ? clips : null;
+}
 
 function contentOf(parts: readonly Part[]) {
   return parts.map((p) => {
@@ -92,13 +89,6 @@ function contentOf(parts: readonly Part[]) {
         return { type: "file" as const, data: p.data, mediaType: p.mediaType };
       case "pdf":
         return { type: "file" as const, data: p.data, mediaType: "application/pdf" };
-      case "video": {
-        const file = { type: "file" as const, data: p.data, mediaType: p.mediaType };
-        if (!p.clip) return file;
-        const { startS, endS, fps } = p.clip;
-        const processing = { type: "static", startOffset: startS, endOffset: endS, fps };
-        return { ...file, providerOptions: { google: { processing } } };
-      }
       default:
         return { type: "file" as const, data: p.data, mediaType: p.mediaType };
     }
@@ -159,15 +149,15 @@ export function sdkModel(o: SdkModelOptions): Model {
       const started = performance.now();
       const timeout = AbortSignal.timeout(limitMs);
       const abortSignal = req.signal ? AbortSignal.any([req.signal, timeout]) : timeout;
-      const clip = clipped(req) && o.clipModel !== undefined;
+      const clips = o.clipModel ? clipsOf(req) : null;
       let result: Awaited<ReturnType<typeof generateText>>;
       try {
         result = await generateText({
-          model: clip && o.clipModel ? o.clipModel : o.model,
+          model: clips && o.clipModel ? o.clipModel(clips) : o.model,
           ...input(o.provider, req),
           maxOutputTokens:
             Math.max(req.maxTokens ?? DEFAULT_MAX_TOKENS, FLOOR_TOKENS) + (o.thinking ?? 0),
-          ...vendorOptions(o.provider, req, clip),
+          ...vendorOptions(o.provider, req),
           maxRetries: 0,
           abortSignal,
         });
@@ -186,11 +176,7 @@ export function sdkModel(o: SdkModelOptions): Model {
       const stop = result.rawFinishReason ?? result.finishReason;
       if (result.finishReason === "length")
         throw new Cut(`${id} stopped at its output cap (${stop})`, result.text, usage);
-      // A failed Interactions run ("error") with nothing said is the vendor stopping too.
-      if (
-        result.finishReason === "content-filter" ||
-        (result.finishReason === "error" && !result.text)
-      )
+      if (result.finishReason === "content-filter")
         throw new Filtered(
           `${id} stopped the answer itself (${stop})`,
           String(stop),

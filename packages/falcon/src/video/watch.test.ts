@@ -2,9 +2,10 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fakeModel, InputRejected, type Model, modelOf } from "@wrenautomation/models";
+import { fakeEar } from "@wrenautomation/models/hear";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
-  cohereCall,
   cutsLine,
   frameCounts,
   onScreenLines,
@@ -25,21 +26,13 @@ const hasFfmpeg = (() => {
   }
 })();
 
-const noPause = async () => {};
-
-/** What a vision call asked: its text, and how many pictures came with it. */
-const asked = (init: RequestInit) => {
-  const body = JSON.parse(String(init.body)) as {
-    model: string;
-    messages: { content: { type: string; text?: string }[] }[];
-  };
-  const parts = body.messages[0]?.content ?? [];
-  return {
-    model: body.model,
-    text: parts.find((p) => p.type === "text")?.text ?? "",
-    images: parts.filter((p) => p.type === "image_url").length,
-  };
-};
+/** A vision model, faked: each call's ask text and image count go to `log`. */
+const eyeOf = (answer: (ask: string, images: number) => string, log: string[] = []): Model =>
+  fakeModel((ask, req) => {
+    log.push(ask);
+    const parts = typeof req.prompt === "string" ? [] : req.prompt;
+    return answer(ask, parts.filter((p) => p.type === "image").length);
+  }, "fake:eye");
 /** The frame times a vision ask lists. */
 const timesIn = (text: string) =>
   (/Their times: ([^.]+)\./.exec(text)?.[1] ?? "").split(", ").filter(Boolean);
@@ -47,26 +40,18 @@ const timesIn = (text: string) =>
 const shots = (n: number) =>
   Array.from({ length: n }, (_, i) => ({ at: i * 2, jpeg: Buffer.from(`frame${i}`) }));
 
-const chatAnswer = (text: string) =>
-  Response.json({ message: { content: [{ type: "text", text }] } });
-
 describe("readScreen", () => {
   it("tags each line with its frame time; a frame with no line stays not read, never filled", async () => {
     const calls: string[] = [];
-    const fetchFn = (async (_url: string, init: RequestInit) => {
-      const q = asked(init);
-      calls.push(q.text);
-      expect(q.model).toBe("command-a-vision-07-2025");
-      expect(q.images).toBe(8);
+    const eye = eyeOf((ask, images) => {
+      expect(images).toBe(8);
       // The model drops the frame at 0:06 and sees no text at 0:08.
-      return chatAnswer(
-        timesIn(q.text)
-          .filter((t) => t !== "0:06")
-          .map((t) => `[${t}] ${t === "0:08" ? "none" : `text at ${t}`}`)
-          .join("\n"),
-      );
-    }) as unknown as typeof fetch;
-    const frames = await readScreen(shots(8), ["k"], { fetchFn, pause: noPause });
+      return timesIn(ask)
+        .filter((t) => t !== "0:06")
+        .map((t) => `[${t}] ${t === "0:08" ? "none" : `text at ${t}`}`)
+        .join("\n");
+    }, calls);
+    const frames = await readScreen(shots(8), eye);
     expect(calls).toHaveLength(1);
     expect(frames.map((f) => f.at)).toEqual([0, 2, 4, 6, 8, 10, 12, 14]);
     expect(frames[3]).toEqual({ at: 6, text: null });
@@ -86,12 +71,12 @@ describe("readScreen", () => {
 
   it("splits frames into batches of 8 and keeps their order", async () => {
     const batches: string[][] = [];
-    const fetchFn = (async (_url: string, init: RequestInit) => {
-      const times = timesIn(asked(init).text);
+    const eye = eyeOf((ask) => {
+      const times = timesIn(ask);
       batches.push(times);
-      return chatAnswer(times.map((t) => `[${t}] t${t}`).join("\n"));
-    }) as unknown as typeof fetch;
-    const frames = await readScreen(shots(11), ["k"], { fetchFn, pause: noPause });
+      return times.map((t) => `[${t}] t${t}`).join("\n");
+    });
+    const frames = await readScreen(shots(11), eye);
     expect(batches.map((b) => b.length).sort()).toEqual([3, 8]);
     expect(frames.map((f) => f.at)).toEqual(Array.from({ length: 11 }, (_, i) => i * 2));
     expect(
@@ -103,18 +88,16 @@ describe("readScreen", () => {
 
   it("retries a refused batch once with the text-only ask, keeping what the first answer read", async () => {
     const asks: string[] = [];
-    const fetchFn = (async (_url: string, init: RequestInit) => {
-      const q = asked(init);
-      asks.push(q.text);
-      return asks.length === 1
-        ? chatAnswer("I can't assist with describing images of people.")
-        : chatAnswer(
-            timesIn(q.text)
+    const eye = eyeOf(
+      (ask) =>
+        asks.length === 1
+          ? "I can't assist with describing images of people."
+          : timesIn(ask)
               .map((t) => `[${t}] says ${t}`)
               .join("\n"),
-          );
-    }) as unknown as typeof fetch;
-    const frames = await readScreen(shots(3), ["k"], { fetchFn, pause: noPause });
+      asks,
+    );
+    const frames = await readScreen(shots(3), eye);
     expect(asks).toHaveLength(2);
     expect(asks[0]).not.toContain("Ignore people");
     expect(asks[1]).toContain("Read only on-screen text, UI and graphics. Ignore people.");
@@ -123,28 +106,25 @@ describe("readScreen", () => {
 
   it("a frame refused in a line is asked again; one the first answer read keeps its line", async () => {
     const asks: string[] = [];
-    const fetchFn = (async (_url: string, init: RequestInit) => {
-      const q = asked(init);
-      asks.push(q.text);
-      return asks.length === 1
-        ? chatAnswer(
-            "[0:00] SALE 50%\n[0:02] I'm sorry, I can't describe images of people.\n[0:04] none",
-          )
-        : chatAnswer("[0:00] changed\n[0:02] a title card\n[0:04] changed");
-    }) as unknown as typeof fetch;
-    const frames = await readScreen(shots(3), ["k"], { fetchFn, pause: noPause });
+    const eye = eyeOf(
+      () =>
+        asks.length === 1
+          ? "[0:00] SALE 50%\n[0:02] I'm sorry, I can't describe images of people.\n[0:04] none"
+          : "[0:00] changed\n[0:02] a title card\n[0:04] changed",
+      asks,
+    );
+    const frames = await readScreen(shots(3), eye);
     expect(asks).toHaveLength(2);
     expect(frames.map((f) => f.text)).toEqual(["SALE 50%", "a title card", ""]);
   });
 
   it("a frame still refused after the retry is not read, and a batch is asked twice at most", async () => {
-    let n = 0;
-    const fetchFn = (async () => {
-      n++;
-      return chatAnswer("I'm sorry, but I can't help with that.");
-    }) as unknown as typeof fetch;
-    const frames = await readScreen(shots(2), ["k"], { fetchFn, pause: noPause });
-    expect(n).toBe(2);
+    const asks: string[] = [];
+    const frames = await readScreen(
+      shots(2),
+      eyeOf(() => "I'm sorry, but I can't help with that.", asks),
+    );
+    expect(asks).toHaveLength(2);
     expect(frames).toEqual([
       { at: 0, text: null },
       { at: 2, text: null },
@@ -154,63 +134,25 @@ describe("readScreen", () => {
   it("an unasked batch leaves its frames not read; all of them failing throws", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const sent: string[] = [];
-      const half = (async (_url: string, init: RequestInit) => {
-        const q = asked(init);
-        sent.push(q.text);
-        if (q.text.includes("0:00,"))
-          return chatAnswer(
-            timesIn(q.text)
-              .map((t) => `[${t}] ok`)
-              .join("\n"),
-          );
-        return new Response("bad request", { status: 400 });
-      }) as unknown as typeof fetch;
-      const frames = await readScreen(shots(10), ["k"], { fetchFn: half, pause: noPause });
+      const half = eyeOf((ask) => {
+        if (!ask.includes("0:00,")) throw new InputRejected("bad request");
+        return timesIn(ask)
+          .map((t) => `[${t}] ok`)
+          .join("\n");
+      });
+      const frames = await readScreen(shots(10), half);
       expect(frames.slice(0, 8).every((f) => f.text === "ok")).toBe(true);
       expect(frames.slice(8)).toEqual([
         { at: 16, text: null },
         { at: 18, text: null },
       ]);
-      const none = (async () =>
-        new Response("bad request", { status: 400 })) as unknown as typeof fetch;
-      await expect(readScreen(shots(2), ["k"], { fetchFn: none, pause: noPause })).rejects.toThrow(
-        /cohere vision 0:00: HTTP 400/,
-      );
+      const none = eyeOf(() => {
+        throw new InputRejected("bad request");
+      });
+      await expect(readScreen(shots(2), none)).rejects.toThrow(/fake:eye 0:00: bad request/);
     } finally {
       warn.mockRestore();
     }
-  });
-});
-
-describe("cohereCall", () => {
-  it("hands a refused key's call to the next, and never puts a key in an error", async () => {
-    const used: string[] = [];
-    const fetchFn = (async (_url: string, init: RequestInit) => {
-      const auth = (init.headers as Record<string, string>).authorization as string;
-      used.push(auth);
-      return used.length === 1 ? new Response("{}", { status: 429 }) : Response.json({ ok: true });
-    }) as unknown as typeof fetch;
-    const r = await cohereCall<{ ok: boolean }>(
-      ["key-a", "key-b"],
-      "/v2/chat",
-      {},
-      {
-        fetchFn,
-        pause: noPause,
-      },
-    );
-    expect(r.ok).toBe(true);
-    expect(new Set(used).size).toBe(2);
-    const dead = (async () => new Response("no", { status: 401 })) as unknown as typeof fetch;
-    const err = await cohereCall(
-      ["key-a", "key-b"],
-      "/v2/chat",
-      {},
-      { fetchFn: dead, pause: noPause },
-    ).catch((e: Error) => e);
-    expect((err as Error).message).toMatch(/every try refused, last HTTP 401/);
-    expect((err as Error).message).not.toMatch(/key-[ab]/);
   });
 });
 
@@ -265,39 +207,33 @@ describe.skipIf(!hasFfmpeg)("watch", () => {
   });
   afterAll(() => rm(dir, { recursive: true, force: true }));
 
-  /** Cohere and Gemini, faked: every call is logged. */
-  const fakes = (gemini: "dead" | "live" | "none" = "none") => {
-    const log: { url: string; auth: string; body: unknown }[] = [];
-    const fetchFn = (async (input: string | URL | Request, init: RequestInit = {}) => {
-      const url = String(input);
-      const headers = (init.headers ?? {}) as Record<string, string>;
-      log.push({
-        url,
-        auth: headers.authorization ?? headers["x-goog-api-key"] ?? "",
-        body: init.body,
-      });
-      if (url.endsWith("/v2/audio/transcriptions"))
-        return Response.json({ text: "hello from the fixture" });
-      if (url.endsWith("/v2/chat"))
-        return chatAnswer(
-          timesIn(asked(init).text)
-            .map((t) => `[${t}] caption ${t}`)
-            .join("\n"),
-        );
-      if (url.includes("/v1beta/models?"))
-        return new Response("{}", { status: gemini === "live" ? 200 : 403 });
-      if (url.includes(":generateContent"))
-        return Response.json({
-          candidates: [{ content: { parts: [{ text: "[0:00:01] [visual] a slide" }] } }],
-        });
-      throw new Error(`unexpected ${url}`);
-    }) as unknown as typeof fetch;
-    return { fetchFn, log };
+  /** The eye, ear and video model, faked: every call is logged. */
+  const fakes = () => {
+    const log: { by: string; images: number; ask: string; media?: string }[] = [];
+    const eye = fakeModel((ask, req) => {
+      const parts = typeof req.prompt === "string" ? [] : req.prompt;
+      log.push({ by: "eye", images: parts.filter((p) => p.type === "image").length, ask });
+      return timesIn(ask)
+        .map((t) => `[${t}] caption ${t}`)
+        .join("\n");
+    }, "fake:eye");
+    const ear = fakeEar((audio, o) => {
+      log.push({ by: "ear", images: 0, ask: `${audio.mediaType} ${o.language}` });
+      expect(audio.data.byteLength).toBeGreaterThan(1000);
+      return "hello from the fixture";
+    });
+    const video = fakeModel((ask, req) => {
+      const parts = typeof req.prompt === "string" ? [] : req.prompt;
+      const media = parts.find((p) => p.type === "video");
+      log.push({ by: "video", images: 0, ask, ...(media ? { media: media.mediaType } : {}) });
+      return "[0:00:01] [visual] a slide";
+    }, "fake:video");
+    return { eye, ear, video, log };
   };
 
-  it("reads a file: ffmpeg facts, Cohere speech and screen, every line on its frame time", async () => {
-    const { fetchFn, log } = fakes();
-    const w = await watch(video, { cohereKeys: ["k1"], fetchFn, pause: noPause });
+  it("reads a file: ffmpeg facts, the ear's speech and the eye's screen, every line on its frame time", async () => {
+    const { eye, ear, log } = fakes();
+    const w = await watch(video, { eye, ear });
     expect(w.durationS).toBeGreaterThan(3.5);
     expect(w.durationS).toBeLessThan(4.5);
     expect(w.speech).toBe("hello from the fixture");
@@ -306,26 +242,12 @@ describe.skipIf(!hasFfmpeg)("watch", () => {
     expect(w.cuts[0]).toBeLessThan(2.2);
     expect(w.frames.map((f) => f.at)).toEqual([0, 2]);
     expect(w.frames.map((f) => f.text)).toEqual(["caption 0:00", "caption 0:02"]);
-    expect(w.gemini).toBeUndefined();
+    expect(w.whole).toBeUndefined();
 
-    const speech = log.find((c) => c.url.endsWith("/v2/audio/transcriptions"));
-    const form = speech?.body as FormData;
-    expect(form.get("model")).toBe("cohere-transcribe-03-2026");
-    expect(form.get("language")).toBe("en");
-    expect((form.get("file") as File).size).toBeGreaterThan(1000);
-    expect(speech?.auth).toBe("Bearer k1");
-    const vision = log.filter((c) => c.url.endsWith("/v2/chat"));
+    expect(log.find((c) => c.by === "ear")?.ask).toBe("audio/mpeg en");
+    const vision = log.filter((c) => c.by === "eye");
     expect(vision).toHaveLength(1);
-    const parts =
-      (
-        JSON.parse(String(vision[0]?.body)) as {
-          messages: { content: { type: string; image_url?: { url: string } }[] }[];
-        }
-      ).messages[0]?.content ?? [];
-    expect(parts[0]?.type).toBe("text");
-    const images = parts.filter((p) => p.type === "image_url");
-    expect(images).toHaveLength(2);
-    expect(images[0]?.image_url?.url).toMatch(/^data:image\/jpeg;base64,/);
+    expect(vision[0]?.images).toBe(2);
 
     const md = renderWatched(w);
     expect(md).toContain(
@@ -334,50 +256,36 @@ describe.skipIf(!hasFfmpeg)("watch", () => {
     expect(md).toContain(cutsLine(w));
   }, 30_000);
 
-  it("skips the transcription when the caller has the words", async () => {
-    const { fetchFn, log } = fakes();
-    const w = await watch(video, { cohereKeys: ["k1"], fetchFn, pause: noPause, speech: false });
-    expect(w.speech).toBe("");
-    expect(log.some((c) => c.url.includes("transcriptions"))).toBe(false);
+  it("skips the transcription when the caller has the words, or gave no ear", async () => {
+    const { eye, ear, log } = fakes();
+    expect((await watch(video, { eye, ear, speech: false })).speech).toBe("");
+    expect((await watch(video, { eye })).speech).toBe("");
+    expect(log.some((c) => c.by === "ear")).toBe(false);
   }, 30_000);
 
-  it("skips Gemini without an error when no key works, and adds its screen when one does", async () => {
-    const dead = fakes("dead");
-    const w = await watch(video, {
-      cohereKeys: ["k1"],
-      geminiKeys: ["g1"],
-      fetchFn: dead.fetchFn,
-      pause: noPause,
-    });
-    expect(w.gemini).toBeUndefined();
-    expect(dead.log.some((c) => c.url.includes(":generateContent"))).toBe(false);
-    expect(renderWatched(w)).not.toContain("Gemini");
-
-    const live = fakes("live");
-    const g = await watch(video, {
-      cohereKeys: ["k1"],
-      geminiKeys: ["g1"],
-      fetchFn: live.fetchFn,
-      pause: noPause,
-    });
-    expect(g.gemini).toBe("[0:00:01] [visual] a slide");
-    expect(renderWatched(g)).toContain("## On screen (Gemini)\n\n[0:00:01] [visual] a slide");
-    const ask = live.log.find((c) => c.url.includes(":generateContent"));
-    expect(String(ask?.body)).toContain("inlineData");
+  it("adds the video model's read of the whole file, sent inline as video", async () => {
+    const { eye, video: whole, log } = fakes();
+    const g = await watch(video, { eye, video: whole });
+    expect(g.whole).toBe("[0:00:01] [visual] a slide");
+    expect(renderWatched(g)).toContain("## On screen (whole video)\n\n[0:00:01] [visual] a slide");
+    expect(log.find((c) => c.by === "video")?.media).toBe("video/mp4");
+    expect(renderWatched(await watch(video, { eye, video: null }))).not.toContain("whole video");
   }, 30_000);
 
-  it("says what it could not open", async () => {
-    await expect(watch(join(dir, "missing.mp4"), { cohereKeys: ["k1"] })).rejects.toThrow(
+  it("says what it could not open, and refuses a video model that takes no video", async () => {
+    const { eye } = fakes();
+    await expect(watch(join(dir, "missing.mp4"), { eye })).rejects.toThrow(
       /ffprobe could not read it/,
     );
-    await expect(watch(video, { cohereKeys: [] })).rejects.toThrow(/needs COHERE keys/);
+    const blind = modelOf({ ...eye, takes: new Set(["text", "image"] as const) });
+    await expect(watch(video, { eye, video: blind })).rejects.toThrow(/takes no video/);
   });
 
   it("leaves no work directory behind", async () => {
     const mine = async () => (await readdir(tmpdir())).filter((n) => n.startsWith("watch-"));
     const before = new Set(await mine());
-    const { fetchFn } = fakes();
-    await watch(video, { cohereKeys: ["k1"], fetchFn, pause: noPause });
+    const { eye, ear } = fakes();
+    await watch(video, { eye, ear });
     expect((await mine()).filter((n) => !before.has(n))).toEqual([]);
   }, 30_000);
 });

@@ -1,13 +1,14 @@
 /**
  * A video or podcast read as one markdown document: the `VideoRead` shape, the captions renderer
  * (a YouTube json3 track to a heading per chapter) and the audio hearer (a file cut by ffmpeg into
- * clips, each transcribed by Gemini). Everything here takes text or a file on disk; fetching the
- * captions or the audio is weaver's (`@wrenautomation/weaver/video`). Every caller passes its own
- * keys and tools. Nothing here touches a database.
+ * clips, each transcribed by a model that takes audio). Everything here takes text or a file on
+ * disk; fetching the captions or the audio is weaver's (`@wrenautomation/weaver/video`). Every
+ * caller passes its own models and tools. Nothing here touches a database.
  */
 import { readdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { askGemini } from "./gemini.js";
+import type { Model } from "@wrenautomation/models";
+import { readMedia } from "./gemini.js";
 import type { VideoInfo } from "./index.js";
 import { clock, run } from "./tools.js";
 
@@ -83,24 +84,23 @@ const HEARD = (start: number) =>
 
 /**
  * A podcast episode heard from its audio file on disk: cut by ffmpeg into `CLIP_S` mono clips
- * small enough to send inline (about 2 MB each), each transcribed by Gemini, 4 at a time, times
- * running on across clips. The clips are written beside the file and left for the caller's
- * cleanup. `label` names the calls in errors.
+ * small enough to send inline (about 2 MB each), each transcribed by `model` (`geminiVideo`), 4 at
+ * a time, times running on across clips. The clips are written beside the file and left for the
+ * caller's cleanup. `label` names the calls in errors.
  */
 export async function hearAudio(
   file: string,
   opts: {
-    geminiKeys: readonly string[];
-    fetchFn?: typeof fetch;
+    /** Takes audio: Gemini reads speakers and times where a plain transcriber gives words. */
+    model: Model;
     ffmpeg?: string;
     /** Seconds per clip; `CLIP_S` unless a test cuts a short tone. */
     clipS?: number;
     label?: string;
   },
 ): Promise<{ speech: string; duration: number }> {
-  if (!opts.geminiKeys.length) throw new Error(`${file}: needs Gemini keys to transcribe`);
+  if (!opts.model.takes.has("audio")) throw new Error(`${file}: ${opts.model.id} takes no audio`);
   const clipS = opts.clipS ?? CLIP_S;
-  const fetchFn = opts.fetchFn ?? fetch;
   const ffmpeg = opts.ffmpeg ?? "ffmpeg";
   const label = opts.label ?? file;
   const dir = dirname(file);
@@ -116,22 +116,15 @@ export async function hearAudio(
   const clips = (await readdir(dir)).filter((f) => f.startsWith("clip")).sort();
   if (!clips.length) throw new Error(`${file}: ffmpeg cut no clips`);
   const hear = async (clip: string, i: number) => {
-    const data = (await readFile(join(dir, clip))).toString("base64");
-    const said = await askGemini(
-      {
-        contents: [
-          {
-            parts: [{ inlineData: { mimeType: "audio/ogg", data } }, { text: HEARD(i * clipS) }],
-          },
-        ],
-      },
-      opts.geminiKeys,
-      fetchFn,
-      `${label} ${clock(i * clipS)} speech`,
-    );
-    if ("unread" in said)
-      throw new Error(`gemini ${label} ${clock(i * clipS)}: unread, last ${said.unread}`);
-    return real(said.text) ? said.text : "";
+    const at = `${label} ${clock(i * clipS)} speech`;
+    const said = await readMedia(
+      opts.model,
+      [{ type: "audio", data: await readFile(join(dir, clip)), mediaType: "audio/ogg" }],
+      HEARD(i * clipS),
+    ).catch((err: unknown) => {
+      throw new Error(`${at}: ${err instanceof Error ? err.message : err}`, { cause: err });
+    });
+    return real(said) ? said : "";
   };
   const speech: string[] = [];
   for (let i = 0; i < clips.length; i += 4)

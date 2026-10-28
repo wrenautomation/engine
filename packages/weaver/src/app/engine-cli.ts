@@ -13,6 +13,7 @@
 import { userInfo } from "node:os";
 import type { Extractor } from "@wrenautomation/falcon/document";
 import { claimExtractor } from "@wrenautomation/falcon/document";
+import { geminiVideo } from "@wrenautomation/falcon/video";
 import { isTransient, type Model } from "@wrenautomation/models";
 import { modelFromSpec } from "@wrenautomation/models/spec";
 import {
@@ -150,7 +151,13 @@ export function sourcesHere(
     );
   const exaKeys = keys(printed, "EXA_API_KEY");
   if (exaKeys.length) out.push(exa({ keys: exaKeys }));
-  out.push(ytdlpSource({ ytDlp, geminiKeys: keys(printed, "GEMINI_API_KEY") }));
+  const geminiKeys = keys(printed, "GEMINI_API_KEY");
+  out.push(
+    ytdlpSource({
+      ytDlp,
+      ...(geminiKeys.length ? { video: () => geminiVideo(geminiKeys) } : {}),
+    }),
+  );
   if (printed.WEAVER_CONTACT)
     out.push(fetcherSource({ fetcher: new PoliteFetcher(userAgent(printed.WEAVER_CONTACT)) }));
   else warn("no WEAVER_CONTACT (an email address or URL for site operators): pages stay unopened");

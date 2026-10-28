@@ -9,7 +9,8 @@ import { readFile } from "node:fs/promises";
 import { Command } from "commander";
 import { readPage } from "../text/htmltext.js";
 import { htmlText, pdfText } from "../text/text.js";
-import { frameCounts, renderWatched, watch } from "../video/watch.js";
+import { geminiVideo } from "../video/gemini.js";
+import { cohereEye, cohereSpeech, frameCounts, renderWatched, watch } from "../video/watch.js";
 
 /** `NAME`, then `NAME_1`, `NAME_2`, ... in order: a fleet of keys for one vendor. */
 function keys(env: NodeJS.ProcessEnv, name: string): string[] {
@@ -65,8 +66,9 @@ program
     const cohereKeys = keys(process.env, "COHERE_API_KEY");
     if (!cohereKeys.length) throw new Error("watch needs COHERE_API_KEY");
     const watched = await watch(input, {
-      cohereKeys,
-      geminiKeys: keys(process.env, "GEMINI_API_KEY"),
+      eye: cohereEye(cohereKeys),
+      ear: cohereSpeech(cohereKeys),
+      video: await geminiVideo(keys(process.env, "GEMINI_API_KEY")),
       ffmpeg: o.ffmpeg,
       speech: o.speech,
       language: o.language,

@@ -1,5 +1,5 @@
 /** Models for tests and dry runs: no network, no keys. */
-import { modelOf, promptText } from "./model.js";
+import { modelOf } from "./model.js";
 import type { Model, Reply, Request } from "./types.js";
 
 const reply = (text: string, model: string): Reply => ({
@@ -11,7 +11,13 @@ const reply = (text: string, model: string): Reply => ({
   raw: { fake: true },
 });
 
-/** Answers each call from `respond` (the prompt's text and the system), or a fixed string. */
+/** The prompt's text parts, joined; media parts are skipped (they are on `req.prompt`). */
+const textOf = (prompt: Request["prompt"]) =>
+  typeof prompt === "string"
+    ? prompt
+    : prompt.flatMap((p) => (p.type === "text" ? [p.text] : [])).join("\n\n");
+
+/** Answers each call from `respond` (the prompt's text and the request), or a fixed string. */
 export function fakeModel(
   respond: string | ((prompt: string, req: Request) => string | Promise<string>) = "{}",
   id = "fake",
@@ -21,8 +27,7 @@ export function fakeModel(
     provider: "fake",
     takes: new Set(["text", "image", "video", "audio", "pdf"]),
     async complete(req) {
-      const text =
-        typeof respond === "string" ? respond : await respond(promptText(req.prompt) ?? "", req);
+      const text = typeof respond === "string" ? respond : await respond(textOf(req.prompt), req);
       return reply(text, id);
     },
   });

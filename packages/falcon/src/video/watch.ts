@@ -1,9 +1,9 @@
 /**
  * Watching a video (designs/2026-10-21-video-watch.md). ffmpeg gives the facts: length,
- * scene cuts, one 360p frame every 2 s, the speech as a small mono mp3. Cohere reads them: the
- * speech with Transcribe, the on-screen text with command-a-vision. Gemini adds its own read of
- * the screen only when a key still works. One core; every caller passes its own keys and tools.
- * Nothing here touches a database.
+ * scene cuts, one 360p frame every 2 s, the speech as a small mono mp3. Models read them: an ear
+ * hears the speech (Cohere's Transcribe), an eye reads the frames as images (command-a-vision),
+ * and a model that takes video (Gemini) may read the whole of it too. One core; every caller
+ * passes its own models and tools. Nothing here touches a database.
  *
  * Cohere's vision is weak, so the result keeps what it did not read: a frame with no line is
  * `null`, never filled from its neighbours, and every line carries its ffmpeg frame time.
@@ -11,18 +11,16 @@
 import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { askShown, INLINE_MAX, SHOWN, shrink } from "./gemini.js";
+import { cohere, type Model, type RotateOptions } from "@wrenautomation/models";
+import { cohereEar, type Ear } from "@wrenautomation/models/hear";
+import { INLINE_MAX, readMedia, SHOWN, shrink } from "./gemini.js";
 import { clock, runFor, TOOL_MS } from "./tools.js";
 
-const COHERE = "https://api.cohere.com";
-const COHERE_SPEECH_MODEL = "cohere-transcribe-03-2026";
 export const COHERE_VISION_MODEL = "command-a-vision-07-2025";
 /** The text model for asks that need no picture (`video look --with cohere`). */
-/** Cohere's text model on its OpenAI-compatible route. */
 export const COHERE_TEXT_MODEL = "command-a-03-2025";
-/** Cohere takes 25 MB of audio a call; at 48 kbps that is about 70 minutes. */
-const COHERE_FILE_MAX = 25_000_000;
-const COHERE_CALL_MS = 120_000;
+/** Trial keys allow about 20 calls a minute: wait out a busy ring, 2 s doubling to 30 s. */
+const COHERE_ROTATE: RotateOptions = { passes: 4, waitMs: 2000, maxWaitMs: 30_000 };
 /** Frames per vision call. */
 const BATCH = 8;
 /** Vision calls at one time; trial keys allow about 20 calls a minute. */
@@ -51,115 +49,43 @@ export interface Watched {
   cutsBy?: Record<SceneDetector, number[]>;
   /** Whether the file has a sound track at all. */
   audio: boolean;
-  /** What Cohere heard; "" when nobody speaks or speech was not asked for. */
+  /** What the ear heard; "" when nobody speaks or speech was not asked for. */
   speech: string;
   frames: Frame[];
-  /** Gemini's read of the screen, when a key worked. */
-  gemini?: string;
+  /** The video model's read of the whole screen, when one was given and it answered. */
+  whole?: string;
 }
 
 export interface WatchOptions {
-  cohereKeys: readonly string[];
-  /** Optional: their read of the screen is added when one still works. */
-  geminiKeys?: readonly string[];
+  /** Reads the frames, `BATCH` images a call (`cohereEye`). */
+  eye: Model;
+  /** Hears the speech (`cohereEar` from models). None: no transcript. */
+  ear?: Ear;
+  /** Optional: reads the whole video for what it shows (`geminiVideo`). It must take video. */
+  video?: Model | null;
   ffmpeg?: string;
   /** The PySceneDetect command (split on spaces: `uvx scenedetect`); set, its cuts come too (`cutsBy`). */
   sceneDetect?: string;
-  fetchFn?: typeof fetch;
   /** False: skip the transcription (the caller has the words already). */
   speech?: boolean;
   /** ISO 639-1 code of the spoken language. */
   language?: string;
   /** Seconds between frames; stretched so a long video stays under `MAX_FRAMES`. */
   everyS?: number;
-  /** For tests: stands in for the wait between retries. */
-  pause?: (ms: number) => Promise<void>;
 }
 
-type Pause = (ms: number) => Promise<void>;
-const sleep: Pause = (ms) => new Promise((r) => setTimeout(r, ms));
+/** Cohere's vision model on a key ring, waiting out a busy ring. */
+export const cohereEye = (keys: readonly string[], o: { fetch?: typeof fetch } = {}): Model =>
+  cohere({ key: keys, model: COHERE_VISION_MODEL, rotate: COHERE_ROTATE, ...o });
+
+/** Cohere's Transcribe on a key ring, waiting out a busy ring. */
+export const cohereSpeech = (keys: readonly string[], o: { fetch?: typeof fetch } = {}): Ear =>
+  cohereEar({ key: keys, rotate: COHERE_ROTATE, ...o });
 
 /** `0:03.2`, a mark with a tenth of a second. */
 export function stamp(s: number): string {
   const t = Math.round(s * 10);
   return `${clock(Math.floor(t / 10))}.${t % 10}`;
-}
-
-let nextCohere = 0;
-/** Keys rotate on these; the rest of the 4xx are our mistake and stop the call. */
-const RETRY = new Set([401, 403, 429, 500, 502, 503, 504]);
-
-/**
- * One Cohere call (JSON body or a multipart `FormData`). A bad key (401/403), a limit (429) or a
- * busy server hands the call to the next key, waiting 2 s doubling to 30 s on the last two; any
- * other refusal throws at once. The key goes in a header and never into an error.
- */
-export async function cohereCall<T>(
-  keys: readonly string[],
-  path: string,
-  body: object | FormData,
-  o: { fetchFn?: typeof fetch; pause?: Pause; label?: string } = {},
-): Promise<T> {
-  const label = o.label ?? path;
-  if (!keys.length) throw new Error(`cohere ${label}: no COHERE keys`);
-  const fetchFn = o.fetchFn ?? fetch;
-  const pause = o.pause ?? sleep;
-  const form = body instanceof FormData;
-  let last = "";
-  let wait = 2000;
-  for (let i = 0; i < Math.max(3, keys.length * 2); i++) {
-    const key = keys[nextCohere++ % keys.length] as string;
-    let res: Response;
-    try {
-      res = await fetchFn(`${COHERE}${path}`, {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${key}`,
-          ...(form ? {} : { "content-type": "application/json" }),
-        },
-        body: form ? body : JSON.stringify(body),
-        signal: AbortSignal.timeout(COHERE_CALL_MS),
-      });
-    } catch (err) {
-      last = err instanceof Error ? err.message : String(err);
-      await pause(wait);
-      wait = Math.min(wait * 2, 30_000);
-      continue;
-    }
-    const text = await res.text();
-    if (res.ok) {
-      try {
-        return JSON.parse(text) as T;
-      } catch {
-        throw new Error(`cohere ${label}: answered ${text.slice(0, 80)}, not JSON`);
-      }
-    }
-    last = `HTTP ${res.status} ${text.slice(0, 200)}`;
-    if (!RETRY.has(res.status)) throw new Error(`cohere ${label}: ${last}`);
-    if (res.status !== 401 && res.status !== 403) {
-      await pause(wait);
-      wait = Math.min(wait * 2, 30_000);
-    }
-  }
-  throw new Error(`cohere ${label}: every try refused, last ${last}`);
-}
-
-/** A chat answer's text. */
-export async function cohereChat(
-  keys: readonly string[],
-  body: object,
-  o: Parameters<typeof cohereCall>[3] = {},
-): Promise<string> {
-  const r = await cohereCall<{ message?: { content?: { text?: string }[] } }>(
-    keys,
-    "/v2/chat",
-    body,
-    { label: "chat", ...o },
-  );
-  return (r.message?.content ?? [])
-    .map((c) => c.text ?? "")
-    .join("")
-    .trim();
 }
 
 // -- the screen ---------------------------------------------------------------------------
@@ -197,32 +123,23 @@ function parseScreen(answer: string, times: ReadonlySet<string>) {
 
 type Shot = { at: number; jpeg: Buffer };
 
-async function readBatch(
-  batch: Shot[],
-  keys: readonly string[],
-  o: { fetchFn?: typeof fetch; pause?: Pause },
-): Promise<Frame[]> {
+async function readBatch(batch: Shot[], eye: Model): Promise<Frame[]> {
   const times = batch.map((f) => clock(f.at));
   const ask = (extra: string) =>
-    cohereChat(
-      keys,
-      {
-        model: COHERE_VISION_MODEL,
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: `${SCREEN_ASK(times)}${extra}` },
-              ...batch.map((f) => ({
-                type: "image_url",
-                image_url: { url: `data:image/jpeg;base64,${f.jpeg.toString("base64")}` },
-              })),
-            ],
-          },
+    eye
+      .complete({
+        prompt: [
+          { type: "text", text: `${SCREEN_ASK(times)}${extra}` },
+          ...batch.map((f) => ({ type: "image" as const, data: f.jpeg, mediaType: "image/jpeg" })),
         ],
-      },
-      { ...o, label: `vision ${times[0]}` },
-    );
+      })
+      .then(
+        (r) => r.text,
+        (err: unknown) => {
+          const why = err instanceof Error ? err.message : String(err);
+          throw new Error(`${eye.id} ${times[0]}: ${why}`, { cause: err });
+        },
+      );
   const first = parseScreen(await ask(""), new Set(times));
   if (first.refused) {
     // Once more, told to leave people out. A frame the first answer read keeps its line.
@@ -238,18 +155,14 @@ async function readBatch(
  * batch that cannot be asked at all leaves its frames unread (and a warning); all of them
  * failing throws.
  */
-export async function readScreen(
-  shots: Shot[],
-  keys: readonly string[],
-  o: { fetchFn?: typeof fetch; pause?: Pause } = {},
-): Promise<Frame[]> {
+export async function readScreen(shots: Shot[], eye: Model): Promise<Frame[]> {
   const batches: Shot[][] = [];
   for (let i = 0; i < shots.length; i += BATCH) batches.push(shots.slice(i, i + BATCH));
   const out: Frame[] = [];
   const errors: Error[] = [];
   for (let i = 0; i < batches.length; i += BATCHES_AT_ONCE) {
     const group = batches.slice(i, i + BATCHES_AT_ONCE);
-    const done = await Promise.allSettled(group.map((b) => readBatch(b, keys, o)));
+    const done = await Promise.allSettled(group.map((b) => readBatch(b, eye)));
     for (const [j, r] of done.entries()) {
       if (r.status === "fulfilled") {
         out.push(...r.value);
@@ -377,8 +290,8 @@ async function speech(
   file: string,
   dir: string,
   ffmpeg: string,
-  keys: readonly string[],
-  o: { language: string; fetchFn?: typeof fetch; pause?: Pause },
+  ear: Ear,
+  o: { language: string; seconds: number },
 ): Promise<string> {
   const mp3 = join(dir, "speech.mp3");
   await runFor(
@@ -389,78 +302,38 @@ async function speech(
     ],
     TOOL_MS,
   );
-  const bytes = await readFile(mp3);
-  if (bytes.length > COHERE_FILE_MAX)
-    throw new Error(
-      `speech: ${(bytes.length / 1e6).toFixed(1)} MB of audio, over Cohere's ${COHERE_FILE_MAX / 1e6} MB`,
-    );
-  const form = new FormData();
-  form.set("model", COHERE_SPEECH_MODEL);
-  form.set("language", o.language);
-  form.set("file", new Blob([bytes], { type: "audio/mpeg" }), "speech.mp3");
-  const r = await cohereCall<{ text?: string }>(keys, "/v2/audio/transcriptions", form, {
-    ...o,
-    label: "transcribe",
-  });
-  return (r.text ?? "").trim();
-}
-
-// -- Gemini, when it works ---------------------------------------------------------------
-
-const GEMINI_KEY_CHECK = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1";
-
-/** The keys the API still accepts; a revoked fleet gives none, quickly. */
-async function liveGeminiKeys(keys: readonly string[], fetchFn: typeof fetch): Promise<string[]> {
-  const ok = await Promise.all(
-    keys.map((key) =>
-      fetchFn(GEMINI_KEY_CHECK, {
-        headers: { "x-goog-api-key": key },
-        signal: AbortSignal.timeout(15_000),
-      }).then(
-        (r) => r.ok,
-        () => false,
-      ),
-    ),
+  const heard = await ear.hear(
+    { data: await readFile(mp3), mediaType: "audio/mpeg", filename: "speech.mp3" },
+    o,
   );
-  return keys.filter((_, i) => ok[i]);
+  return heard.text.trim();
 }
 
-/** Gemini's read of the screen from the video inline, as the SOP reader did before Cohere. Undefined: no key worked, or nothing came back. */
-async function geminiScreen(
+// -- the whole video ---------------------------------------------------------------------
+
+/** The video model's read of the screen from the file inline. Undefined: too large, or nothing came back. */
+async function wholeScreen(
   file: string,
   dir: string,
-  keys: readonly string[],
-  o: { ffmpeg: string; fetchFn: typeof fetch; info: Parameters<typeof shrink>[2] },
+  video: Model,
+  o: { ffmpeg: string; info: Parameters<typeof shrink>[2] },
 ): Promise<string | undefined> {
-  const live = await liveGeminiKeys(keys, o.fetchFn);
-  if (!live.length) return undefined;
   let bytes: Buffer = await readFile(file);
   if (bytes.length > INLINE_MAX)
     bytes = await shrink(file, join(dir, "small.mp4"), o.info, o.ffmpeg);
   if (bytes.length > INLINE_MAX) return undefined;
-  const video = { inlineData: { mimeType: "video/mp4", data: bytes.toString("base64") } };
-  const r = await askShown(
-    (paraphrase) => ({
-      contents: [
-        {
-          parts: [
-            video,
-            {
-              text: `${SHOWN(0, paraphrase)} Markdown. If nothing is shown, reply with the single word none.`,
-            },
-          ],
-        },
-      ],
-    }),
-    live,
-    o.fetchFn,
-    "watch screen",
-  );
-  if ("unread" in r) {
-    console.warn(`gemini watch screen: unread, last ${r.unread}`);
+  try {
+    const text = await readMedia(
+      video,
+      [{ type: "video", data: bytes, mediaType: "video/mp4" }],
+      (paraphrase) =>
+        `${SHOWN(0, paraphrase)} Markdown. If nothing is shown, reply with the single word none.`,
+    );
+    return text && text.toLowerCase() !== "none" ? text : undefined;
+  } catch (err) {
+    console.warn(`${video.id} watch screen: not read, ${err instanceof Error ? err.message : err}`);
     return undefined;
   }
-  return r.text.toLowerCase() === "none" ? undefined : r.text;
 }
 
 // -- the core -----------------------------------------------------------------------------
@@ -474,10 +347,9 @@ async function allSettled<T extends unknown[]>(ps: { [K in keyof T]: Promise<T[K
 
 /** Watch a video file on disk (a URL is fetched first by weaver's `watch`). */
 export async function watch(input: string, opts: WatchOptions): Promise<Watched> {
-  if (!opts.cohereKeys.length)
-    throw new Error(`${input}: needs COHERE keys to read the speech and the screen`);
+  if (opts.video && !opts.video.takes.has("video"))
+    throw new Error(`${input}: ${opts.video.id} takes no video; pass it as the eye`);
   const ffmpeg = opts.ffmpeg ?? "ffmpeg";
-  const fetchFn = opts.fetchFn ?? fetch;
   const dir = await mkdtemp(join(tmpdir(), "watch-"));
   try {
     const file = resolve(input);
@@ -487,7 +359,6 @@ export async function watch(input: string, opts: WatchOptions): Promise<Watched>
     if (!facts.picture) throw new Error(`${input}: no picture to watch`);
     const durationS = facts.durationS;
     const every = Math.max(opts.everyS ?? FRAME_EVERY_S, Math.ceil(durationS / MAX_FRAMES));
-    const call = { fetchFn, ...(opts.pause ? { pause: opts.pause } : {}) };
     const psd = async (d: SceneDetector) =>
       opts.sceneDetect ? sceneDetectCuts(file, d, opts.sceneDetect, dir) : [];
     const [c, h, a, f, s, g] = await allSettled<
@@ -496,14 +367,16 @@ export async function watch(input: string, opts: WatchOptions): Promise<Watched>
       sceneCuts(file, ffmpeg),
       psd("hash"),
       psd("adaptive"),
-      frames(file, dir, every, ffmpeg).then((shots) => readScreen(shots, opts.cohereKeys, call)),
-      opts.speech === false || !facts.audio
+      frames(file, dir, every, ffmpeg).then((shots) => readScreen(shots, opts.eye)),
+      opts.speech === false || !facts.audio || !opts.ear
         ? Promise.resolve("")
-        : speech(file, dir, ffmpeg, opts.cohereKeys, { language: opts.language ?? "en", ...call }),
-      opts.geminiKeys?.length
-        ? geminiScreen(file, dir, opts.geminiKeys, {
+        : speech(file, dir, ffmpeg, opts.ear, {
+            language: opts.language ?? "en",
+            seconds: durationS,
+          }),
+      opts.video
+        ? wholeScreen(file, dir, opts.video, {
             ffmpeg,
-            fetchFn,
             info: {
               duration: durationS,
               ...(facts.width ? { width: facts.width } : {}),
@@ -519,7 +392,7 @@ export async function watch(input: string, opts: WatchOptions): Promise<Watched>
       audio: facts.audio,
       speech: s,
       frames: f,
-      ...(g ? { gemini: g } : {}),
+      ...(g ? { whole: g } : {}),
     };
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -580,7 +453,7 @@ export function renderWatched(w: Watched): string {
   return [
     `## Speech\n\n${w.speech || "(no speech)"}`,
     `## On screen\n\n${screen}`,
-    ...(w.gemini ? [`## On screen (Gemini)\n\n${w.gemini}`] : []),
+    ...(w.whole ? [`## On screen (whole video)\n\n${w.whole}`] : []),
     `## Cuts\n\n${cutsLine(w)}`,
     // Only a film's page carries the fence: a reel's cuts are the line above.
     ...(w.cutsBy ? [`## Facts\n\n\`\`\`json\n${JSON.stringify(watchFacts(w))}\n\`\`\``] : []),

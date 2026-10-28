@@ -10,11 +10,11 @@ Three doors:
 | Import | Does |
 |---|---|
 | `@wrenautomation/falcon/text` | `htmlText`, `pdfText`, `decodeHtml`; `readPage` (HTML to title, text, links, mailtos, tels) |
-| `@wrenautomation/falcon/video` | `watch` a video file: ffmpeg cuts and frames, Cohere speech and on-screen text, Gemini's read of the screen when a key works; shot labels. `captionsBody` renders a caption track per chapter, `hearAudio` transcribes an audio file by clips; both feed the one `VideoRead` shape weaver's readers return |
+| `@wrenautomation/falcon/video` | `watch` a video file: ffmpeg cuts and frames, an ear for the speech (`cohereSpeech`), an eye for the frames (`cohereEye`), and a video model's read of the whole file when given (`geminiVideo`); shot labels. Every model call goes through `@wrenautomation/models`. `captionsBody` renders a caption track per chapter, `hearAudio` transcribes an audio file by clips; both feed the one `VideoRead` shape weaver's readers return |
 | `@wrenautomation/falcon/study` | a study's synthesis reader: the quote gate (`pageQuoted`, `numbersQuoted`), the passages a page is shown by, drafts that cite claims, the markdown report. The planner (queries per angle, which pages to read, the claim gate per angle) went in 0.5.0: raven plans, weaver runs |
 | `@wrenautomation/falcon/document` | the research engine's document side: `Document`, `Finding`, `Proof`, `Verdict` (zod), readers by media (`html`, `pdf`, `text`; add `video`, `audio`), `claimExtractor` (findings that quote the document, through the gate, and a verdict on the document: its quality and the ask's gap; no cap on findings or their length, and an answer the model's output cap cut is continued from its last kept quote), the `Model` seam it takes and the `Cut` a model throws when its cap cut an answer |
 
-Everything is a pure function of what you pass: bytes, text, a file path, keys.
+Everything is a pure function of what you pass: bytes, text, a file path, models.
 What fetches a page or a video is weaver's (`@wrenautomation/weaver`: polite HTTP, robots, the
 fetch ladder, yt-dlp). What searches, stores, schedules or knows a customer belongs to the caller.
 

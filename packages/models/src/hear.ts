@@ -161,3 +161,18 @@ export const groqEar = (o: {
     ...(o.rotate ? { rotate: o.rotate } : {}),
     ...(o.fetch ? { fetch: o.fetch } : {}),
   });
+
+/** An ear for tests and dry runs: no network, no keys. Answers each call from `respond`. */
+export function fakeEar(
+  respond: string | ((audio: Audio, o: HearOptions) => string | Promise<string>) = "",
+  id = "fake:ear",
+): Ear {
+  return {
+    id,
+    model: id,
+    async hear(audio, o = {}) {
+      const text = typeof respond === "string" ? respond : await respond(audio, o);
+      return { text, model: id, ms: 0, usd: 0 };
+    },
+  };
+}

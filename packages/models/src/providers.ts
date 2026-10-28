@@ -10,7 +10,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { type RotateOptions, rotating } from "./keys.js";
 import { TEXT_ONLY } from "./model.js";
 import { sdkModel } from "./sdk.js";
-import type { Model, PartKind } from "./types.js";
+import type { Clip, Model, PartKind } from "./types.js";
 
 const kinds = (...k: PartKind[]): ReadonlySet<PartKind> => new Set(k);
 const keyList = (key: string | readonly string[]) => (typeof key === "string" ? [key] : key);
@@ -65,8 +65,9 @@ export function anthropic(o: VendorOptions): Model {
 }
 
 /**
- * Gemini on the free key ring. It takes every part kind, YouTube URLs as video included; a video
- * part with a `clip` goes through the Interactions API, the one that reads a stretch.
+ * Gemini on the free key ring. It takes every part kind, YouTube URLs as video included. A video
+ * part with a `clip` goes to generateContent with `videoMetadata` (`withClips`). Gemini's
+ * Interactions API also reads a stretch, but on free keys its flash quota is spent at once.
  */
 export function gemini(o: VendorOptions): Model {
   const modelId = o.model ?? "gemini-3.5-flash";
@@ -78,7 +79,8 @@ export function gemini(o: VendorOptions): Model {
         secret: apiKey,
         modelId,
         model: createGoogle({ apiKey, ...wire(o) })(modelId),
-        clipModel: createGoogle({ apiKey, ...wire(o) }).interactions(modelId),
+        clipModel: (clips) =>
+          createGoogle({ apiKey, fetch: withClips(clips, o.fetch ?? fetch) })(modelId),
         takes: kinds("text", "image", "video", "audio", "pdf"),
         free: true,
         ...(o.limitMs ? { limitMs: o.limitMs } : {}),
@@ -86,6 +88,32 @@ export function gemini(o: VendorOptions): Model {
     o.rotate,
     "gemini",
   );
+}
+
+/**
+ * A fetch that adds Gemini's `videoMetadata` to each video part of a generateContent body: one
+ * clip per video part, in prompt order (`undefined` leaves that part whole). The SDK builds the
+ * rest of the body and reads the reply.
+ */
+export function withClips(clips: readonly (Clip | undefined)[], go: typeof fetch): typeof fetch {
+  return (url, init) => {
+    if (typeof init?.body !== "string") return go(url, init);
+    const body = JSON.parse(init.body) as { contents?: { parts?: Record<string, unknown>[] }[] };
+    let n = 0;
+    for (const content of body.contents ?? [])
+      for (const part of content.parts ?? []) {
+        const file = (part.fileData ?? part.inlineData) as { mimeType?: string } | undefined;
+        if (!file?.mimeType?.startsWith("video/")) continue;
+        const clip = clips[n++];
+        if (clip)
+          part.videoMetadata = {
+            startOffset: `${clip.startS}s`,
+            endOffset: `${clip.endS}s`,
+            ...(clip.fps ? { fps: clip.fps } : {}),
+          };
+      }
+    return go(url, { ...init, body: JSON.stringify(body) });
+  };
 }
 
 const GEMINI_MODELS = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1";

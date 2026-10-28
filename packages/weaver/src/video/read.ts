@@ -1,25 +1,25 @@
 /**
  * A video or podcast on the web read as one markdown document (falcon's `VideoRead`). Four
- * readers: a YouTube video from its captions and chapters (yt-dlp) plus Gemini's read of the
- * screen; a YouTube video from its URL alone (Gemini hears and reads it: no download, no home
- * IP); any other video yt-dlp fetches (falcon's `watch`: Cohere hears the audio and reads the
- * frames); a podcast episode from its audio URL (fetched, then falcon's `hearAudio`). Everything
- * that takes a URL or spawns yt-dlp lives here; the reading over a file is falcon's. Every caller
- * passes its own keys and tools. Nothing here touches a database.
+ * readers: a YouTube video from its captions and chapters (yt-dlp) plus a video model's read of
+ * the screen; a YouTube video from its URL alone (the model hears and reads it: no download, no
+ * home IP); any other video yt-dlp fetches (falcon's `watch`: an ear and an eye); a podcast
+ * episode from its audio URL (fetched, then falcon's `hearAudio`). Everything that takes a URL or
+ * spawns yt-dlp lives here; the reading over a file is falcon's. The video model is Gemini
+ * (falcon's `geminiVideo`): the one that takes a YouTube URL. Every caller passes its own models
+ * and tools. Nothing here touches a database.
  */
 import { createHash } from "node:crypto";
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  askGemini,
-  askShown,
   CLIP_S,
   captionsBody,
   clock,
   hearAudio,
   isoDate,
   type Json3,
+  readMedia,
   real,
   renderWatched,
   runFor,
@@ -31,6 +31,7 @@ import {
   type WatchOptions,
   watch as watchFile,
 } from "@wrenautomation/falcon/video";
+import type { Model, Part } from "@wrenautomation/models";
 
 /** What yt-dlp's `-j` prints for a download; only what the readers use. */
 export interface VideoMeta
@@ -97,41 +98,45 @@ const captionTracks = (info: VideoInfo) =>
 const SHOWN_ASK = (start: number, paraphrase: boolean) =>
   `${SHOWN(start, paraphrase)} Markdown. If nothing is shown, reply with the single word none.`;
 
+/** A YouTube page as a video part; `clip` reads only that stretch, at half a frame a second. */
+const youtubePart = (page: string, start: number | null, durationS: number): Part => ({
+  type: "video",
+  data: new URL(page),
+  mediaType: "video/mp4",
+  ...(start === null
+    ? {}
+    : { clip: { startS: start, endS: Math.min(start + CLIP_S, durationS), fps: 0.5 } }),
+});
+
+// Low resolution reads a shown document fine at a quarter of the tokens.
+const LOW = { resolution: "low" } as const;
+
 /**
- * What the video shows on screen (documents, slides, tables, templates), read by Gemini straight
+ * What the video shows on screen (documents, slides, tables, templates), read by `model` straight
  * from the YouTube URL in `CLIP_S` clips. One markdown block per clip, timestamps absolute.
- * Empty when `keys` is empty.
+ * Empty with no model.
  */
 async function screenText(
   url: string,
   durationS: number,
-  keys: readonly string[],
-  fetchFn: typeof fetch,
+  model: Model | null | undefined,
 ): Promise<string> {
-  if (!keys.length) return "";
+  if (!model) return "";
   const clips = Array.from({ length: Math.ceil(durationS / CLIP_S) }, (_, i) => i * CLIP_S);
   const read = async (start: number): Promise<string> => {
-    const end = Math.min(start + CLIP_S, durationS);
-    const body = (paraphrase: boolean) => ({
-      contents: [
-        {
-          parts: [
-            {
-              fileData: { fileUri: url },
-              videoMetadata: { startOffset: `${start}s`, endOffset: `${end}s`, fps: 0.5 },
-            },
-            { text: SHOWN_ASK(start, paraphrase) },
-          ],
-        },
-      ],
-      // Low resolution reads a shown document fine at a quarter of the tokens.
-      generationConfig: { mediaResolution: "MEDIA_RESOLUTION_LOW" },
-    });
-    const r = await askShown(body, keys, fetchFn, clock(start));
-    if ("text" in r) return r.text;
-    // One unread clip must not lose the other 23: leave a marker and carry on.
-    console.warn(`gemini ${clock(start)}: unread, last ${r.unread}`);
-    return `[${clock(start)}] (not read: ${r.unread})`;
+    try {
+      return await readMedia(
+        model,
+        [youtubePart(url, start, durationS)],
+        (paraphrase) => SHOWN_ASK(start, paraphrase),
+        LOW,
+      );
+    } catch (err) {
+      // One unread clip must not lose the other 23: leave a marker and carry on.
+      const why = err instanceof Error ? err.message : String(err);
+      console.warn(`${model.id} ${clock(start)}: unread, ${why}`);
+      return `[${clock(start)}] (not read: ${why})`;
+    }
   };
   const out: string[] = [];
   // 4 clips at a time; limits are per key, so go wider if it ever drags.
@@ -144,12 +149,12 @@ async function screenText(
 
 /**
  * A YouTube video from its captions and chapters, through `yt-dlp` (`ytDlp` is the command,
- * split on spaces: `uvx yt-dlp`). With Gemini keys, an `## On screen` section follows: what the
- * video showed, read from the frames, since the captions carry only the speech.
+ * split on spaces: `uvx yt-dlp`). With a `video` model, an `## On screen` section follows: what
+ * the video showed, read from the frames, since the captions carry only the speech.
  */
 export async function readYoutube(
   url: string,
-  opts: { ytDlp: string; geminiKeys?: readonly string[]; fetchFn?: typeof fetch },
+  opts: { ytDlp: string; video?: Model | null; fetchFn?: typeof fetch },
 ): Promise<VideoRead> {
   const fetchFn = opts.fetchFn ?? fetch;
   const [cmd, ...pre] = opts.ytDlp.split(/\s+/) as [string, ...string[]];
@@ -174,7 +179,7 @@ export async function readYoutube(
   }
   if (!json) throw new Error(`${url}: captions fetch HTTP ${last} on all ${tracks.length} tracks`);
   let body = captionsBody(info, json);
-  const screen = await screenText(url, info.duration ?? 0, opts.geminiKeys ?? [], fetchFn);
+  const screen = await screenText(url, info.duration ?? 0, opts.video);
   if (screen)
     body += `\n## On screen\n\nWhat the video showed (documents, slides, tables, visuals), read from the frames; the transcript above has only the speech.\n\n${screen}\n`;
   const uploaded = isoDate(info.upload_date);
@@ -195,7 +200,7 @@ const SPEECH =
   "Transcribe the speech in this video: every word spoken, in paragraphs, each starting with its [m:ss] video time. Fix only obvious mishearings. Markdown, no heading. If nobody speaks, reply with the single word none.";
 
 /**
- * A YouTube video read from its URL alone, no download and no home IP: Gemini hears the speech
+ * A YouTube video read from its URL alone, no download and no home IP: `model` hears the speech
  * and reads the screen in `CLIP_S` clips (one clip when the length isn't known). The title,
  * channel and thumbnail come from YouTube's oEmbed. For a server; a machine with yt-dlp and a
  * home IP reads the captions instead (`readYoutube`).
@@ -203,7 +208,8 @@ const SPEECH =
 export async function readYoutubeByUrl(
   url: string,
   opts: {
-    geminiKeys: readonly string[];
+    /** Takes a YouTube URL as video (`geminiVideo`). */
+    model: Model;
     fetchFn?: typeof fetch;
     durationS?: number | null | undefined;
   },
@@ -222,33 +228,21 @@ export async function readYoutubeByUrl(
     ? Array.from({ length: Math.ceil(duration / CLIP_S) }, (_, i) => i * CLIP_S)
     : [null];
   const readClip = async (start: number | null) => {
-    const part = {
-      fileData: { fileUri: page },
-      ...(start === null
-        ? {}
-        : {
-            videoMetadata: {
-              startOffset: `${start}s`,
-              endOffset: `${Math.min(start + CLIP_S, duration)}s`,
-            },
-          }),
-    };
-    const ask = (text: string) => ({
-      contents: [{ parts: [part, { text }] }],
-      generationConfig: { mediaResolution: "MEDIA_RESOLUTION_LOW" },
-    });
-    const label = `${id} ${clock(start ?? 0)}`;
+    const media = [youtubePart(page, start, duration)];
+    const label = `${opts.model.id} ${id} ${clock(start ?? 0)}`;
     const [said, screen] = await Promise.all([
-      askGemini(ask(SPEECH), opts.geminiKeys, fetchFn, `${label} speech`),
-      askShown(
-        (paraphrase) => ask(SHOWN_ASK(start ?? 0, paraphrase)),
-        opts.geminiKeys,
-        fetchFn,
-        `${label} screen`,
-      ),
+      readMedia(opts.model, media, SPEECH, LOW).catch((err: unknown) => {
+        throw new Error(`${label} speech: ${err instanceof Error ? err.message : err}`, {
+          cause: err,
+        });
+      }),
+      // The screen is extra: a clip it cannot read keeps its speech.
+      readMedia(opts.model, media, (p) => SHOWN_ASK(start ?? 0, p), LOW).catch((err: unknown) => {
+        console.warn(`${label} screen: unread, ${err instanceof Error ? err.message : err}`);
+        return "";
+      }),
     ]);
-    if ("unread" in said) throw new Error(`gemini ${label} speech: unread, last ${said.unread}`);
-    return { said: said.text, screen: "text" in screen ? screen.text : "" };
+    return { said, screen };
   };
   const clips: { said: string; screen: string }[] = [];
   // 4 clips at a time, kept in order: a key fleet spreads them.
@@ -272,8 +266,8 @@ export async function readYoutubeByUrl(
 
 /**
  * Any other video `yt-dlp` fetches (an Instagram reel, TikTok, X). No captions there, so falcon's
- * `watch` hears the audio and reads the frames with Cohere (Gemini adds its read of the screen
- * when a key works). The body holds the caption, then Speech, On screen and Cuts.
+ * `watch` hears the audio and reads the frames (its `video` model adds a read of the whole
+ * screen when given). The body holds the caption, then Speech, On screen and Cuts.
  */
 export async function readVideo(
   url: string,
@@ -302,7 +296,7 @@ const AUDIO_MAX = 600_000_000;
 
 /**
  * A podcast episode heard from its audio URL: downloaded to a temp file, then falcon's
- * `hearAudio` (ffmpeg clips, Gemini transcribes each). `url` is the episode's page; `title` and
+ * `hearAudio` (ffmpeg clips, `model` transcribes each). `url` is the episode's page; `title` and
  * `creator` are what its feed said. The id is a hash of the audio URL.
  */
 export async function readAudio(
@@ -311,14 +305,14 @@ export async function readAudio(
     url: string;
     title?: string | null;
     creator?: string | null;
-    geminiKeys: readonly string[];
+    /** Takes audio (`geminiVideo`). */
+    model: Model;
     fetchFn?: typeof fetch;
     ffmpeg?: string;
     /** Seconds per clip; `CLIP_S` unless a test cuts a short tone. */
     clipS?: number;
   },
 ): Promise<VideoRead> {
-  if (!opts.geminiKeys.length) throw new Error(`${audioUrl}: needs Gemini keys to transcribe`);
   const fetchFn = opts.fetchFn ?? fetch;
   const dir = await mkdtemp(join(tmpdir(), "weaver-audio-"));
   try {
@@ -330,8 +324,7 @@ export async function readAudio(
     await writeFile(whole, Buffer.from(await res.arrayBuffer()));
     const id = createHash("sha1").update(audioUrl).digest("hex").slice(0, 12);
     const heard = await hearAudio(whole, {
-      geminiKeys: opts.geminiKeys,
-      fetchFn,
+      model: opts.model,
       ...(opts.ffmpeg ? { ffmpeg: opts.ffmpeg } : {}),
       ...(opts.clipS ? { clipS: opts.clipS } : {}),
       label: id,

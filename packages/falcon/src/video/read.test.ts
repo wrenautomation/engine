@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fakeModel } from "@wrenautomation/models";
 import { describe, expect, it } from "vitest";
 import { captionsBody, hearAudio } from "./read.js";
 import { clock } from "./tools.js";
@@ -61,18 +62,15 @@ describe.skipIf(!hasFfmpeg)("audio", () => {
         ...["-ac", "1", "-c:a", "libopus", "-b:a", "8k", "-f", "ogg", file],
       ]);
       const asks: string[] = [];
-      const fetchFn = (async (_input: string | URL | Request, init?: RequestInit) => {
-        const body = JSON.parse(String(init?.body)) as {
-          contents: { parts: { inlineData?: { mimeType: string }; text?: string }[] }[];
-        };
-        const parts = body.contents[0]?.parts ?? [];
-        expect(parts[0]?.inlineData?.mimeType).toBe("audio/ogg");
-        const at = /clip starts at ([\d:]+)/.exec(parts[1]?.text ?? "")?.[1] ?? "?";
+      const model = fakeModel((ask, req) => {
+        const parts = typeof req.prompt === "string" ? [] : req.prompt;
+        expect(parts[0]).toMatchObject({ type: "audio", mediaType: "audio/ogg" });
+        const at = /clip starts at ([\d:]+)/.exec(ask)?.[1] ?? "?";
         asks.push(at);
-        return Response.json({ candidates: [{ content: { parts: [{ text: `heard ${at}` }] } }] });
-      }) as unknown as typeof fetch;
+        return `heard ${at}`;
+      });
       // Two-second clips of a three-second tone: a 700 s episode took minutes to encode and cut.
-      const r = await hearAudio(file, { geminiKeys: ["k"], fetchFn, clipS: 2 });
+      const r = await hearAudio(file, { model, clipS: 2 });
       expect(asks.sort()).toEqual(["0:00", "0:02"]);
       expect(r.duration).toBe(3);
       expect(r.speech.indexOf("heard 0:00")).toBeLessThan(r.speech.indexOf("heard 0:02"));

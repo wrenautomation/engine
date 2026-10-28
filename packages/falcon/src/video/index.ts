@@ -1,7 +1,7 @@
 /**
- * Video: `watch` (ffmpeg facts, Cohere speech and on-screen text, Gemini when a key works) over a
- * file on disk, and the `VideoRead` shape with the captions renderer and the audio hearer
- * (`read.ts`). Every caller passes its own keys and tools. Fetching is weaver's. No database here.
+ * Video: `watch` (ffmpeg facts; an ear for the speech, an eye for the frames, a video model when
+ * one is given) over a file on disk, and the `VideoRead` shape with the captions renderer and the
+ * audio hearer (`read.ts`). Every caller passes its own models and tools. Fetching is weaver's. No database here.
  */
 export * from "./gemini.js";
 export * from "./read.js";

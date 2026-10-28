@@ -2,6 +2,8 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fakeModel, gemini } from "@wrenautomation/models";
+import { fakeEar } from "@wrenautomation/models/hear";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { flatPlaylist } from "./list.js";
 import { readAudio, readVideo, readYoutubeByUrl } from "./read.js";
@@ -17,11 +19,15 @@ const hasFfmpeg = (() => {
 
 describe("youtube by URL", () => {
   it("reads speech and screen, clips in order, meta from oEmbed", async () => {
+    const oembed = (async () =>
+      Response.json({
+        title: "Cold email in 2026",
+        author_name: "Synth Channel",
+      })) as unknown as typeof fetch;
     const asked: string[] = [];
-    const fetchFn = (async (input: string | URL | Request, init?: RequestInit) => {
+    // The real Gemini model over a faked wire: each clip's offsets must reach the body.
+    const wire = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
-      if (url.includes("oembed"))
-        return Response.json({ title: "Cold email in 2026", author_name: "Synth Channel" });
       asked.push(url);
       const body = JSON.parse(String(init?.body)) as {
         contents: { parts: { videoMetadata?: { startOffset: string }; text?: string }[] }[];
@@ -30,12 +36,17 @@ describe("youtube by URL", () => {
       const start = parts[0]?.videoMetadata?.startOffset ?? "?";
       const speech = parts[1]?.text?.startsWith("Transcribe the speech");
       return Response.json({
-        candidates: [{ content: { parts: [{ text: speech ? `said ${start}` : "none" }] } }],
+        candidates: [
+          {
+            content: { role: "model", parts: [{ text: speech ? `said ${start}` : "none" }] },
+            finishReason: "STOP",
+          },
+        ],
       });
     }) as unknown as typeof fetch;
     const r = await readYoutubeByUrl("https://youtu.be/abcdefghijk", {
-      geminiKeys: ["k"],
-      fetchFn,
+      model: gemini({ key: "k-0000000001", fetch: wire }),
+      fetchFn: oembed,
       durationS: 900,
     });
     expect(r).toMatchObject({
@@ -49,13 +60,13 @@ describe("youtube by URL", () => {
     expect(r.body.indexOf("said 0s")).toBeLessThan(r.body.indexOf("said 600s"));
     expect(r.body).not.toContain("## On screen");
     expect(asked).toHaveLength(4);
-    expect(asked[0]).toMatch(/^https:\/\/generativelanguage\.googleapis\.com\//);
+    expect(asked[0]).toMatch(/^https:\/\/generativelanguage\.googleapis\.com\/.*:generateContent/);
   });
 
   it("refuses what is not a YouTube video", async () => {
-    await expect(readYoutubeByUrl("https://example.com/x", { geminiKeys: ["k"] })).rejects.toThrow(
-      /not a YouTube video/,
-    );
+    await expect(
+      readYoutubeByUrl("https://example.com/x", { model: fakeModel("none") }),
+    ).rejects.toThrow(/not a YouTube video/);
   });
 });
 
@@ -70,23 +81,19 @@ describe.skipIf(!hasFfmpeg)("audio", () => {
       ]);
       const audio = await readFile(file);
       const asks: string[] = [];
-      const fetchFn = (async (input: string | URL | Request, init?: RequestInit) => {
-        const url = String(input);
-        if (url === "https://cdn.example.com/ep1.mp3") return new Response(audio);
-        const body = JSON.parse(String(init?.body)) as {
-          contents: { parts: { inlineData?: { mimeType: string }; text?: string }[] }[];
-        };
-        const parts = body.contents[0]?.parts ?? [];
-        expect(parts[0]?.inlineData?.mimeType).toBe("audio/ogg");
-        const at = /clip starts at ([\d:]+)/.exec(parts[1]?.text ?? "")?.[1] ?? "?";
+      const fetchFn = (async () => new Response(audio)) as unknown as typeof fetch;
+      const model = fakeModel((ask, req) => {
+        const parts = typeof req.prompt === "string" ? [] : req.prompt;
+        expect(parts[0]).toMatchObject({ type: "audio", mediaType: "audio/ogg" });
+        const at = /clip starts at ([\d:]+)/.exec(ask)?.[1] ?? "?";
         asks.push(at);
-        return Response.json({ candidates: [{ content: { parts: [{ text: `heard ${at}` }] } }] });
-      }) as unknown as typeof fetch;
+        return `heard ${at}`;
+      });
       const r = await readAudio("https://cdn.example.com/ep1.mp3", {
         url: "https://show.example/ep1",
         title: "Episode one",
         creator: "Synth Show",
-        geminiKeys: ["k"],
+        model,
         fetchFn,
         // Two-second clips of a three-second tone: a 700 s episode took minutes to encode and cut.
         clipS: 2,
@@ -106,25 +113,14 @@ describe.skipIf(!hasFfmpeg)("audio", () => {
   });
 });
 
-/** Cohere, faked: the speech and one on-screen line per frame time asked. */
-const cohere = (async (input: string | URL | Request, init: RequestInit = {}) => {
-  const url = String(input);
-  if (url.endsWith("/v2/audio/transcriptions"))
-    return Response.json({ text: "hello from the fixture" });
-  if (url.endsWith("/v2/chat")) {
-    const body = JSON.parse(String(init.body)) as {
-      messages: { content: { type: string; text?: string }[] }[];
-    };
-    const text = body.messages[0]?.content.find((p) => p.type === "text")?.text ?? "";
-    const times = (/Their times: ([^.]+)\./.exec(text)?.[1] ?? "").split(", ").filter(Boolean);
-    return Response.json({
-      message: {
-        content: [{ type: "text", text: times.map((t) => `[${t}] caption ${t}`).join("\n") }],
-      },
-    });
-  }
-  throw new Error(`unexpected ${url}`);
-}) as unknown as typeof fetch;
+/** The eye, faked: one on-screen line per frame time asked. */
+const eye = fakeModel((ask) =>
+  (/Their times: ([^.]+)\./.exec(ask)?.[1] ?? "")
+    .split(", ")
+    .filter(Boolean)
+    .map((t) => `[${t}] caption ${t}`)
+    .join("\n"),
+);
 
 describe.skipIf(!hasFfmpeg)("other video", () => {
   let dir = "";
@@ -156,9 +152,8 @@ console.log(JSON.stringify({ id: "abc", title: "Video by x", extractor_key: "Ins
     );
     const r = await readVideo("https://www.instagram.com/reel/abc/", {
       ytDlp: `node ${fake}`,
-      cohereKeys: ["k1"],
-      fetchFn: cohere,
-      pause: async () => {},
+      eye,
+      ear: fakeEar("hello from the fixture"),
     });
     expect(r).toMatchObject({
       kind: "instagram",
