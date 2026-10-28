@@ -26,4 +26,4 @@ pnpm gates          # lint, build, test; holds the checks lock
 pnpm release 0.7.1  # bumps every package, tags v0.7.1; the tag publishes
 ```
 
-PolyForm Shield 1.0.0 ([LICENSE.md](LICENSE.md)).
+PolyForm Strict 1.0.0 ([LICENSE.md](LICENSE.md)). Noncommercial use only; commercial use by license from Wren Automation.

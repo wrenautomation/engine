@@ -106,4 +106,4 @@ pnpm lint && pnpm typecheck && pnpm test
 
 A `v*` tag publishes to npm (`.github/workflows/release.yml`, trusted publishing: no stored token).
 
-License: PolyForm Shield 1.0.0 (`LICENSE.md`).
+License: PolyForm Strict 1.0.0 (`LICENSE.md`).

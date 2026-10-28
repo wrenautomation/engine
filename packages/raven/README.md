@@ -56,4 +56,4 @@ model's.
 
 ## License
 
-PolyForm Shield 1.0.0. Free to use, change and share; not to build a competing product.
+PolyForm Strict 1.0.0. Noncommercial use only; commercial use by license from Wren Automation.

@@ -4,7 +4,7 @@
   "version": "0.8.3",
   "type": "module",
   "description": "The research engine: models, raven, falcon and weaver, one npm package each.",
-  "license": "PolyForm-Shield-1.0.0",
+  "license": "PolyForm-Strict-1.0.0",
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || true",
     "lint": "biome check --error-on-warnings .",
