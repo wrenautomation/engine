@@ -568,7 +568,17 @@ describe("agent commands", () => {
     };
     let guess = "forum";
     const judge = fakeJudge(() => ({ class: { [guess]: 0.9 } }));
-    const d = { ...deps(), sources: registry(three, opener), judge };
+    const any: Source = {
+      name: "opener",
+      kind: "open",
+      cost: "free",
+      open: async (h) => ({
+        url: h.url,
+        media: "text",
+        text: "Owners said they spend a lot on ads.",
+      }),
+    };
+    const d = { ...deps(), sources: registry(three, any), judge };
     const runId = (
       await planRound(d, { ask: { text: "what owners spend", kind: "web" }, planFile, model: "m" })
     ).run;
@@ -596,6 +606,18 @@ describe("agent commands", () => {
     await accept(d, runId2, { take: "keep", over: 0, why: "all" }, agent);
     const done = await searchTree(d, runId2, tree, agent);
     expect(done.tree.facets[0]).toMatchObject({ kept: 3, fit: 3, enough: true });
+    // The read page with a finding turns out a vendor's: the facet lacks its class, not enough.
+    const read = await open(d, runId2, { why: "w" }, agent);
+    const page = read.wrote.find((r) => r.type === "document")?.id ?? "";
+    const quote = "Owners said they spend a lot on ads";
+    await add(d, runId2, { type: "finding", document: page, text: quote, quote }, agent);
+    await add(d, runId2, { type: "class", on: page, class: "vendor", why: "an ad" }, agent);
+    const after = await searchTree(d, runId2, tree, agent);
+    expect(after.tree.facets[0]).toMatchObject({
+      classes: { vendor: 1 },
+      lacks: true,
+      enough: false,
+    });
   });
 
   it("a failed check's fix lands as a new finding after the gate and a second check", async () => {
@@ -860,11 +882,24 @@ describe("agent commands", () => {
     expect(skipped.tree.dead).toEqual(["spend"]);
     await add(d, a, { type: "edge", next: "stop", why: "one niche checked" }, agent);
 
-    // The caps: children per parent round, and depth.
+    // The caps: children per parent round is a stop; depth a warning the why answers.
     const b = await child("coaches", "a second niche");
     await expect(child("third")).rejects.toThrow("the cap");
-    await expect(child("deeper", "go deeper", a)).rejects.toThrow("the tree stops at 2");
     await expect(child("no why", " ")).rejects.toThrow("why this child");
+    const deep = await planRound(d, {
+      ask: { text: "deeper", kind: "web" },
+      planFile: { ...planFile, runs },
+      model: "m",
+      parent: { run: a, why: "a sub-question of this niche, not a new option" },
+    });
+    expect(deep.note).toContain("level 3, past runs.depth 2");
+    const bd = await brief(d, deep.run);
+    expect(bd.lineage.map((x) => [x.run, x.why])).toEqual([
+      [root, undefined],
+      [a, "a niche"],
+    ]);
+    // The root pinned the tree's reads: 1 read x 2 rounds x (2 children + 1).
+    expect(bd.treeRoom).toEqual({ root, cap: 6, read: 2, left: 4 });
 
     const rb = await brief(d, root);
     expect(rb.children.map((c) => [c.run, c.stopped, c.patterns])).toEqual([
@@ -904,6 +939,38 @@ describe("agent commands", () => {
     expect(byRunner?.ask.known).toContain(
       "38% of placements came from repeat clients. (https://a.example/one)",
     );
+  });
+
+  it("the tree's reads are the one hard stop: a read past them and a new child both fail", async () => {
+    const d = deps();
+    const runs = { depth: 2, children: 6, reads: 2 };
+    const pf = { ...planFile, budget: { ...planFile.budget, reads: 5 }, runs };
+    const { run: root } = await planRound(d, {
+      ask: { text: "which niche buys repeat work", kind: "web" },
+      planFile: pf,
+      model: "m",
+    });
+    const one = await open(
+      d,
+      root,
+      {
+        urls: ["https://a.example/one", "https://b.example/four", "https://a.example/two"],
+        why: "w",
+      },
+      agent,
+    );
+    expect(one.note).toContain("the tree's cap left 2 of 3");
+    await expect(
+      planRound(d, {
+        ask: { text: "a niche", kind: "web" },
+        planFile: pf,
+        model: "m",
+        parent: { run: root, why: "w" },
+      }),
+    ).rejects.toThrow("its cap 2");
+    const more = await open(d, root, { urls: ["https://a.example/three"], why: "w" }, agent);
+    expect(more.ok).toBe(false);
+    expect(more.note).toContain("read 2 pages, its cap 2");
   });
 
   it("recalls what earlier runs found: quote, date and run, dropped ones left out", async () => {

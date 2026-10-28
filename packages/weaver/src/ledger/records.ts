@@ -164,6 +164,8 @@ export const SnapshotRecord = Envelope.extend({ type: z.literal("snapshot") })
         why: z.string().min(1),
       })
       .optional(),
+    /** On a root run: the pages the whole tree under it may read. Reads stop there. */
+    treeReads: z.number().int().positive().optional(),
   });
 export type SnapshotRecord = z.infer<typeof SnapshotRecord>;
 

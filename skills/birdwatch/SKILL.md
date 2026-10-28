@@ -110,8 +110,9 @@ records show done.
    keep what can hold a fact that answers the ask, drop the rest (vendor pages, listicles, a
    page the ask does not need). One why per call, short. A page you know of yourself: `open --url`.
    Tens of hits: read the top and the bottom of the judge's order, then set a bar from what you
-   saw: `accept keep --over 0.8 --why` and `accept drop --under 0.2 --why`. Call the middle
-   yourself. Your bar, your why: the records are yours.
+   saw: `accept drop --under 0.2 --why`, and keep only the tops you read. `serves` ranks
+   vendor pages high and buyer threads in the middle (0.3 to 0.5): a high keep bar keeps the
+   wrong side. Call the middle yourself. Your bar, your why: the records are yours.
 4. **Read.** `open`, then `show` each document and read it. Write each fact that answers the
    ask as `add finding` with its exact quote; a quote that is not on the page fails. Say what
    the page lacks as `add gap --on <document>`. For a run too big to read (tens of pages), or
@@ -120,9 +121,10 @@ records show done.
    page with a kept finding (`brief.documents.unclassed`): `add class <document> <class> --why`.
    Its findings take the class. When one finding differs (a vendor page that quotes a survey),
    class that finding too. `unclassed[].guess` is the judge's class; spot-check a few, then
-   `accept class --min 0.8 --why`. A facet's `enough` counts the judge's class guess: kept hits
-   that are all the wrong class keep the facet's next try open, and `search` says "none of them
-   <needs>".
+   `accept class --min 0.8 --why` (a guess at 0.8 or more held in 8 of 8 on one run; under it,
+   5 of 7 changed). A facet's `enough` counts the judge's class guess: kept hits that are all
+   the wrong class keep the facet's next try open, and `search` says "none of them <needs>".
+   After the read, a facet whose classed pages lack its `needs` (`lacks`) is never enough.
 5. **Check.** Read a sample of the kept findings again against their documents (`show`), a
    different page each: `add check <finding> --ok|--fail --why`. A fail drops it. For a bulk
    run, `check` does the same with a model over the budget's `checks` or a tenth of the kept
@@ -147,8 +149,14 @@ records show done.
 8. **Children.** A wide ask (which niche, which offer) goes deep in child runs, one per option
    worth it: `plan "<the option's ask>" --parent <run> --why "<why this one>"`. The child's plan
    reads what the parent and its siblings found; its budget is never more than the parent's.
-   The plan file caps the depth (2: the root and its children) and the children per round. Drive
-   each child to its stop. Then `add edge again` on the parent: its next plan reads each stopped
+   The plan file's `runs.depth` (2: the root and its children) is a guard rail: a deeper child
+   warns, and its why says why it beats a sibling. A facet to try again needs no run: add a try
+   to `tree.json`, or `add edge again` and plan the next round. Two caps stop: the children per
+   round, and the whole tree's reads (`runs.reads` on the root's plan file; by default the
+   root's reads times its rounds times children plus one). `open` stops or cuts its hits at the
+   tree's cap. `brief.lineage` lists the ancestors, root first, with their asks and whys;
+   `brief.treeRoom` says the cap, what the tree read and what is left. Drive each child to its
+   stop. Then `add edge again` on the parent: its next plan reads each stopped
    child's stop, patterns (with sites per class) and dead ends, and lists a child still going
    as open. The parent decides: drop an option, add one, or stop. `brief.children` shows the
    tree; `brief.treeCost` what all of it cost.

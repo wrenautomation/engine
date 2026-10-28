@@ -1,8 +1,10 @@
 /**
  * The run tree: a child run names its parent on every snapshot. A wide run finds the niches;
  * a child per niche goes deep; a stopped child's patterns and dead ends reach the parent's next
- * plan. Each child keeps its own budget, stop and resume. The plan file caps the depth and the
- * children per parent round; a child's budget is never more than its parent's.
+ * plan. Each child keeps its own budget, stop and resume. A child's budget is never more than
+ * its parent's. The depth and the children per round are guard rails: past the depth a warning.
+ * The one hard stop is the pages the whole tree reads, pinned on the root's snapshot: depth costs
+ * nothing a sibling would not, so only the total is worth a wall.
  */
 import type { Budget, PlanFile } from "@wrenautomation/raven";
 import type { SnapshotRecord, SpendRecord } from "../ledger/records.js";
@@ -29,6 +31,32 @@ export async function childrenOf(deps: Reads, run: string): Promise<SnapshotReco
   return [...out.values()];
 }
 
+/** The pages a tree may read, for a root's snapshot: the plan file's, else from the root's budget. */
+export const treeReadsOf = (planFile: PlanFile, budget: Budget): number =>
+  planFile.runs?.reads ??
+  budget.reads * budget.rounds * ((planFile.runs?.children ?? RUNS.children) + 1);
+
+/** The run's ancestors, root first, each by its latest snapshot. */
+export async function lineageOf(deps: Reads, run: string): Promise<SnapshotRecord[]> {
+  const out: SnapshotRecord[] = [];
+  for (let s = (await stateOf(deps, run)).snapshot; s?.parent; ) {
+    s = (await stateOf(deps, s.parent.run)).snapshot;
+    if (s) out.unshift(s);
+  }
+  return out;
+}
+
+/** What the tree the run sits in may still read; null for a tree with no cap (a run before 0.21). */
+export async function treeRoom(
+  deps: Reads,
+  run: string,
+): Promise<{ root: string; cap: number; read: number; left: number } | null> {
+  const root = (await lineageOf(deps, run))[0] ?? (await stateOf(deps, run)).snapshot;
+  if (!root?.treeReads) return null;
+  const read = (await runTree(deps, root.run)).reads;
+  return { root: root.run, cap: root.treeReads, read, left: Math.max(0, root.treeReads - read) };
+}
+
 /** Per field, the smaller: a child never gets more than its parent. */
 export const minBudget = (a: Budget, b: Budget): Budget => ({
   queries: Math.min(a.queries, b.queries),
@@ -48,8 +76,9 @@ export async function budgetUnder(
 }
 
 /**
- * A new child's link, checked: the parent has a plan, the child stays within the depth, and the
- * parent's round has room for one more child.
+ * A new child's link, checked: the parent has a plan, its round has room for one more child, and
+ * the tree has pages left to read. Past the depth, a warning: the why says why deeper beats a
+ * sibling.
  */
 export async function linkTo(
   deps: Reads,
@@ -60,12 +89,11 @@ export async function linkTo(
   const up = (await stateOf(deps, to.run)).snapshot;
   if (!up) throw new Error(`parent ${to.run}: no plan yet`);
   const caps = { ...RUNS, ...planFile.runs };
-  let level = 2;
-  for (let s: SnapshotRecord | null = up; s?.parent; level++)
-    s = (await stateOf(deps, s.parent.run)).snapshot;
-  if (level > caps.depth)
+  const level = (await lineageOf(deps, to.run)).length + 2;
+  const room = await treeRoom(deps, to.run);
+  if (room && !room.left)
     throw new Error(
-      `--parent: a child of ${to.run} is level ${level}; the tree stops at ${caps.depth} (plan file runs.depth)`,
+      `--parent: the tree under ${room.root} read ${room.read} pages, its cap ${room.cap} (plan file runs.reads on the root)`,
     );
   const siblings = (await childrenOf(deps, to.run)).filter(
     (c) => c.parent?.round === up.round,
@@ -75,6 +103,10 @@ export async function linkTo(
       `--parent: round ${up.round} of ${to.run} has ${siblings} children, the cap (plan file runs.children)`,
     );
   const warnings: string[] = [];
+  if (level > caps.depth)
+    warnings.push(
+      `level ${level}, past runs.depth ${caps.depth}: a guard rail; the why says why a deeper run beats a sibling`,
+    );
   const reads = (await runTree(deps, to.run)).reads;
   const cap = up.budget.reads * up.budget.rounds;
   if (reads >= cap)

@@ -59,7 +59,15 @@ import {
   type StepFn,
   type StepResult,
 } from "./steps.js";
-import { budgetUnder, type ChildView, linkTo, runTree } from "./tree.js";
+import {
+  budgetUnder,
+  type ChildView,
+  lineageOf,
+  linkTo,
+  runTree,
+  treeReadsOf,
+  treeRoom,
+} from "./tree.js";
 
 /** Who a record is from: the agent (`ai`, its id) or the person through it (`human`, their name). */
 export interface Who {
@@ -198,7 +206,7 @@ export async function planRound(deps: Deps, input: PlanInput): Promise<Did> {
       planFile: { id: input.planFile.id, version: input.planFile.version },
       model: input.model,
       yieldRows: yieldRows.length,
-      ...(parent ? { parent } : {}),
+      ...(parent ? { parent } : { treeReads: treeReadsOf(input.planFile, input.planFile.budget) }),
     },
     tool(deps),
   );
@@ -363,12 +371,13 @@ export function treeView(state: RunState, round: number, guide: TreeGuide): Tree
   }
   for (const f of facets) {
     f.tries.sort((a, b) => a.tier - b.tier);
-    // A facet that needs classes is enough only with one kept hit of them, once any class is known.
-    f.enough = f.kept >= guide.thin && (!f.needs.length || !f.guessed || f.fit > 0);
     f.lacks =
       f.needs.length > 0 &&
       Object.keys(f.classes).length > 0 &&
       !f.needs.some((n) => f.classes[n as SourceClass]);
+    // A facet that needs classes is enough only with one kept hit of them, once any class is
+    // known; after the reads, only with a read page of them.
+    f.enough = f.kept >= guide.thin && (!f.needs.length || !f.guessed || f.fit > 0) && !f.lacks;
   }
   const served = new Set(facets.map((f) => f.name));
   const dead = state.dead.map((d) => d.facet);
@@ -1045,6 +1054,10 @@ export interface Brief {
   /** The runs that name this one as parent, and what the tree under it read and cost. */
   children: ChildView[];
   treeCost: ReturnType<typeof costOf> | null;
+  /** The asks from the root down to this run's parent, each with why it began: to see drift. */
+  lineage: { run: string; ask: string; why?: string }[];
+  /** Pages the whole tree may still read: the one hard stop. Null on a run with no cap. */
+  treeRoom: { root: string; cap: number; read: number; left: number } | null;
   /** Facets given up on, with why. */
   dead: { facet: string; why: string }[];
   /** The latest rough draft, or null: never the final. */
@@ -1139,6 +1152,12 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
     parent: s?.parent ?? null,
     children: family.children,
     treeCost: family.children.length ? family.cost : null,
+    lineage: (await lineageOf(deps, run)).map((x) => ({
+      run: x.run,
+      ask: x.ask.text,
+      ...(x.parent ? { why: x.parent.why } : {}),
+    })),
+    treeRoom: await treeRoom(deps, run),
     dead: state.dead.map(({ facet, why }) => ({ facet, why })),
     draft: (() => {
       const d = state.drafts.at(-1);

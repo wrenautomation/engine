@@ -205,7 +205,11 @@ round's plan reads them, and the review's why on `again`, under "The last round 
 distinct sites is computed from the findings' proofs, never claimed, and `brief.patterns` lists
 them for the report. A run can be a child (`--parent <run> --why`): its snapshot names the parent, its plan reads
 what the parent and siblings found (recall over those runs), and its budget is the parent's at
-most. The plan file's `runs` caps the depth (2) and the children per parent round (6). A
+most. The plan file's `runs.depth` (2) is a guard rail: a deeper child warns. Two caps stop: the
+children per parent round (`runs.children`, 6) and the whole tree's reads (`runs.reads`, pinned
+on the root's snapshot as `treeReads`; by default the root's reads × rounds × (children + 1)).
+`open` stops or cuts its hits at the tree's cap; `brief.lineage` and `brief.treeRoom` show the
+ancestors and the room left. A
 stopped child's stop, patterns and dead ends (`add dead`) reach the parent's next plan as
 known lines; a running child is open. A `class` (`add class`) says what kind of source a document is (primary data, survey,
 practitioner, vendor, forum, news, other), with why; its findings take it, and a class on one
@@ -213,7 +217,7 @@ finding overrides it. `brief.patterns[].classes` counts sources per class: disti
 but each forum thread on its own; `echo` flags a pattern whose classed sources are all vendors,
 and `unchecked` lists its findings no check has read. Only the agent or a person writes a
 class. A tree facet's `needs` names the classes that can prove it; `tree.facets[].lacks` says
-its read pages have none, and a facet whose every try pins one site is flagged. A `draft` (`add draft`, JSON items on stdin) is a rough draft over the kept
+its read pages have none (and the facet is not `enough`), and a facet whose every try pins one site is flagged. A `draft` (`add draft`, JSON items on stdin) is a rough draft over the kept
 findings and patterns: falcon's draft gate drops an item that cites nothing kept or has a number
 no cited quote has. `brief.draft` shows the latest. It is never the final write.
 

@@ -43,7 +43,15 @@ import {
   toRead,
   uncalledHits,
 } from "./state.js";
-import { budgetUnder, fromChildren, fromSiblings, linkTo, type Parent } from "./tree.js";
+import {
+  budgetUnder,
+  fromChildren,
+  fromSiblings,
+  linkTo,
+  type Parent,
+  treeReadsOf,
+  treeRoom,
+} from "./tree.js";
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -222,14 +230,15 @@ export const planStep: StepFn = async (ctx, state) => {
       sources: p.sources,
       budget: await budgetUnder(ctx.deps, parent, p.budget),
       ...snapshot,
-      ...(parent ? { parent } : {}),
+      ...(parent ? { parent } : { treeReads: treeReadsOf(planFile, p.budget) }),
     },
     tool(ctx.deps.runner),
   );
   for (const { from, by, ...q } of p.queries)
     await ctx.write({ type: "query", ...q }, { from, by });
+  const warned = link?.warnings.length ? `; ${link.warnings.join("; ")}` : "";
   return p.queries.length
-    ? { ok: true, note: `${p.queries.length} queries over ${p.sources.join(", ")}` }
+    ? { ok: true, note: `${p.queries.length} queries over ${p.sources.join(", ")}${warned}` }
     : { ok: false, note: "no queries: nothing proposed" };
 };
 
@@ -383,8 +392,18 @@ export const readStep: StepFn = (ctx, state) => readHits(ctx, state, toRead(stat
 export async function readHits(
   ctx: StepContext,
   state: RunState,
-  hits: readonly HitRecord[],
+  wanted: readonly HitRecord[],
 ): Promise<StepResult> {
+  // The tree's cap is the one hard stop on reads.
+  const room = wanted.length ? await treeRoom(ctx.deps, ctx.run) : null;
+  if (room && !room.left)
+    return {
+      ok: false,
+      note: `the tree under ${room.root} read ${room.read} pages, its cap ${room.cap}: stop a run, or plan a new root with a higher runs.reads`,
+    };
+  const hits = room ? wanted.slice(0, room.left) : wanted;
+  const capped =
+    hits.length < wanted.length ? `; the tree's cap left ${hits.length} of ${wanted.length}` : "";
   const listed = sourcesOf(ctx, state).filter((s) => s.open);
   // A site's own reader before the general openers; the allow-list's order inside each.
   const openers = [...listed.filter((s) => s.first), ...listed.filter((s) => !s.first)];
@@ -453,7 +472,7 @@ export async function readHits(
     : { judged: 0, failed: 0 };
   return {
     ok: true,
-    note: `${read} of ${hits.length} hits read${missed ? `, ${missed} no source could open` : ""}${hint}${passNote(judged)}`,
+    note: `${read} of ${hits.length} hits read${missed ? `, ${missed} no source could open` : ""}${capped}${hint}${passNote(judged)}`,
   };
 }
 
