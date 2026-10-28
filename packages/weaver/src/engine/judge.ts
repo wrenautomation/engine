@@ -245,7 +245,8 @@ export interface JudgeStats {
     doubtedFailed: number;
   };
   /**
-   * The worth trial: on extracted documents, its worth score against "a finding on it was kept".
+   * The worth trial: on documents read for facts (a verdict, a finding or a gap on it), its
+   * worth score against "a finding on it was kept".
    * `under` is what a gate at a half would skip, and how many of those held a kept finding.
    */
   worth: { both: number; good: number; auc: number | null; under: number; underGood: number };
@@ -277,7 +278,12 @@ export function judgeStats(state: RunState, judge: string | null): JudgeStats {
     return yes === undefined ? [] : [[yes > 0.5, ok]];
   });
   const keptOn = new Set(state.findings.filter((f) => kept(state, f)).map((f) => f.document));
-  const extracted = new Set(state.verdicts.map((v) => v.document));
+  // Read for facts: an extract's verdict, a finding by hand, or a gap on the page.
+  const extracted = new Set([
+    ...state.verdicts.map((v) => v.document),
+    ...state.findings.map((f) => f.document),
+    ...state.gaps.flatMap((g) => (g.on ? [g.on] : [])),
+  ]);
   const worth = [...extracted].flatMap((d): [number, boolean][] => {
     const yes = yesOf(state, d, "worth");
     return yes === undefined ? [] : [[yes, keptOn.has(d)]];

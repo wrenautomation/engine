@@ -922,6 +922,20 @@ describe("agent commands", () => {
     // The worth trial: both pages kept a finding; the low score on page four is a miss a gate would make.
     expect(b.documents.toExtract).toEqual([]);
     expect(b.judge.worth).toEqual({ both: 2, good: 2, auc: null, under: 1, underGood: 1 });
+
+    // Read by hand with nothing to keep: a gap on the page labels it.
+    await open(d, runId, { urls: ["https://a.example/two"], why: "w" }, agent);
+    const two = (await fold(runId, await d.ledger.trace(runId))).documents.find((x) =>
+      x.url.endsWith("two"),
+    )?.id as string;
+    await add(d, runId, { type: "gap", note: "nothing on the ask", on: two }, agent);
+    expect((await brief(d, runId)).judge.worth).toEqual({
+      both: 3,
+      good: 2,
+      auc: 0.75,
+      under: 2,
+      underGood: 1,
+    });
   });
 
   it("an AUC: the share of good-over-bad pairs a score orders right, ties a half", () => {
