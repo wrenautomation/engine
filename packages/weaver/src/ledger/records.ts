@@ -49,6 +49,7 @@ export const RECORD_TYPES = [
   "pattern",
   "found",
   "draft",
+  "class",
 ] as const;
 export const RecordType = z.enum(RECORD_TYPES);
 export type RecordType = z.infer<typeof RecordType>;
@@ -239,6 +240,32 @@ export const DraftRecord = Envelope.extend({
 });
 export type DraftRecord = z.infer<typeof DraftRecord>;
 
+/** What kind of source a page is. A closed set, so counts per class add up across agents. */
+export const SOURCE_CLASSES = [
+  "primary_data",
+  "survey",
+  "practitioner",
+  "vendor",
+  "forum",
+  "news",
+  "other",
+] as const;
+export const SourceClass = z.enum(SOURCE_CLASSES);
+export type SourceClass = z.infer<typeof SourceClass>;
+
+/**
+ * The agent's word on what kind of source a document is, with why. Its findings take the class;
+ * a class on a finding overrides it (a vendor page that quotes a survey). The latest per target
+ * wins. The runner writes none.
+ */
+export const ClassRecord = Envelope.extend({
+  type: z.literal("class"),
+  on: z.string().min(1),
+  class: SourceClass,
+  why: z.string().min(1),
+});
+export type ClassRecord = z.infer<typeof ClassRecord>;
+
 export const LedgerRecord = z.discriminatedUnion("type", [
   QueryRecord,
   HitRecord,
@@ -256,6 +283,7 @@ export const LedgerRecord = z.discriminatedUnion("type", [
   PatternRecord,
   FoundRecord,
   DraftRecord,
+  ClassRecord,
 ]);
 export type LedgerRecord = z.infer<typeof LedgerRecord>;
 

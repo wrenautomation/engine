@@ -8,6 +8,7 @@ import { latestCalls, ofType } from "../ledger/ledger.js";
 import {
   type CallRecord,
   type CheckRecord,
+  type ClassRecord,
   type DocumentRecord,
   type DraftRecord,
   type EdgeRecord,
@@ -19,6 +20,7 @@ import {
   type PatternRecord,
   type QueryRecord,
   type SnapshotRecord,
+  type SourceClass,
   type SpendRecord,
   STEPS,
   type SteerRecord,
@@ -60,6 +62,9 @@ export interface RunState {
   /** What the agent says several findings say together. */
   patterns: PatternRecord[];
   drafts: DraftRecord[];
+  classes: ClassRecord[];
+  /** The latest class on each document and finding. */
+  classOf: Map<string, SourceClass>;
   /** A known hit found again by another query. */
   founds: FoundRecord[];
   /** The hit record for each canonical URL: a hit seen again, in any round, is a `found`, not a new record. */
@@ -117,6 +122,8 @@ export function fold(run: string, records: readonly LedgerRecord[]): RunState {
     checks: ofType(records, "check"),
     patterns: ofType(records, "pattern"),
     drafts: ofType(records, "draft"),
+    classes: ofType(records, "class"),
+    classOf: new Map(ofType(records, "class").map((c) => [c.on, c.class])),
     founds: ofType(records, "found"),
     hitByKey: new Map(hits.map((h) => [h.key, h.id])),
     called: latestCalls(records),
@@ -218,3 +225,7 @@ export const toExtract = (state: RunState, round: number): DocumentRecord[] => {
   const judged = new Set(state.verdicts.map((v) => v.document));
   return state.documents.filter((d) => d.round === round && !judged.has(d.id));
 };
+
+/** A finding's class: its own, else its document's; undefined when neither has one. */
+export const classOfFinding = (state: RunState, f: FindingRecord): SourceClass | undefined =>
+  state.classOf.get(f.id) ?? state.classOf.get(f.document);

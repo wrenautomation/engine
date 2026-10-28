@@ -33,6 +33,7 @@ weaver add check <run> <finding> --ok|--fail --why "<why>"    # your own check; 
 weaver extract <run>                                 # bulk only: a model behind the quote gate
 weaver check <run> [-n 3]                            # bulk only: a model's sample check
 weaver add gap <run> "<what is still missing>"
+weaver add class <run> <document|finding> <class> --why "<why>"   # primary_data, survey, practitioner, vendor, forum, news, other
 weaver add pattern <run> "<what several findings say together>" --on <finding> <finding>...
 weaver add edge <run> again|stop --why "<why>"       # your review of the round
 echo '[{"title":"..","body":"..","cites":["<pattern or finding>"]}]' | weaver add draft <run> --for "<a decision memo>"   # a rough draft, gated
@@ -90,7 +91,10 @@ records show done.
    ask as `add finding` with its exact quote; a quote that is not on the page fails. Say what
    the page lacks as `add gap --on <document>`. For a run too big to read (tens of pages), or
    in the runner, `extract` puts a model behind the same gate; then judge its findings in
-   `wrote` and drop what does not answer the ask (`add call <finding> drop --why`).
+   `wrote` and drop what does not answer the ask (`add call <finding> drop --why`). Class each
+   page with a kept finding (`brief.documents.unclassed`): `add class <document> <class> --why`.
+   Its findings take the class. When one finding differs (a vendor page that quotes a survey),
+   class that finding too.
 5. **Check.** Read a sample of the kept findings again against their documents (`show`), a
    different page each: `add check <finding> --ok|--fail --why`. A fail drops it. For a bulk
    run, `check` does the same with a model; put a finding back with `add call <finding> keep
@@ -98,11 +102,13 @@ records show done.
 6. **Patterns.** When kept findings from different sites say one thing, write it once:
    `add pattern` with the finding ids. The engine counts the distinct sites; one site is a
    claim, not a pattern, and it warns. A pattern is your sentence; the findings are its proof.
+   `brief.patterns[].classes` counts its sites per class. Three vendor pages are weaker than
+   one survey: weigh the classes, not the total.
 7. **Review.** Ask: does what is kept answer the ask? What is missing? Write each hole as a gap.
    Then the edge: `again` with a why that names the hole (the next round's plan reads it), or
    `stop` with a why that says what the run has and what it still lacks. The budget's rounds
    are a guard rail: past them, say in the why why one more round is worth it.
-8. **Report.** From `brief`: the patterns first, each with its site count and its findings;
+8. **Report.** From `brief`: the patterns first, each with its site count per class and its findings;
    then the kept findings no pattern rests on, each with its quote, URL and date; the gaps; the
    cost line. Nothing in the report that is not a finding. When the person wants prose (a memo,
    an SOP outline), write a rough draft with `add draft`: each item cites kept patterns or

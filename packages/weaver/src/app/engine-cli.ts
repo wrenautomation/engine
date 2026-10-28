@@ -57,7 +57,14 @@ import {
 } from "../engine/index.js";
 import { PoliteFetcher, userAgent } from "../fetch/fetcher.js";
 import type { LadderClient } from "../fetch/ladder.js";
-import { FilesLedger, type Ledger, type Problem, ulids } from "../ledger/index.js";
+import {
+  FilesLedger,
+  type Ledger,
+  type Problem,
+  SOURCE_CLASSES,
+  SourceClass,
+  ulids,
+} from "../ledger/index.js";
 import {
   accountsFrom,
   exa,
@@ -748,6 +755,15 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     .requiredOption("--on <finding...>", "the findings it rests on")
     .action((runId: string, text: string, o: Common & Agent & { on: string[] }) =>
       added(o, runId, { type: "pattern", text, findings: o.on }),
+    );
+
+  agent(common(adds.command("class <run> <on> <class>")))
+    .description(
+      `what kind of source a document is (its findings take it), or one finding when it differs: ${SOURCE_CLASSES.join(", ")}. Patterns count sites per class`,
+    )
+    .requiredOption("--why <why>")
+    .action((runId: string, on: string, cls: string, o: Common & Agent & { why: string }) =>
+      added(o, runId, { type: "class", on, class: SourceClass.parse(cls), why: o.why }),
     );
 
   agent(common(adds.command("draft <run>")))

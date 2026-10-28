@@ -196,7 +196,10 @@ round's plan reads them, and the review's why on `again`, under "The last round 
 `add edge back --to <step>` writes a person's edge: the fold takes it like raven's. A `pattern`
 (`add pattern`) is what several kept findings say together, in the agent's words; its count of
 distinct sites is computed from the findings' proofs, never claimed, and `brief.patterns` lists
-them for the report. A `draft` (`add draft`, JSON items on stdin) is a rough draft over the kept
+them for the report. A `class` (`add class`) says what kind of source a document is (primary data, survey,
+practitioner, vendor, forum, news, other), with why; its findings take it, and a class on one
+finding overrides it. `brief.patterns[].classes` counts distinct sites per class. Only the
+agent or a person writes a class. A `draft` (`add draft`, JSON items on stdin) is a rough draft over the kept
 findings and patterns: falcon's draft gate drops an item that cites nothing kept or has a number
 no cited quote has. `brief.draft` shows the latest. It is never the final write.
 

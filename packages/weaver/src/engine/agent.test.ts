@@ -224,6 +224,27 @@ describe("agent commands", () => {
       add(d, runId, { type: "pattern", text: "x", findings: ["nope"] }, agent),
     ).rejects.toThrow("no finding nope");
 
+    // A class on a document reaches its findings; one on a finding overrides it; the latest wins.
+    const weekly = findings[1];
+    if (weekly?.type !== "finding") throw new Error("no second finding");
+    const classes = async () => (await brief(d, runId)).patterns.at(-1)?.classes;
+    expect(await classes()).toEqual({ unclassed: 2 });
+    expect((await brief(d, runId)).documents.unclassed.map((x) => x.id)).toEqual([
+      docOne.id,
+      weekly.document,
+    ]);
+    await add(d, runId, { type: "class", on: docOne.id, class: "survey", why: "a survey" }, agent);
+    await add(d, runId, { type: "class", on: weekly.document, class: "vendor", why: "ad" }, agent);
+    expect(await classes()).toEqual({ survey: 1, vendor: 1 });
+    await add(d, runId, { type: "class", on: weekly.id, class: "survey", why: "cites one" }, agent);
+    expect(await classes()).toEqual({ survey: 2 });
+    await add(d, runId, { type: "class", on: docOne.id, class: "forum", why: "a thread" }, agent);
+    expect(await classes()).toEqual({ forum: 1, survey: 1 });
+    expect((await brief(d, runId)).documents.unclassed).toEqual([]);
+    await expect(
+      add(d, runId, { type: "class", on: "nope", class: "news", why: "x" }, agent),
+    ).rejects.toThrow("no document or finding nope");
+
     // A rough draft: each item cites kept findings or patterns, and its numbers come from them.
     const draft = await add(
       d,

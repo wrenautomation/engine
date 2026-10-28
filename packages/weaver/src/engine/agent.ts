@@ -7,7 +7,7 @@
  * can take a run over, and the fold reads both the same. The budget is a guard rail here: the
  * brief shows it, nothing cuts a query or stops a round by it.
  */
-import { type ClaimAnswer, gateFindings, patternOf } from "@wrenautomation/falcon/document";
+import { type ClaimAnswer, gateFindings, hostOf, patternOf } from "@wrenautomation/falcon/document";
 import { gateDrafts, type NumberedClaim } from "@wrenautomation/falcon/study";
 import { isTransient } from "@wrenautomation/models";
 import {
@@ -29,13 +29,23 @@ import {
   type From,
   type HitRecord,
   LedgerRecord,
+  type SourceClass,
   type Step,
 } from "../ledger/records.js";
 import { canonical } from "./canonical.js";
 import { costOf } from "./cost.js";
 import type { Deps } from "./ports.js";
 import { context } from "./runner.js";
-import { fold, found, kept, type Pointer, personRound, queriesOf, type RunState } from "./state.js";
+import {
+  classOfFinding,
+  fold,
+  found,
+  kept,
+  type Pointer,
+  personRound,
+  queriesOf,
+  type RunState,
+} from "./state.js";
 import {
   checkSample,
   extractDocuments,
@@ -577,7 +587,8 @@ export type Addition =
   | { type: "steer"; text: string }
   | { type: "gap"; note: string; on?: string }
   | { type: "pattern"; text: string; findings: string[] }
-  | { type: "draft"; for: string; items: DraftInput[] };
+  | { type: "draft"; for: string; items: DraftInput[] }
+  | { type: "class"; on: string; class: SourceClass; why: string };
 
 /** One item of a draft as the agent writes it: cites are finding or pattern ids. */
 export interface DraftInput {
@@ -606,7 +617,8 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
     a.type === "finding" ||
     a.type === "pattern" ||
     a.type === "check" ||
-    a.type === "draft"
+    a.type === "draft" ||
+    a.type === "class"
       ? state.round
       : personRound(state);
   const warnings: string[] = [];
@@ -730,6 +742,15 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
       if (pattern.sources < 2) warnings.push("one source: a claim, not a pattern yet");
       return { record: await write({ type: "pattern", ...pattern }), warnings };
     }
+    case "class": {
+      const target =
+        state.documents.some((d) => d.id === a.on) || state.findings.some((f) => f.id === a.on);
+      if (!target) throw new Error(`no document or finding ${a.on}`);
+      return {
+        record: await write({ type: "class", on: a.on, class: a.class, why: why(a.why, "class") }),
+        warnings,
+      };
+    }
     case "draft": {
       if (!a.for.trim()) throw new Error("draft: say what it is for");
       // Falcon's gate numbers its claims: each kept finding is one, a pattern stands for its findings.
@@ -831,7 +852,15 @@ export interface Brief {
   };
   checks: { on: string; ok: boolean; why: string }[];
   /** What the agent says several findings say together, with the count of distinct sites. */
-  patterns: { id: string; round: number; text: string; findings: string[]; sources: number }[];
+  patterns: {
+    id: string;
+    round: number;
+    text: string;
+    findings: string[];
+    sources: number;
+    /** Distinct sites per class over its kept findings; `unclassed` counts the sites with none. */
+    classes: Partial<Record<SourceClass | "unclassed", number>>;
+  }[];
   /** The latest rough draft, or null: never the final. */
   draft: { id: string; round: number; for: string; items: DraftRecord["items"] } | null;
   verdicts: { document: string; url: string; quality: string; gap?: string }[];
@@ -843,11 +872,30 @@ export interface Brief {
     read: number;
     total: number;
   };
-  documents: { toExtract: { id: string; url: string }[]; total: number };
+  documents: {
+    toExtract: { id: string; url: string }[];
+    /** Documents with a kept finding and no class: class them before the patterns count. */
+    unclassed: { id: string; url: string }[];
+    total: number;
+  };
   edges: { round: number; next: string; to?: string; why: string; by: string }[];
   /** What the allow-list's sources yielded over every run. */
   yield: YieldRow[];
   cost: ReturnType<typeof costOf>;
+}
+
+/** Distinct sites per class over a pattern's findings still kept. */
+function classesOf(
+  state: RunState,
+  ids: readonly string[],
+): Partial<Record<SourceClass | "unclassed", number>> {
+  const sites = new Map<SourceClass | "unclassed", Set<string>>();
+  for (const f of state.findings) {
+    if (!ids.includes(f.id) || !kept(state, f)) continue;
+    const c = classOfFinding(state, f) ?? "unclassed";
+    sites.set(c, (sites.get(c) ?? new Set()).add(hostOf(f.proof.url)));
+  }
+  return Object.fromEntries([...sites].map(([c, s]) => [c, s.size]));
 }
 
 /** What raven's prompts see, as JSON: everything the agent needs to plan, triage, review and stop. */
@@ -901,6 +949,7 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
       text,
       findings,
       sources,
+      classes: classesOf(state, findings),
     })),
     draft: (() => {
       const d = state.drafts.at(-1);
@@ -927,6 +976,13 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
     },
     documents: {
       toExtract: unjudged(state).map(({ id, url }) => ({ id, url })),
+      unclassed: state.documents
+        .filter(
+          (d) =>
+            !state.classOf.has(d.id) &&
+            state.findings.some((f) => f.document === d.id && kept(state, f)),
+        )
+        .map(({ id, url }) => ({ id, url })),
       total: state.documents.length,
     },
     edges: state.edges.map(({ round, next, to, why, by }) => ({
