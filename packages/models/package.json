@@ -1,0 +1,70 @@
+{
+  "name": "@wrenautomation/models",
+  "version": "0.2.0",
+  "description": "One door to every model: a Model takes text, image, video, audio and PDF parts, answers with text, tokens and USD, and parses an answer to a zod shape. Adapters for Anthropic, Gemini, Cohere, any OpenAI-compatible server and a shell command (claude -p); ears for speech to text; one price table; one key ring.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wrenautomation/models.git"
+  },
+  "license": "PolyForm-Shield-1.0.0",
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "README.md",
+    "LICENSE.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./prices": {
+      "types": "./dist/prices.d.ts",
+      "import": "./dist/prices.js"
+    },
+    "./hear": {
+      "types": "./dist/hear.d.ts",
+      "import": "./dist/hear.js"
+    },
+    "./command": {
+      "types": "./dist/command.d.ts",
+      "import": "./dist/command.js"
+    },
+    "./spec": {
+      "types": "./dist/spec.d.ts",
+      "import": "./dist/spec.js"
+    }
+  },
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "prepare": "git config core.hooksPath .githooks || true",
+    "lint": "biome check --error-on-warnings .",
+    "lint:fix": "biome check --write .",
+    "typecheck": "tsc --noEmit",
+    "build": "rm -rf dist && tsc",
+    "test": "vitest run",
+    "gates": "lockf -t 900 /tmp/wren_automation-checks.lock sh -c 'pnpm lint && pnpm typecheck && pnpm test'",
+    "prepublishOnly": "pnpm build"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "4.0.90",
+    "@ai-sdk/cohere": "4.0.71",
+    "@ai-sdk/google": "4.0.107",
+    "@ai-sdk/openai-compatible": "3.0.80",
+    "ai": "7.0.155",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.14",
+    "@types/node": "22.20.3",
+    "typescript": "5.9.3",
+    "vitest": "5.0.1"
+  }
+}
