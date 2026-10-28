@@ -20,7 +20,7 @@ Three more doors run the research engine (wren's `designs/2026-10-26-research-en
 
 | Import | Does |
 |---|---|
-| `@wrenautomation/weaver/engine` | `Source` (a name, `search` and/or `open`, a cost), `registry` and the plan's allow-list, `run(deps, options)`: plan, fetch, triage, read, extract, check (a sample of findings against their documents), review, round after round until raven's edge says stop; `fold` rebuilds a run's state from its records, so a run resumes from the step it stopped on; `Transient`, the failure worth another try; raven's `Model`, `Ask`, `PlanFile` and record shapes re-exported, so a host pins weaver alone |
+| `@wrenautomation/weaver/engine` | `Source` (a name, `search` and/or `open`, a cost), `registry` and the plan's allow-list; the agent's calls (`planRound`, `search`, `open`, `extract`, `check`, `add`, `brief`), one step each; `run(deps, options)`: plan, fetch, triage, read, extract, check (a sample of findings against their documents), review, round after round until raven's edge says stop; `fold` rebuilds a run's state from its records, so a run resumes from the step it stopped on; `Transient`, the failure worth another try; raven's `Model`, `Ask`, `PlanFile` and record shapes re-exported, so a host pins weaver alone |
 | `@wrenautomation/weaver/sources` | `searxng`, `exa` (search), `youtube` (search and read, yt-dlp), `fetcher` (open, the polite fetcher), `ladder` (open, autobrowse's fetch ladder up to a browser), `paste` (a person's URLs), `ledger` (hits earlier runs saw) |
 | `@wrenautomation/weaver/ledger` | the records (`query`, `hit`, `document`, `finding`, `verdict`, `call`, `spend`, `snapshot`, `edge`, `done`, `steer`, `gap`, `check`), `FilesLedger` (a folder: `runs/<run>/<writer>.jsonl`, `plans/<kind>.json`), `MemoryLedger`, yield rows per source, person, channel and kind |
 
@@ -41,21 +41,46 @@ COHERE_API_KEY=... npx weaver read https://www.instagram.com/reel/...     # watc
 npx weaver list 'ytsearch10:cold email' --to 10                           # hits as JSON, no downloads
 ```
 
-The engine's commands print JSON, so Claude Code can drive them. The model is `anthropic` by
-default (Claude Haiku direct, `ANTHROPIC_API_KEY`; `--model anthropic:sonnet|opus|id` for another),
-`--model gateway[:alias]` for Wren's LLM gateway (`WREN_LLM_GATEWAY_URL`,
-`WREN_LLM_GATEWAY_TOKEN`), or any command that reads a prompt on stdin and prints the answer
-(`claude -p --output-format json` is Claude Code headless). Sources come from the environment:
-`SEARXNG_URL` (and `SEARXNG_TOKEN`, a bearer, for an instance behind a proxy), `EXA_API_KEY`
-(or `_1..n`), `GEMINI_API_KEY` for videos without
-captions, `WEAVER_CONTACT` for the fetcher (no contact, no page opens), `AUTOBROWSE_URL` and
-`AUTOBROWSE_TOKEN` for the ladder. The ledger folder is `--ledger` or `WEAVER_LEDGER`
-(default `./ledger`); `--writer` or `WEAVER_WRITER` names your file in it.
+The engine has two drivers over the same steps. An agent (Claude Code, or any agent with a
+shell) drives it one command at a time: it plans, triages, reviews and stops in its own head and
+the engine does the fixed work (search, open, extract behind the quote gate, check) and keeps the
+records. `run` is the runner: raven's prompts make those decisions and the loop runs alone. Both
+write the same ledger, so `run --resume` takes over a run an agent started and `brief` reads a
+run the runner made. Every command prints JSON.
 
-Every model call is a `spend` record with the model id, the tokens in and out, and `usd` from
-the list price (`src/app/prices.ts`: Claude Haiku, Sonnet and Opus 5.5; the gateway's `free`
-alias is $0; another model keeps its tokens, no price). `run` prints the run's total on stderr
-and as `cost` in its JSON, and the last review's edge (`edge`: next and why) the same way.
+```sh
+export WEAVER_AGENT=claude-code                     # the agent's id on every record it writes
+weaver plan "how do staffing firms win repeat clients" --known "referrals convert"   # a run; prints its id
+weaver brief 01M5YS...                              # the ask, budget, sources, what is open, hits, findings, cost
+weaver search 01M5YS... "staffing repeat client rate" --why "the ask's words"       # one query, then every searcher
+echo '[{"terms":"...","why":"..."},{"terms":"...","why":"..."}]' | weaver search 01M5YS...   # a batch
+weaver add call 01M5YS... 01M5YT... keep --why "a survey with numbers"               # triage: a hit kept
+weaver add call 01M5YS... 01M5YU... drop --why "a vendor page"
+weaver open 01M5YS... 01M5YT... --url https://a.example/report --why "numbers"      # keep these, read every kept hit
+weaver extract 01M5YS...                            # the model behind the quote gate, every document without a verdict
+weaver add finding 01M5YS... 01M5YV... --text "412 firms were surveyed." --quote "A 2025 survey of 412 firms"
+weaver check 01M5YS... -n 3                         # a sample of findings read against their documents
+weaver add gap 01M5YS... "no UK numbers yet"
+weaver add steer 01M5YS... "numbers only" --human will                                # the person's word, relayed
+weaver add edge 01M5YS... again --why "thin on the UK"                                # the review: a new round
+weaver plan --run 01M5YS...                         # round 2: known, steer and what round 1 left open, in its snapshot
+weaver add edge 01M5YS... stop --why "enough"
+```
+
+`plan` opens a round: its snapshot carries the ask, what is known (the findings so far), every
+steer, what the last round left open, the allow-list and the budget. No queries: the agent's come
+through `search` or `add query`, never capped. The budget is a guard rail: `brief` shows it, and
+an edge `again` past `budget.rounds` prints a warning, never a refusal. `search`, `open`,
+`extract` and `check` each run one step and print what it wrote (a document's text as `chars`);
+a step that gave up exits 2 with its note. `open` reads every kept hit of the run that has no
+document; `extract` every document without a verdict; `check` a sample across documents of the
+kept findings not yet checked. `add` writes one record by hand: a query, a finding (its quote
+must be on the document word for word, or the add fails with the gate's why), a call (keep or
+drop a hit or a finding), an edge (`again`, `stop`, `back --to <step>`), a gap, or a steer (always
+the person's: `--human [name]`). Every `add` takes `--why` where a decision needs one. A
+`--human` record is the person's word through the agent: `from: human`, `by` their name.
+
+The runner alone:
 
 ```sh
 WEAVER_CONTACT=you@example.com npx weaver run "how do staffing firms win repeat clients" --known "referrals convert"
@@ -72,6 +97,22 @@ npx weaver drop 01M5YT... -r "the quote is a forecast, not a result"           #
 npx weaver yield --source exa                                                  # hits, reads, proposed, kept
 npx weaver sources                                                             # what this machine can run
 ```
+
+The model is `anthropic` by default (Claude Haiku direct, `ANTHROPIC_API_KEY`; `--model
+anthropic:sonnet|opus|id` for another), `--model gateway[:alias]` for Wren's LLM gateway
+(`WREN_LLM_GATEWAY_URL`, `WREN_LLM_GATEWAY_TOKEN`), or any command that reads a prompt on stdin
+and prints the answer (`claude -p --output-format json` is Claude Code headless). Sources come
+from the environment: `SEARXNG_URL` (and `SEARXNG_TOKEN`, a bearer, for an instance behind a
+proxy), `EXA_API_KEY` (or `_1..n`), `GEMINI_API_KEY` for videos without captions,
+`WEAVER_CONTACT` for the fetcher (no contact, no page opens), `AUTOBROWSE_URL` and
+`AUTOBROWSE_TOKEN` for the ladder. The ledger folder is `--ledger` or `WEAVER_LEDGER` (default
+`./ledger`); `--writer` or `WEAVER_WRITER` names your file in it.
+
+Every model call is a `spend` record with the model id, the tokens in and out, and `usd` from
+the list price (`src/app/prices.ts`: Claude Haiku, Sonnet and Opus 5.5; the gateway's `free`
+alias is $0; another model keeps its tokens, no price). `run` prints the run's total on stderr
+and as `cost` in its JSON, and the last review's edge (`edge`: next and why) the same way;
+`brief` prints the total as `cost`.
 
 `run` exits 2 when the run stopped on a step that gave up (no model, no source, a block):
 `--resume` continues it once the cause is fixed. A failure worth another try (a 429, a 5xx, a

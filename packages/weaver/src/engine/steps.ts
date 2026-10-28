@@ -14,6 +14,7 @@ import { dedupeHits, defaultPlanFile, plan, review, triage } from "@wrenautomati
 import type {
   DocumentRecord,
   Envelope,
+  FindingRecord,
   From,
   GapRecord,
   HitRecord,
@@ -308,8 +309,14 @@ export const triageStep: StepFn = async (ctx, state) => {
   return { ok: true, note: `${reads} of ${hits.length} hits to read` };
 };
 
-export const readStep: StepFn = async (ctx, state) => {
-  const hits = toRead(state, ctx.round);
+export const readStep: StepFn = (ctx, state) => readHits(ctx, state, toRead(state, ctx.round));
+
+/** Opens `hits`, each by the first opener that has it; the agent's `open` passes its own list. */
+export async function readHits(
+  ctx: StepContext,
+  state: RunState,
+  hits: readonly HitRecord[],
+): Promise<StepResult> {
   const openers = sourcesOf(ctx, state).filter((s) => s.open);
   if (hits.length && !openers.length)
     return { ok: false, note: "no open source in the allow-list" };
@@ -340,7 +347,7 @@ export const readStep: StepFn = async (ctx, state) => {
   const gapOn = new Set(state.gaps.map((g) => g.on));
   let read = 0;
   let missed = 0;
-  await batched(hits, openOne, async (h, g) => {
+  await batched([...hits], openOne, async (h, g) => {
     if (!("doc" in g)) {
       if (!g.missed || gapOn.has(h.id)) return;
       await ctx.write(
@@ -361,10 +368,17 @@ export const readStep: StepFn = async (ctx, state) => {
     ok: true,
     note: `${read} of ${hits.length} hits read${missed ? `, ${missed} no source could open` : ""}`,
   };
-};
+}
 
-export const extractStep: StepFn = async (ctx, state) => {
-  const docs = toExtract(state, ctx.round);
+export const extractStep: StepFn = (ctx, state) =>
+  extractDocuments(ctx, state, toExtract(state, ctx.round));
+
+/** Extracts `docs` with the extractor on the run's model; the agent's `extract` passes its own list. */
+export async function extractDocuments(
+  ctx: StepContext,
+  state: RunState,
+  docs: readonly DocumentRecord[],
+): Promise<StepResult> {
   if (!docs.length) return { ok: true, note: "nothing to extract" };
   if (!ctx.model) return { ok: false, note: "no model: nothing extracted" };
   const ask = state.snapshot?.ask;
@@ -400,7 +414,7 @@ export const extractStep: StepFn = async (ctx, state) => {
   // Each document's findings and verdict land as its batch settles: a document whose extract
   // fails costs only itself. The verdict is the checkpoint: the documents without one are
   // extracted on the next try.
-  const got = await batched(docs, extractOne, async (d, g) => {
+  const got = await batched([...docs], extractOne, async (d, g) => {
     const who = { from: "ai" as const, by: g.model.id };
     for (const f of g.out.findings)
       await ctx.write(
@@ -419,7 +433,7 @@ export const extractStep: StepFn = async (ctx, state) => {
     ok: true,
     note: `${proposed} findings from ${done} documents, ${dropped} dropped at the gate${continued ? `, ${continued} cut answers continued` : ""}`,
   };
-};
+}
 
 /**
  * The sample check: a few kept findings, spread across the round's documents, each read by a
@@ -427,9 +441,15 @@ export const extractStep: StepFn = async (ctx, state) => {
  * drop call; one that holds gets a check record. The share that fails is the review's read on
  * the extract. A check record is the checkpoint: a rerun checks only the rest of the sample.
  */
-export const checkStep: StepFn = async (ctx, state) => {
-  const p = planOf(state, ctx.round);
-  const findings = toCheck(state, ctx.round, p.budget.checks);
+export const checkStep: StepFn = (ctx, state) =>
+  checkSample(ctx, state, toCheck(state, ctx.round, planOf(state, ctx.round).budget.checks));
+
+/** Checks `findings` against their documents; the agent's `check` passes its own sample. */
+export async function checkSample(
+  ctx: StepContext,
+  state: RunState,
+  findings: readonly FindingRecord[],
+): Promise<StepResult> {
   if (!findings.length) return { ok: true, note: "nothing to check" };
   if (!ctx.model) return { ok: true, note: "no model: no checks" };
   const docs = new Map(state.documents.map((d) => [d.id, d]));
@@ -441,7 +461,7 @@ export const checkStep: StepFn = async (ctx, state) => {
   };
   let ok = 0;
   let failed = 0;
-  const got = await batched(findings, checkOne, async (f, g) => {
+  const got = await batched([...findings], checkOne, async (f, g) => {
     if (!g.out) return;
     const who = { from: "ai" as const, by: g.model.id };
     await ctx.write({ type: "check", on: f.id, ok: g.out.ok, why: g.out.why }, who);
@@ -453,7 +473,7 @@ export const checkStep: StepFn = async (ctx, state) => {
   });
   if (got.transient) throw got.transient;
   return { ok: true, note: `${ok + failed} checked, ${failed} not backed by their quote` };
-};
+}
 
 export const reviewStep: StepFn = async (ctx, state) => {
   const p = planOf(state, ctx.round);

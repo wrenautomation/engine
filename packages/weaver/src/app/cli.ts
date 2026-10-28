@@ -3,8 +3,10 @@
  * `weaver`: the library from a shell. `fetch <url>` prints a page as text, `read <url>` a video
  * as one markdown document, `list <target>` what a profile, channel or search holds. A file on
  * disk is falcon's (`npx falcon text|page|watch`). Keys come from the environment:
- * COHERE_API_KEY (or COHERE_API_KEY_1..n), GEMINI_API_KEY. The engine's commands (`run`,
- * `trace`, `keep`, `drop`, `yield`, `sources`) are in `engine-cli.ts`.
+ * COHERE_API_KEY (or COHERE_API_KEY_1..n), GEMINI_API_KEY. The engine's commands are in
+ * `engine-cli.ts`: the agent's (`plan`, `search`, `open`, `extract`, `check`, `add`, `brief`),
+ * the runner's (`run`), and the ledger's (`trace`, `keep`, `drop`, `steer`, `gap`, `back`,
+ * `yield`, `sources`).
  */
 import { readPage } from "@wrenautomation/falcon/text";
 import { cohereEye, cohereSpeech, geminiVideo, type VideoRead } from "@wrenautomation/falcon/video";

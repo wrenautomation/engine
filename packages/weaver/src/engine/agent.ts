@@ -1,0 +1,541 @@
+/**
+ * The engine driven by an agent: each step as one call over a run's ledger. Claude Code (or any
+ * agent) plans, triages, reviews and stops in its own head; the engine does the fixed work
+ * (search, open, extract through the quote gate, check) and keeps the records. Every record the
+ * agent writes carries its id and, on a decision, a why; the person's words come through it
+ * marked `from: human`. The runner loops over the same step functions, so `weaver run --resume`
+ * can take a run over, and the fold reads both the same. The budget is a guard rail here: the
+ * brief shows it, nothing cuts a query or stops a round by it.
+ */
+import { type ClaimAnswer, gateFindings } from "@wrenautomation/falcon/document";
+import { isTransient } from "@wrenautomation/models";
+import type { AskKind, Edge, PlanFile, YieldRow } from "@wrenautomation/raven";
+import {
+  type DocumentRecord,
+  type Envelope,
+  type FindingRecord,
+  type From,
+  type HitRecord,
+  LedgerRecord,
+  type Step,
+} from "../ledger/records.js";
+import { canonical } from "./canonical.js";
+import { costOf } from "./cost.js";
+import type { Deps } from "./ports.js";
+import { context } from "./runner.js";
+import { fold, found, kept, type Pointer, personRound, type RunState } from "./state.js";
+import {
+  checkSample,
+  extractDocuments,
+  fetchStep,
+  openAfter,
+  readHits,
+  type StepFn,
+  type StepResult,
+} from "./steps.js";
+
+/** Who a record is from: the agent (`ai`, its id) or the person through it (`human`, their name). */
+export interface Who {
+  from: From;
+  by: string;
+}
+
+/** What one command did: the step's word and every record it wrote, in order. */
+export interface Did {
+  run: string;
+  round: number;
+  step: Step;
+  ok: boolean;
+  note?: string;
+  wrote: Shown[];
+}
+
+/** A record as a command prints it: a document's text replaced by its length. */
+export type Shown = LedgerRecord | (Omit<DocumentRecord, "text"> & { chars: number });
+
+export const shown = (r: LedgerRecord): Shown => {
+  if (r.type !== "document") return r;
+  const { text, ...rest } = r;
+  return { ...rest, chars: text.length };
+};
+
+const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+async function stateOf(deps: Deps, run: string): Promise<RunState> {
+  const state = fold(run, await deps.ledger.trace(run));
+  if (!state.records.length) throw new Error(`run ${run}: no records`);
+  return state;
+}
+
+/** The round's snapshot is every step's precondition. */
+function planned(state: RunState): void {
+  if (state.snapshot?.round !== state.round)
+    throw new Error(`run ${state.run}: round ${state.round} has no plan: weaver plan --run first`);
+}
+
+const tool = (deps: Deps) => ({ from: "tool" as const, by: deps.runner });
+
+/** One step over the run as the runner runs it: the fold, the step, its `done`, the fold again. */
+async function stepRun(deps: Deps, run: string, step: Step, fn: StepFn): Promise<Did> {
+  const state = await stateOf(deps, run);
+  planned(state);
+  const before = new Set(state.records.map((r) => r.id));
+  const ctx = context(deps, {}, run, state.round, step);
+  let result: StepResult;
+  try {
+    result = await fn(ctx, state);
+  } catch (err) {
+    if (isTransient(err)) throw err;
+    result = { ok: false, note: message(err) };
+  }
+  await ctx.write(
+    { type: "done", step, ok: result.ok, ...(result.note ? { note: result.note } : {}) },
+    tool(deps),
+  );
+  const after = await deps.ledger.trace(run);
+  return {
+    run,
+    round: state.round,
+    step,
+    ok: result.ok,
+    ...(result.note ? { note: result.note } : {}),
+    wrote: after.filter((r) => !before.has(r.id)).map(shown),
+  };
+}
+
+export interface AskInput {
+  text: string;
+  kind: AskKind;
+  known?: readonly string[];
+  site?: string;
+}
+
+export interface PlanInput {
+  /** Absent: a new run. Present: the next round of it, after an edge that said again. */
+  run?: string;
+  /** A new run's ask; a later round takes the last snapshot's. */
+  ask?: AskInput;
+  /** Its `sources` are the run's allow-list, every name one this machine has. */
+  planFile: PlanFile;
+  /** The model id the extract will use, for the snapshot; null when none. */
+  model: string | null;
+}
+
+/**
+ * Opens a round: writes its snapshot (the ask, with what is known and what the last round left
+ * open, the allow-list, the budget) and the plan step's `done`. No queries: the agent's come
+ * through `search`, never capped.
+ */
+export async function planRound(deps: Deps, input: PlanInput): Promise<Did> {
+  const run = input.run ?? deps.ids();
+  const state = fold(run, await deps.ledger.trace(run));
+  if (input.run && !state.records.length) throw new Error(`run ${run}: no records`);
+  const round = state.round;
+  if (state.snapshot?.round === round)
+    throw new Error(
+      state.next
+        ? `run ${run}: round ${round} is planned`
+        : `run ${run}: stopped after round ${round}; weaver add edge again opens the next`,
+    );
+  const last = state.snapshot?.ask;
+  const base = last ?? input.ask;
+  if (!base) throw new Error("a new run needs an ask");
+  for (const name of input.planFile.sources)
+    if (!deps.sources.has(name)) throw new Error(`no source named ${name}`);
+  const ask = {
+    text: base.text,
+    kind: base.kind,
+    known: [...new Set([...(base.known ?? []), ...found(state)])],
+    steer: [...new Set([...(last?.steer ?? []), ...state.steers.map((s) => s.text)])],
+    open: round > 1 ? openAfter(state, round - 1) : [],
+    ...(base.site ? { site: base.site } : {}),
+  };
+  const yieldRows = await deps.ledger.yield();
+  const ctx = context(deps, { planFile: input.planFile }, run, round, "plan");
+  await ctx.write(
+    {
+      type: "snapshot",
+      ask,
+      sources: input.planFile.sources,
+      budget: input.planFile.budget,
+      known: ask.known,
+      planFile: { id: input.planFile.id, version: input.planFile.version },
+      model: input.model,
+      yieldRows: yieldRows.length,
+    },
+    tool(deps),
+  );
+  const note = `round ${round} over ${input.planFile.sources.join(", ")}; search next`;
+  await ctx.write({ type: "done", step: "plan", ok: true, note }, tool(deps));
+  const after = await deps.ledger.trace(run);
+  return {
+    run,
+    round,
+    step: "plan",
+    ok: true,
+    note,
+    wrote: after.filter((r) => r.round === round && r.step === "plan").map(shown),
+  };
+}
+
+export interface QueryInput {
+  terms: string;
+  why: string;
+  site?: string;
+}
+
+/** Writes the agent's queries, then runs the fetch step: every searcher on every unsearched query of the round. */
+export async function search(
+  deps: Deps,
+  run: string,
+  queries: readonly QueryInput[],
+  who: Who,
+): Promise<Did> {
+  const state = await stateOf(deps, run);
+  planned(state);
+  const kind = (state.snapshot as NonNullable<RunState["snapshot"]>).ask.kind;
+  const ctx = context(deps, {}, run, state.round, "plan");
+  for (const q of queries) {
+    const terms = q.terms.replace(/\s+/g, " ").trim();
+    if (!terms) throw new Error("a query needs terms");
+    if (!q.why.trim()) throw new Error(`query "${terms}": why?`);
+    await ctx.write(
+      { type: "query", kind, terms, why: q.why, ...(q.site ? { site: q.site } : {}) },
+      who,
+    );
+  }
+  return stepRun(deps, run, "fetch", fetchStep);
+}
+
+export interface OpenInput {
+  /** Hits to keep (a call in the agent's name) and read. */
+  hits?: readonly string[];
+  /** Pages the agent names itself: a hit each, kept and read. */
+  urls?: readonly string[];
+  /** Why these: required with `hits` or `urls`. */
+  why?: string;
+}
+
+/** Kept hits of any round with no document yet. */
+export const unread = (state: RunState): HitRecord[] => {
+  const read = new Set(state.documents.map((d) => d.hit));
+  return state.hits.filter((h) => state.called.get(h.id) === "keep" && !read.has(h.id));
+};
+
+/**
+ * Keeps the hits named (and writes a hit per URL named), then runs the read step over every
+ * kept hit of the run that has no document. No names: the reads alone.
+ */
+export async function open(deps: Deps, run: string, input: OpenInput, who: Who): Promise<Did> {
+  const state = await stateOf(deps, run);
+  planned(state);
+  const named = [...(input.hits ?? [])];
+  if ((named.length || input.urls?.length) && !input.why?.trim())
+    throw new Error("open: why read these?");
+  const ids = new Set(state.hits.map((h) => h.id));
+  for (const id of named) if (!ids.has(id)) throw new Error(`no hit ${id}`);
+  const ctx = context(deps, {}, run, state.round, "triage");
+  const byKey = new Map(state.hits.map((h) => [h.key, h.id]));
+  for (const url of input.urls ?? []) {
+    const key = canonical(url);
+    const have = byKey.get(key);
+    if (have) {
+      named.push(have);
+      continue;
+    }
+    const id = await ctx.write({ type: "hit", url, key, queries: [], sources: [] }, who);
+    byKey.set(key, id);
+    named.push(id);
+  }
+  for (const id of new Set(named))
+    await ctx.write({ type: "call", on: id, verdict: "keep", why: input.why as string }, who);
+  return stepRun(deps, run, "read", (c, s) => readHits(c, s, unread(s)));
+}
+
+/** Documents of any round the extractor has no verdict on. */
+export const unjudged = (state: RunState): DocumentRecord[] => {
+  const judged = new Set(state.verdicts.map((v) => v.document));
+  return state.documents.filter((d) => !judged.has(d.id));
+};
+
+/** The extract step over the documents named, else every one of the run without a verdict. */
+export async function extract(
+  deps: Deps,
+  run: string,
+  documents?: readonly string[],
+): Promise<Did> {
+  return stepRun(deps, run, "extract", (c, s) => {
+    const docs = documents
+      ? documents.map((id) => {
+          const d = s.documents.find((x) => x.id === id);
+          if (!d) throw new Error(`no document ${id}`);
+          return d;
+        })
+      : unjudged(s);
+    return extractDocuments(c, s, docs);
+  });
+}
+
+/**
+ * At most `n` kept, unchecked findings with a quote, from any round, spread across documents:
+ * each document's first, then each one's second, and so on.
+ */
+export function sampleToCheck(state: RunState, n: number): FindingRecord[] {
+  const checked = new Set(state.checks.map((c) => c.on));
+  const byDoc = new Map<string, FindingRecord[]>();
+  for (const f of state.findings)
+    if (f.proof.quote && !checked.has(f.id) && kept(state, f))
+      byDoc.set(f.document, [...(byDoc.get(f.document) ?? []), f]);
+  const out: FindingRecord[] = [];
+  const lists = [...byDoc.values()];
+  for (let i = 0; out.length < n && lists.some((l) => i < l.length); i++)
+    for (const l of lists) {
+      const f = l[i];
+      if (f && out.length < n) out.push(f);
+    }
+  return out;
+}
+
+/** The check step over the findings named, else a sample of `n` (the budget's `checks` by default). */
+export async function check(
+  deps: Deps,
+  run: string,
+  input: { findings?: readonly string[]; n?: number } = {},
+): Promise<Did> {
+  return stepRun(deps, run, "check", (c, s) => {
+    const sample = input.findings
+      ? input.findings.map((id) => {
+          const f = s.findings.find((x) => x.id === id);
+          if (!f) throw new Error(`no finding ${id}`);
+          return f;
+        })
+      : sampleToCheck(s, input.n ?? s.snapshot?.budget.checks ?? 3);
+    return checkSample(c, s, sample);
+  });
+}
+
+/** What the agent or the person adds by hand. */
+export type Addition =
+  | { type: "query"; terms: string; why: string; site?: string }
+  | { type: "finding"; document: string; text: string; quote: string }
+  | { type: "call"; on: string; verdict: "keep" | "drop"; why: string }
+  | { type: "edge"; next: Edge["next"]; to?: Edge["to"]; why: string }
+  | { type: "steer"; text: string }
+  | { type: "gap"; note: string; on?: string };
+
+export interface Added {
+  record: Shown;
+  /** What the agent should know: an edge past the budget, a finding on a dropped document. */
+  warnings: string[];
+}
+
+/**
+ * One record in the agent's or the person's name. A query or finding lands in the current
+ * round; a call, edge, steer or gap in the round it is about (the one just reviewed, between
+ * rounds). A finding goes through falcon's gate: its quote must be on the document, word for
+ * word, or the add fails with the gate's why. No `step`: a hand-written record has none.
+ */
+export async function add(deps: Deps, run: string, a: Addition, who: Who): Promise<Added> {
+  const state = await stateOf(deps, run);
+  const round = a.type === "query" || a.type === "finding" ? state.round : personRound(state);
+  const warnings: string[] = [];
+  const write = async <T extends Omit<LedgerRecord, keyof Envelope>>(record: T) => {
+    const id = deps.ids();
+    const full = LedgerRecord.parse({
+      ...record,
+      id,
+      run,
+      round,
+      at: deps.clock().toISOString(),
+      from: who.from,
+      by: who.by,
+    });
+    await deps.ledger.append(full);
+    return full;
+  };
+  const why = (text: string, what: string) => {
+    if (!text.trim()) throw new Error(`${what}: why?`);
+    return text;
+  };
+  switch (a.type) {
+    case "query": {
+      if (!state.snapshot) throw new Error(`run ${run}: no plan yet`);
+      const terms = a.terms.replace(/\s+/g, " ").trim();
+      if (!terms) throw new Error("a query needs terms");
+      return {
+        record: await write({
+          type: "query",
+          kind: state.snapshot.ask.kind,
+          terms,
+          why: why(a.why, `query "${terms}"`),
+          ...(a.site ? { site: a.site } : {}),
+        }),
+        warnings,
+      };
+    }
+    case "finding": {
+      const doc = state.documents.find((d) => d.id === a.document);
+      if (!doc) throw new Error(`no document ${a.document}`);
+      const answer: ClaimAnswer = { findings: [{ text: a.text, quote: a.quote }] };
+      const gate = gateFindings(answer, doc);
+      const f = gate.findings[0];
+      if (!f) throw new Error(`finding dropped at the gate: ${gate.dropped[0]?.why ?? "empty"}`);
+      return {
+        record: await write({
+          type: "finding",
+          ...f,
+          document: doc.id,
+          ...(doc.date ? { date: doc.date } : {}),
+        }),
+        warnings,
+      };
+    }
+    case "call": {
+      const hit = state.hits.find((h) => h.id === a.on);
+      const finding = hit ? undefined : state.findings.find((f) => f.id === a.on);
+      if (!hit && !finding) throw new Error(`no hit or finding ${a.on}`);
+      return {
+        record: await write({
+          type: "call",
+          on: a.on,
+          verdict: a.verdict,
+          why: why(a.why, "call"),
+        }),
+        warnings,
+      };
+    }
+    case "edge": {
+      if (a.next === "back" && !a.to) throw new Error("edge back: to which step?");
+      const budget = state.snapshot?.budget;
+      if (a.next === "again" && budget && round >= budget.rounds)
+        warnings.push(
+          `round ${round + 1} is past the budget of ${budget.rounds}: a guard rail, not a stop`,
+        );
+      return {
+        record: await write({
+          type: "edge",
+          next: a.next,
+          ...(a.to ? { to: a.to } : {}),
+          why: why(a.why, "edge"),
+        }),
+        warnings,
+      };
+    }
+    case "steer":
+      if (who.from !== "human") throw new Error("a steer is the person's word: --human");
+      if (!a.text.trim()) throw new Error("steer: say what");
+      return { record: await write({ type: "steer", text: a.text }), warnings };
+    case "gap":
+      if (!a.note.trim()) throw new Error("gap: say what is missing");
+      return {
+        record: await write({ type: "gap", note: a.note, ...(a.on ? { on: a.on } : {}) }),
+        warnings,
+      };
+  }
+}
+
+/** A hit as the brief shows it: the view, its id, round and queries. */
+export type HitBrief = Omit<HitRecord, "type" | "run" | "step" | "at" | "from" | "by" | "key">;
+
+export interface Brief {
+  run: string;
+  round: number;
+  /** Where the runner would go next; null when an edge said stop. */
+  next: Pointer | null;
+  /** The last edge's why, or the step that gave up. */
+  note: string | null;
+  ask: NonNullable<RunState["snapshot"]>["ask"] | null;
+  budget: NonNullable<RunState["snapshot"]>["budget"] | null;
+  sources: string[];
+  planFile: NonNullable<RunState["snapshot"]>["planFile"] | null;
+  /** What the person said, oldest first. */
+  steer: string[];
+  /** What the last round left open: its edge's why, its gaps, the person's calls. */
+  open: string[];
+  /** This round's gaps, as lines. */
+  gaps: string[];
+  findings: {
+    kept: { id: string; round: number; text: string; quote?: string; url: string; date?: string }[];
+    dropped: number;
+  };
+  checks: { on: string; ok: boolean; why: string }[];
+  verdicts: { document: string; url: string; quality: string; gap?: string }[];
+  hits: {
+    uncalled: HitBrief[];
+    toRead: { id: string; url: string }[];
+    read: number;
+    total: number;
+  };
+  documents: { toExtract: { id: string; url: string }[]; total: number };
+  edges: { round: number; next: string; to?: string; why: string; by: string }[];
+  /** What the allow-list's sources yielded over every run. */
+  yield: YieldRow[];
+  cost: ReturnType<typeof costOf>;
+}
+
+/** What raven's prompts see, as JSON: everything the agent needs to plan, triage, review and stop. */
+export async function brief(deps: Deps, run: string): Promise<Brief> {
+  const state = await stateOf(deps, run);
+  const s = state.snapshot;
+  const round = state.round;
+  const urlOf = new Map(state.documents.map((d) => [d.id, d.url]));
+  const sources = s?.sources ?? [];
+  const yieldRows = (await deps.ledger.yield()).filter(
+    (r) => r.source === undefined || sources.includes(r.source),
+  );
+  const gapLine = (g: RunState["gaps"][number]) => `${g.step ?? g.by}: ${g.note}`;
+  return {
+    run,
+    round,
+    next: state.next,
+    note: state.note,
+    ask: s?.ask ?? null,
+    budget: s?.budget ?? null,
+    sources,
+    planFile: s?.planFile ?? null,
+    steer: state.steers.map((x) => x.text),
+    open: round > 1 ? openAfter(state, round - 1) : [],
+    gaps: state.gaps.filter((g) => g.round === round).map(gapLine),
+    findings: {
+      kept: state.findings
+        .filter((f) => kept(state, f))
+        .map((f) => ({
+          id: f.id,
+          round: f.round,
+          text: f.text,
+          ...(f.proof.quote ? { quote: f.proof.quote } : {}),
+          url: f.proof.url,
+          ...(f.date ? { date: f.date } : {}),
+        })),
+      dropped: state.findings.filter((f) => !kept(state, f)).length,
+    },
+    checks: state.checks.map(({ on, ok, why }) => ({ on, ok, why })),
+    verdicts: state.verdicts.map((v) => ({
+      document: v.document,
+      url: urlOf.get(v.document) ?? v.document,
+      quality: v.quality,
+      ...(v.gap ? { gap: v.gap } : {}),
+    })),
+    hits: {
+      uncalled: state.hits
+        .filter((h) => !state.called.has(h.id))
+        .map(({ type: _t, run: _r, step: _s, at: _a, from: _f, by: _b, key: _k, ...view }) => view),
+      toRead: unread(state).map(({ id, url }) => ({ id, url })),
+      read: state.documents.length,
+      total: state.hits.length,
+    },
+    documents: {
+      toExtract: unjudged(state).map(({ id, url }) => ({ id, url })),
+      total: state.documents.length,
+    },
+    edges: state.edges.map(({ round, next, to, why, by }) => ({
+      round,
+      next,
+      ...(to ? { to } : {}),
+      why,
+      by,
+    })),
+    yield: yieldRows,
+    cost: costOf(state.spends),
+  };
+}

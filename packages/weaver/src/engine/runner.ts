@@ -116,7 +116,8 @@ const tokens = (u: Usage | undefined): Omit<Extract<Outcome, { ok: true }>, "ok"
     : {}),
 });
 
-function context(
+/** The step context: `write` fills the envelope, `invoke` and `modelOn` write every spend. The agent commands build one per call. */
+export function context(
   deps: Deps,
   options: RunOptions,
   run: string,

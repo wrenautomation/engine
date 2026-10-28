@@ -27,13 +27,25 @@ import {
 } from "@wrenautomation/raven";
 import type { Command } from "commander";
 import {
+  type Addition,
+  add,
+  brief,
+  check,
+  costOf,
+  type Did,
+  extract,
   fold,
+  open,
   personRound,
+  planRound,
+  type QueryInput,
   registry,
   run,
   type Source,
   type Sources,
   type StepEvent,
+  search,
+  type Who,
 } from "../engine/index.js";
 import { PoliteFetcher, userAgent } from "../fetch/fetcher.js";
 import {
@@ -42,7 +54,6 @@ import {
   type LedgerRecord,
   ofType,
   type Problem,
-  type SpendRecord,
   ulids,
 } from "../ledger/index.js";
 import {
@@ -62,43 +73,9 @@ export const RESUMES = 5;
 /** The longest pause before a resume, whatever `retry-after` said. */
 const MAX_RESUME_WAIT_MS = 300_000;
 
-/** The pause before a resume: to `retryAfter` (five minutes at most), else 15 s per resume so far. */
-/** What a run's spends add up to: USD where priced, tokens and calls per model or source. */
-export function costOf(spends: readonly SpendRecord[]): {
-  total: { usd: number; unpriced: number; input: number; output: number; calls: number };
-  line: string;
-} {
-  let usd = 0;
-  let unpriced = 0;
-  let input = 0;
-  let output = 0;
-  const by = new Map<string, { calls: number; input: number; output: number; usd: number }>();
-  for (const s of spends) {
-    const row = by.get(s.source) ?? { calls: 0, input: 0, output: 0, usd: 0 };
-    row.calls++;
-    row.input += s.tokens?.input ?? 0;
-    row.output += s.tokens?.output ?? 0;
-    input += s.tokens?.input ?? 0;
-    output += s.tokens?.output ?? 0;
-    if (s.usd !== undefined) {
-      usd += s.usd;
-      row.usd += s.usd;
-    } else if (s.cost === "metered") unpriced++;
-    by.set(s.source, row);
-  }
-  const parts = [...by].map(
-    ([name, r]) =>
-      `${name} ${r.calls} calls` +
-      (r.input || r.output ? `, ${r.input} in, ${r.output} out` : "") +
-      (r.usd ? `, $${r.usd.toFixed(4)}` : ""),
-  );
-  const line =
-    `$${usd.toFixed(4)}` +
-    (unpriced ? ` plus ${unpriced} metered calls with no price` : "") +
-    `; ${parts.join("; ")}`;
-  return { total: { usd, unpriced, input, output, calls: spends.length }, line };
-}
+export { costOf };
 
+/** The pause before a resume: to `retryAfter` (five minutes at most), else 15 s per resume so far. */
 export function resumeWaitMs(n: number, retryAfter: string | undefined, now = Date.now()): number {
   if (retryAfter) {
     const until = Date.parse(retryAfter) - now;
@@ -209,6 +186,36 @@ const progress = (e: StepEvent) =>
     `${e.run} ${e.round}.${e.step} ${e.ok ? "ok" : "gave up"} ${e.ms}ms${e.note ? `: ${e.note}` : ""}`,
   );
 
+/** The options a command that runs sources or a model takes. */
+interface Machine {
+  model: string | false;
+  ytDlp: string;
+}
+
+/** The options an agent's command takes: who writes, in whose name. */
+interface Agent {
+  by?: string;
+  human?: string | true;
+}
+
+const kindOf = (kind: string): AskKind => defaultPlanFile(kind as never).kind;
+
+/** Prints what a command did as JSON; a step that gave up exits 2, like `run`. */
+function printDid(did: Did): void {
+  console.error(
+    `${did.run} ${did.round}.${did.step} ${did.ok ? "ok" : "gave up"}${did.note ? `: ${did.note}` : ""}`,
+  );
+  console.log(JSON.stringify(did, null, 2));
+  if (!did.ok) process.exitCode = 2;
+}
+
+/** Whole stdin, for a batch of queries as JSON. */
+async function stdinText(): Promise<string> {
+  let text = "";
+  for await (const chunk of process.stdin) text += chunk;
+  return text;
+}
+
 export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): void {
   const ledgerOf = deps.ledger ?? filesLedger;
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
@@ -220,8 +227,73 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
         "this terminal's file in the ledger",
         process.env.WEAVER_WRITER ?? userInfo().username,
       );
+  const machine = (c: Command) =>
+    c
+      .option(
+        "--model <spec>",
+        "a models spec: anthropic[:haiku|sonnet|opus], gateway[:alias], gemini[:id], claude-code, command:<cmd>, ...",
+        process.env.WEAVER_MODEL ?? DEFAULT_MODEL,
+      )
+      .option("--no-model", "no model: nothing extracted or checked")
+      .option("--yt-dlp <cmd>", "the yt-dlp command", process.env.WEAVER_YTDLP ?? "yt-dlp");
+  const agent = (c: Command) =>
+    c
+      .option("--by <agent>", "the agent's id on what it writes", process.env.WEAVER_AGENT)
+      .option(
+        "--human [name]",
+        "the record is the person's word, relayed: from human, by their name (default: the writer)",
+      );
+  /** The ledger, this machine's sources and the model, from the options. */
+  const setup = (o: Common & Machine) => {
+    const ledger = ledgerOf(o);
+    const sources = deps.sources
+      ? deps.sources(o, ledger)
+      : sourcesHere(process.env, ledger as FilesLedger, o.ytDlp);
+    const model: Model | null =
+      o.model === false ? null : (deps.model ?? modelFromSpec)(o.model, process.env);
+    return { ledger, sources, model };
+  };
+  /**
+   * The ledger's tuned plan file for the kind (the stock one when none), its sources the run's
+   * allow-list: the names given by hand, else `first` then the plan file's, as far as this
+   * machine has them.
+   */
+  const planFileOf = async (
+    ledger: HostLedger,
+    sources: Sources,
+    kind: AskKind,
+    byHand: string[] | undefined,
+    first: string[] = [],
+  ): Promise<PlanFile> => {
+    const stock = defaultPlanFile(kind);
+    const tuned = (await ledger.readPlan?.(kind)) ?? stock;
+    if (tuned.version < stock.version)
+      console.error(
+        `plan file ${kind} is version ${tuned.version}; weaver ships ${stock.version}: delete it to take the new one`,
+      );
+    const wanted = byHand ?? [...first, ...tuned.sources];
+    // raven narrows to the plan file's sources, so the run's allow-list goes in as the plan file's.
+    return { ...tuned, sources: allowList(sources, wanted, !!byHand) };
+  };
+  const depsOf = (s: ReturnType<typeof setup>, runner: string) => ({
+    ...s,
+    extractor: deps.extractor ?? claimExtractor,
+    clock: () => new Date(),
+    ids: ulids(),
+    runner,
+  });
+  /** The agent's id: `--by` or WEAVER_AGENT. Every record it writes names it. */
+  const agentOf = (o: Agent): string => {
+    if (!o.by) throw new Error("name the agent: --by <id> or WEAVER_AGENT");
+    return o.by;
+  };
+  /** Who a record is from: the person through the agent (`--human`), else the agent. */
+  const whoOf = (o: Common & Agent): Who =>
+    o.human
+      ? { from: "human", by: o.human === true ? o.writer : o.human }
+      : { from: "ai", by: agentOf(o) };
 
-  common(program.command("run [ask]"))
+  machine(common(program.command("run [ask]")))
     .description(
       "run an ask through plan, fetch, triage, read, extract, check and review; prints the run as JSON",
     )
@@ -240,16 +312,9 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       "who proposes or pastes",
       process.env.WEAVER_WRITER ?? userInfo().username,
     )
-    .option(
-      "--model <spec>",
-      "a models spec: anthropic[:haiku|sonnet|opus], gateway[:alias], gemini[:id], claude-code, command:<cmd>, ...",
-      process.env.WEAVER_MODEL ?? DEFAULT_MODEL,
-    )
-    .option("--no-model", "no model: your queries only, every hit read, nothing extracted")
     .option("--resume <run>", "continue an earlier run from the step it stopped on")
     .option("--run <id>", "the new run's id")
     .option("--pause", "stop after each round's review: `weaver steer`, then --resume")
-    .option("--yt-dlp <cmd>", "the yt-dlp command", process.env.WEAVER_YTDLP ?? "yt-dlp")
     .action(
       async (
         ask: string | undefined,
@@ -262,19 +327,15 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
           propose?: string[];
           url?: string[];
           by: string;
-          model: string | false;
           resume?: string;
           run?: string;
           pause?: boolean;
-          ytDlp: string;
-        },
+        } & Machine,
       ) => {
         if (!ask && !o.resume) throw new Error("run needs an ask, or --resume <run>");
-        const kind = defaultPlanFile(o.kind as never).kind;
-        const ledger = ledgerOf(o);
-        const sources = deps.sources
-          ? deps.sources(o, ledger)
-          : sourcesHere(process.env, ledger as FilesLedger, o.ytDlp);
+        const kind = kindOf(o.kind);
+        const s = setup(o);
+        const { ledger, sources } = s;
         if (o.url?.length)
           sources.set(
             "paste",
@@ -283,17 +344,13 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
               o.by,
             ),
           );
-        const stock = defaultPlanFile(kind);
-        const tuned = (await ledger.readPlan?.(kind)) ?? stock;
-        if (tuned.version < stock.version)
-          console.error(
-            `plan file ${kind} is version ${tuned.version}; weaver ships ${stock.version}: delete it to take the new one`,
-          );
-        const wanted = o.sources ?? [...(o.url?.length ? ["paste"] : []), ...tuned.sources];
-        // raven narrows to the plan file's sources, so the run's allow-list goes in as the plan file's.
-        const planFile = { ...tuned, sources: allowList(sources, wanted, !!o.sources) };
-        const model: Model | null =
-          o.model === false ? null : (deps.model ?? modelFromSpec)(o.model, process.env);
+        const planFile = await planFileOf(
+          ledger,
+          sources,
+          kind,
+          o.sources,
+          o.url?.length ? ["paste"] : [],
+        );
         const byHand = [
           ...(o.propose ?? []).map((terms) => ({ kind, terms, why: "proposed by hand" })),
           // The paste answers the first query it sees: this one, when nothing else is proposed.
@@ -305,15 +362,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
           ? [{ from: "human", by: o.by, queries: byHand }]
           : [];
         const id = o.resume ?? o.run ?? ulids()();
-        const engineDeps = {
-          sources,
-          ledger,
-          model,
-          extractor: deps.extractor ?? claimExtractor,
-          clock: () => new Date(),
-          ids: ulids(),
-          runner: o.writer,
-        };
+        const engineDeps = depsOf(s, o.writer);
         const options = {
           ...(ask
             ? {
@@ -393,6 +442,198 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
         if (!result?.finished && !result?.paused) process.exitCode = 2;
       },
     );
+
+  agent(machine(common(program.command("plan [ask]"))))
+    .description(
+      "open a round: a new run from an ask, or the next round of --run after an edge that said again. Prints the run id",
+    )
+    .option("--run <id>", "the run whose next round to open")
+    .option("--kind <kind>", `one of ${PLAN_KINDS.join(", ")}`, "web")
+    .option("--known <line...>", "what is known already, one line each")
+    .option("--site <host>", "the site the ask is about")
+    .option(
+      "--sources <name...>",
+      "the allow-list for this run (default: the plan file's, as far as this machine has them)",
+    )
+    .action(
+      async (
+        ask: string | undefined,
+        o: Common &
+          Machine &
+          Agent & {
+            run?: string;
+            kind: string;
+            known?: string[];
+            site?: string;
+            sources?: string[];
+          },
+      ) => {
+        if (!ask && !o.run) throw new Error("plan needs an ask, or --run <run>");
+        const s = setup(o);
+        const kind = o.run
+          ? (fold(o.run, await s.ledger.trace(o.run)).snapshot?.ask.kind ?? kindOf(o.kind))
+          : kindOf(o.kind);
+        const planFile = await planFileOf(s.ledger, s.sources, kind, o.sources);
+        printDid(
+          await planRound(depsOf(s, agentOf(o)), {
+            ...(o.run ? { run: o.run } : {}),
+            ...(ask
+              ? {
+                  ask: {
+                    text: ask,
+                    kind,
+                    known: o.known ?? [],
+                    ...(o.site ? { site: o.site } : {}),
+                  },
+                }
+              : {}),
+            planFile,
+            model: s.model?.id ?? null,
+          }),
+        );
+      },
+    );
+
+  agent(machine(common(program.command("search <run> [terms]"))))
+    .description(
+      "one query in the agent's name, then every searcher on every unsearched query of the round; the new hits as JSON. No terms: a JSON array of {terms, why, site?} on stdin",
+    )
+    .option("--why <why>", "why this query serves the ask")
+    .option("--site <host>", "keep the query on one host")
+    .action(
+      async (
+        runId: string,
+        terms: string | undefined,
+        o: Common & Machine & Agent & { why?: string; site?: string },
+      ) => {
+        const queries: QueryInput[] = terms
+          ? [{ terms, why: o.why ?? "", ...(o.site ? { site: o.site } : {}) }]
+          : (JSON.parse(await stdinText()) as QueryInput[]);
+        if (!queries.length) throw new Error("search: no queries");
+        const s = setup(o);
+        printDid(await search(depsOf(s, agentOf(o)), runId, queries, whoOf(o)));
+      },
+    );
+
+  agent(machine(common(program.command("open <run> [hit...]"))))
+    .description(
+      "keep the hits named (and a hit per --url), then read every kept hit of the run that has no document yet",
+    )
+    .option("--url <url...>", "pages the agent names itself")
+    .option("--why <why>", "why read these (with hits or --url)")
+    .action(
+      async (
+        runId: string,
+        hits: string[],
+        o: Common & Machine & Agent & { url?: string[]; why?: string },
+      ) => {
+        const s = setup(o);
+        printDid(
+          await open(
+            depsOf(s, agentOf(o)),
+            runId,
+            { hits, ...(o.url ? { urls: o.url } : {}), ...(o.why ? { why: o.why } : {}) },
+            whoOf(o),
+          ),
+        );
+      },
+    );
+
+  agent(machine(common(program.command("extract <run> [document...]"))))
+    .description(
+      "the extractor (a model behind the quote gate) over the documents named, else every one without a verdict; findings as JSON",
+    )
+    .action(async (runId: string, documents: string[], o: Common & Machine & Agent) => {
+      const s = setup(o);
+      printDid(
+        await extract(depsOf(s, agentOf(o)), runId, documents.length ? documents : undefined),
+      );
+    });
+
+  agent(machine(common(program.command("check <run> [finding...]"))))
+    .description(
+      "a model reads each finding against its document: the findings named, else a sample spread across documents. One that fails gets a drop call",
+    )
+    .option("-n <n>", "the sample's size (default: the budget's checks)", (v) => Number(v))
+    .action(
+      async (runId: string, findings: string[], o: Common & Machine & Agent & { n?: number }) => {
+        const s = setup(o);
+        printDid(
+          await check(depsOf(s, agentOf(o)), runId, {
+            ...(findings.length ? { findings } : {}),
+            ...(o.n !== undefined ? { n: o.n } : {}),
+          }),
+        );
+      },
+    );
+
+  const added = async (o: Common & Agent, runId: string, a: Addition) => {
+    const s = { ledger: ledgerOf(o), sources: registry(), model: null };
+    const { record, warnings } = await add(depsOf(s, agentOf(o)), runId, a, whoOf(o));
+    for (const w of warnings) console.error(`${runId}: ${w}`);
+    console.log(JSON.stringify(record));
+  };
+  const adds = program
+    .command("add")
+    .description("one record by hand, in the agent's name or (--human) the person's");
+  agent(common(adds.command("query <run> <terms>")))
+    .description("a query for the next search")
+    .requiredOption("--why <why>", "why it serves the ask")
+    .option("--site <host>")
+    .action((runId: string, terms: string, o: Common & Agent & { why: string; site?: string }) =>
+      added(o, runId, { type: "query", terms, why: o.why, ...(o.site ? { site: o.site } : {}) }),
+    );
+  agent(common(adds.command("finding <run> <document>")))
+    .description(
+      "a finding the agent read itself: the sentence and its quote, which must be on the document word for word",
+    )
+    .requiredOption("--text <sentence>", "one plain sentence")
+    .requiredOption("--quote <quote>", "copied from the document")
+    .action(
+      (runId: string, document: string, o: Common & Agent & { text: string; quote: string }) =>
+        added(o, runId, { type: "finding", document, text: o.text, quote: o.quote }),
+    );
+  agent(common(adds.command("call <run> <on> <verdict>")))
+    .description("keep or drop a hit (read it or not) or a finding, with why")
+    .requiredOption("--why <why>")
+    .action((runId: string, on: string, verdict: string, o: Common & Agent & { why: string }) => {
+      if (verdict !== "keep" && verdict !== "drop") throw new Error("verdict: keep or drop");
+      return added(o, runId, { type: "call", on, verdict, why: o.why });
+    });
+  agent(common(adds.command("edge <run> <next>")))
+    .description("the round's edge: again (a new round), stop, or back --to <step>")
+    .requiredOption("--why <why>")
+    .option("--to <step>", "with back: plan, fetch, triage, read or extract")
+    .action((runId: string, next: string, o: Common & Agent & { why: string; to?: string }) => {
+      if (next !== "again" && next !== "stop" && next !== "back")
+        throw new Error("next: again, stop or back");
+      return added(o, runId, {
+        type: "edge",
+        next,
+        ...(o.to ? { to: RavenStep.parse(o.to) } : {}),
+        why: o.why,
+      });
+    });
+  agent(common(adds.command("steer <run> <text>")))
+    .description("what the person says to the run: first in every prompt after it (always --human)")
+    .action((runId: string, text: string, o: Common & Agent) =>
+      added({ ...o, human: o.human ?? true }, runId, { type: "steer", text }),
+    );
+  agent(common(adds.command("gap <run> <text>")))
+    .description("what the round still lacks")
+    .option("--on <id>", "the query or hit it is about")
+    .action((runId: string, text: string, o: Common & Agent & { on?: string }) =>
+      added(o, runId, { type: "gap", note: text, ...(o.on ? { on: o.on } : {}) }),
+    );
+
+  common(program.command("brief <run>"))
+    .description(
+      "the run as the agent needs it: the ask, what is known, what the last round left open, hits to call, documents to extract, findings, checks, edges, yield, cost",
+    )
+    .action(async (runId: string, o: Common) => {
+      const s = { ledger: ledgerOf(o), sources: registry(), model: null };
+      console.log(JSON.stringify(await brief(depsOf(s, o.writer), runId), null, 2));
+    });
 
   common(program.command("trace <run>"))
     .description("every record of a run, in time order, as JSON lines")
