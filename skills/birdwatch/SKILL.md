@@ -72,7 +72,10 @@ records show done.
    each try, what it wrote, `kept`, `uncalled`, and which guide facets you did not cover. A
    trade word that sits on both sides of a market ("agency", "coach", "setter") pulls the
    other side: put a buyer marker in the terms ("coaches who hired", not "appointment
-   setting"), and read the first tries' titles in `brief` before you write the next. The
+   setting"), and read the first tries' titles in `brief` before you write the next. Each
+   facet's why names the buyer it looks for and the inverse to avoid: "owners who pay for
+   setters, not consumers who hire a coach"; "firms that buy cold email, not vendors who sell
+   it". A facet that still returns the inverse after its tries: `add dead` with the why. The
    budget is a guard rail, not a cap.
 
    ```json
