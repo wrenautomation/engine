@@ -55,7 +55,7 @@ captions, `WEAVER_CONTACT` for the fetcher (no contact, no page opens), `AUTOBRO
 Every model call is a `spend` record with the model id, the tokens in and out, and `usd` from
 the list price (`src/app/prices.ts`: Claude Haiku, Sonnet and Opus 5.5; the gateway's `free`
 alias is $0; another model keeps its tokens, no price). `run` prints the run's total on stderr
-and as `cost` in its JSON.
+and as `cost` in its JSON, and the last review's edge (`edge`: next and why) the same way.
 
 ```sh
 WEAVER_CONTACT=you@example.com npx weaver run "how do staffing firms win repeat clients" --known "referrals convert"

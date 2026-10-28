@@ -357,6 +357,9 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
             `${id}: paused after round ${state.edges.length}; weaver steer ${id} "<what you say>", then weaver run --resume ${id} --pause`,
           );
         const cost = costOf(state.spends);
+        // The last review's word: on a stop by the budget, what the ask still lacks.
+        const last = state.edges.at(-1);
+        if (last) console.error(`${id}: ${last.next}: ${last.why}`);
         console.error(`${id}: ${cost.line}`);
         console.log(
           JSON.stringify(
@@ -367,6 +370,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
               finished: result?.finished ?? false,
               ...(result?.paused ? { paused: true } : {}),
               note: result ? result.note : "stopped on a transient failure: --resume to go on",
+              ...(last ? { edge: { next: last.next, why: last.why } } : {}),
               hits: state.hits.length,
               documents: state.documents.length,
               findings: state.findings.filter((f) => state.called.get(f.id) !== "drop"),

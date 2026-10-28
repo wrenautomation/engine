@@ -282,10 +282,18 @@ describe.skipIf(!hasFfmpeg)("watch", () => {
   });
 
   it("leaves no work directory behind", async () => {
-    const mine = async () => (await readdir(tmpdir())).filter((n) => n.startsWith("watch-"));
-    const before = new Set(await mine());
-    const { eye, ear } = fakes();
-    await watch(video, { eye, ear });
-    expect((await mine()).filter((n) => !before.has(n))).toEqual([]);
+    // A temp folder of its own: the shared one holds other runs' work directories.
+    const own = await mkdtemp(join(tmpdir(), "watch-test-own-"));
+    const was = process.env.TMPDIR;
+    process.env.TMPDIR = own;
+    try {
+      const { eye, ear } = fakes();
+      await watch(video, { eye, ear });
+      expect(await readdir(own)).toEqual([]);
+    } finally {
+      if (was === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = was;
+      await rm(own, { recursive: true, force: true });
+    }
   }, 30_000);
 });
