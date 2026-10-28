@@ -58,6 +58,7 @@
     "@wrenautomation/models": "workspace:*",
     "@wrenautomation/raven": "workspace:*",
     "commander": "15.0.0",
+    "minisearch": "7.2.0",
     "robots-parser": "3.0.1",
     "ulid": "3.0.2",
     "zod": "4.6.5"

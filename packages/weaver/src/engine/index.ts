@@ -7,6 +7,7 @@ export * from "./canonical.js";
 export * from "./cost.js";
 export * from "./ports.js";
 export * from "./raven.js";
+export * from "./recall.js";
 export * from "./runner.js";
 export * from "./state.js";
 export * from "./steps.js";

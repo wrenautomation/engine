@@ -130,9 +130,11 @@ export function gateFindings(answer: ClaimAnswer, doc: Document): Omit<Extracted
     const text = (p.text ?? "").replace(/\s+/g, " ").trim();
     if (!text) continue;
     const quote = (p.quote ?? "").trim();
-    const why =
-      words(quote) < QUOTE_MIN_WORDS
-        ? "no_quote"
+    // A short quote proves little (it is on many pages); a line break inside one folds to a space.
+    const why = !quote
+      ? "no_quote"
+      : words(quote) < QUOTE_MIN_WORDS
+        ? "quote_short"
         : !pageQuoted(quote, [page], doc.url)
           ? "quote_not_found"
           : !numbersQuoted(text, quote, page)

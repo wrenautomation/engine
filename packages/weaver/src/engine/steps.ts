@@ -22,7 +22,7 @@ import type {
   Step,
 } from "../ledger/records.js";
 import { canonical } from "./canonical.js";
-import { type Deps, pick, type RunOptions, type Source } from "./ports.js";
+import { type Deps, pick, type RunOptions, type Source, searchersFor } from "./ports.js";
 import {
   found,
   kept,
@@ -192,7 +192,7 @@ export const fetchStep: StepFn = async (ctx, state) => {
   let answered = 0;
   let transient: Transient | null = null;
   for (const q of queries) {
-    const todo = searchers.filter((s) => !searched.has(`${q.id}\u0000${s.name}`));
+    const todo = searchersFor(searchers, q).filter((s) => !searched.has(`${q.id}\u0000${s.name}`));
     calls += todo.length;
     const got = gather(
       await Promise.allSettled(
@@ -254,7 +254,7 @@ export const fetchStep: StepFn = async (ctx, state) => {
   for (const q of queries) {
     // A tree's query is thin, not a gap: the tree says so when a facet's every try came up empty.
     if (q.facet || hitOn.has(q.id) || gapOn.has(q.id)) continue;
-    if (!searchers.every((s) => okOn.has(`${q.id}\u0000${s.name}`))) continue;
+    if (!searchersFor(searchers, q).every((s) => okOn.has(`${q.id}\u0000${s.name}`))) continue;
     await ctx.write(
       { type: "gap", on: q.id, note: `query "${q.terms}": no new hits` },
       tool(ctx.deps.runner),

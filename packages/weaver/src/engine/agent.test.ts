@@ -17,6 +17,7 @@ import {
   type Who,
 } from "./agent.js";
 import { type Deps, registry, type Source } from "./ports.js";
+import { recall } from "./recall.js";
 import { run } from "./runner.js";
 import { fold } from "./state.js";
 
@@ -400,6 +401,130 @@ describe("agent commands", () => {
       agent,
     );
     expect(asked.sort()).toEqual(["opener https://a.example/one", "site https://b.example/four"]);
+  });
+
+  it("a site-scoped query skips a searcher that cannot keep to the site", async () => {
+    const asked: string[] = [];
+    const tube: Source = {
+      name: "tube",
+      kind: "search",
+      cost: "free",
+      keeps: (site) => site === "youtube.com",
+      search: async (q) => {
+        asked.push(`tube ${q.terms}`);
+        return [];
+      },
+    };
+    const web: Source = {
+      ...fake,
+      search: async (q) => {
+        asked.push(`web ${q.terms}`);
+        return [];
+      },
+    };
+    const d = { ...deps(), sources: registry(web, tube, opener) };
+    const { run } = await planRound(d, {
+      ask: { text: "how do staffing firms win repeat clients", kind: "web" },
+      planFile: { ...planFile, sources: ["fake", "tube", "opener"] },
+      model: "m",
+    });
+    await search(
+      d,
+      run,
+      [
+        { terms: "on reddit", why: "threads", site: "reddit.com" },
+        { terms: "on youtube", why: "talks", site: "youtube.com" },
+        { terms: "anywhere", why: "all" },
+      ],
+      agent,
+    );
+    expect(asked.sort()).toEqual([
+      "tube anywhere",
+      "tube on youtube",
+      "web anywhere",
+      "web on reddit",
+      "web on youtube",
+    ]);
+    // Every searcher it went to answered empty: still a gap.
+    const gaps = (await d.ledger.trace(run)).filter((r) => r.type === "gap");
+    expect(gaps).toHaveLength(3);
+  });
+
+  it("recalls what earlier runs found: quote, date and run, dropped ones left out", async () => {
+    const d = deps();
+    const runOf = async (text: string) => {
+      const { run } = await planRound(d, {
+        ask: { text, kind: "web" },
+        planFile,
+        model: "m",
+      });
+      const did = await open(d, run, { urls: ["https://a.example/one"], why: "read" }, agent);
+      const doc = (await d.ledger.trace(run)).find((r) => r.type === "document");
+      if (!doc) throw new Error(`no document: ${JSON.stringify(did)}`);
+      return { run, doc: doc.id };
+    };
+    const first = await runOf("how do staffing firms win repeat clients");
+    const kept = await add(
+      d,
+      first.run,
+      {
+        type: "finding",
+        document: first.doc,
+        text: "38% of placements came from repeat clients.",
+        quote: "38% of placements came from repeat clients",
+      },
+      agent,
+    );
+    const dropped = await add(
+      d,
+      first.run,
+      {
+        type: "finding",
+        document: first.doc,
+        text: "A survey covered 412 firms.",
+        quote: "A 2025 survey of 412 firms",
+      },
+      agent,
+    );
+    await add(
+      d,
+      first.run,
+      { type: "call", on: kept.record.id, verdict: "keep", why: "a number" },
+      agent,
+    );
+    await add(
+      d,
+      first.run,
+      { type: "call", on: dropped.record.id, verdict: "drop", why: "thin" },
+      agent,
+    );
+    const second = await runOf("where do placements come from");
+    await add(
+      d,
+      second.run,
+      {
+        type: "finding",
+        document: second.doc,
+        text: "Repeat clients gave 38% of placements.",
+        quote: "38% of placements came from repeat clients",
+      },
+      agent,
+    );
+    const found = await recall(d.ledger, "repeat clients placements");
+    // One page, one quote: the latest run's, with the earlier run beside it.
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({
+      run: second.run,
+      ask: "where do placements come from",
+      quote: "38% of placements came from repeat clients",
+      url: "https://a.example/one",
+      state: "open",
+      alsoIn: [first.run],
+    });
+    expect(await recall(d.ledger, "412 firms survey")).toEqual([]);
+    const notSecond = await recall(d.ledger, "repeat clients", { not: second.run });
+    expect(notSecond.map((r) => [r.run, r.state])).toEqual([[first.run, "kept"]]);
+    await expect(recall(d.ledger, "  ")).rejects.toThrow("recall needs terms");
   });
 
   it("learns: the next plan file version carries the changes, and nothing else moves", () => {

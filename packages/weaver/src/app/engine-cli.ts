@@ -39,9 +39,11 @@ import {
   type Did,
   extract,
   fold,
+  joined,
   open,
   planRound,
   type QueryInput,
+  recall,
   registry,
   run,
   type Source,
@@ -805,6 +807,32 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       const s = { ledger: ledgerOf(o), sources: registry(), model: null };
       console.log(JSON.stringify(await brief(depsOf(s, o.writer), runId), null, 2));
     });
+
+  common(program.command("recall <terms...>"))
+    .description(
+      "what earlier runs found on these terms: each finding with its quote, URL, source date and run, best match first; dropped findings left out",
+    )
+    .option("-n <n>", "at most this many (default 20)", Number)
+    .option("--not <run>", "leave out this run (the one asking)")
+    .option("--kind <kind>", "only runs of this ask kind")
+    .option("--also <dir...>", "more ledger folders to read with --ledger (one per day)")
+    .action(
+      async (
+        terms: string[],
+        o: Common & { n?: number; not?: string; kind?: string; also?: string[] },
+      ) => {
+        const ledgers = [
+          ledgerOf(o),
+          ...(o.also ?? []).map((dir) => ledgerOf({ ...o, ledger: dir })),
+        ];
+        const found = await recall(joined(ledgers), terms.join(" "), {
+          ...(o.n !== undefined ? { n: o.n } : {}),
+          ...(o.not ? { not: o.not } : {}),
+          ...(o.kind ? { kind: kindOf(o.kind) } : {}),
+        });
+        console.log(JSON.stringify(found, null, 2));
+      },
+    );
 
   common(program.command("trace <run>"))
     .description("every record of a run, in time order, as JSON lines")

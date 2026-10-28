@@ -20,6 +20,7 @@ picks that account, never you.
 ## One run
 
 ```sh
+weaver recall <terms> [--not <run>] [--also <ledger>...]   # what earlier runs found: quote, URL, source date, run
 weaver plan "<the ask>" [--kind web|video|site|channel|person] [--known "<fact>"...] [--site <host>]
 weaver brief <run>                                   # read it after every step
 weaver search <run> < tree.json                      # the round's query tree (below); or "<terms>" --why, or a JSON array
@@ -45,6 +46,9 @@ records show done.
 
 ## How to drive
 
+0. **Recall.** Before the plan, `recall` the ask's words. A recalled finding still fresh for the
+   ask (its `date`, else `found`) goes in `--known` with its source; an old one names a query to
+   read again. A quote short of 5 words fails the gate: take the line with its label.
 1. **Plan the tree.** Read the ask and `brief`. Write the round's query tree: one facet per
    side of the ask the guide names (`brief.planFile` kind's guide: a number, a how, a who, a
    counter-view, a primary source; add a facet the ask needs), each with 2 or 3 tries in the

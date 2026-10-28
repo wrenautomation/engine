@@ -179,6 +179,7 @@ describe("claim extractor", () => {
             quote: "38% of placements came from repeat clients",
           },
           { text: "Short.", quote: "tiny" },
+          { text: "None.", quote: "" },
         ],
         quality: "rich",
         gap: "No numbers on referral cost.",
@@ -193,6 +194,7 @@ describe("claim extractor", () => {
     expect(out.dropped.map((d) => d.why)).toEqual([
       "quote_not_found",
       "number_not_in_quote",
+      "quote_short",
       "no_quote",
     ]);
     expect(out.verdict).toEqual({ quality: "rich", gap: "No numbers on referral cost." });

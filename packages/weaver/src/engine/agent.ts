@@ -617,7 +617,14 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
       const answer: ClaimAnswer = { findings: [{ text: a.text, quote: a.quote }] };
       const gate = gateFindings(answer, doc);
       const f = gate.findings[0];
-      if (!f) throw new Error(`finding dropped at the gate: ${gate.dropped[0]?.why ?? "empty"}`);
+      if (!f) {
+        const why = gate.dropped[0]?.why ?? "empty";
+        throw new Error(
+          why === "quote_short"
+            ? "finding dropped at the gate: quote_short, the quote needs 5 words: take the line with its label or the next line"
+            : `finding dropped at the gate: ${why}`,
+        );
+      }
       return {
         record: await write({
           type: "finding",

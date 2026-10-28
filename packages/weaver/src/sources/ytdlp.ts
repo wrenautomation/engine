@@ -67,6 +67,8 @@ export function ytdlpSource(o: {
     name: "youtube",
     kind: "both",
     cost: "metered",
+    // YouTube's own search knows no other site.
+    keeps: (site) => /(^|\.)(youtube\.com|youtu\.be)$/i.test(site),
     async search(q) {
       const entries = await list(o.ytDlp, `ytsearch${o.n ?? 10}:${q.terms}`);
       return entries.map(entryHit).filter((h): h is NonNullable<typeof h> => h !== null);

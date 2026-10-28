@@ -19,6 +19,11 @@ export interface Source {
   from?: From;
   /** Who its records are by: the person behind a paste. The default is the source's name. */
   by?: string;
+  /**
+   * Whether its search keeps to that site (a query's `site`). A site-scoped query skips a
+   * searcher that would answer from everywhere. Absent: it keeps to any site.
+   */
+  keeps?(site: string): boolean;
   /** Hits as the source shows them for free. Throw on failure: the runner writes the spend. */
   search?(query: QueryRecord): Promise<HitViewIn[]>;
   /**
@@ -101,3 +106,10 @@ export interface StepEvent {
   note?: string;
   ms: number;
 }
+
+/** The searchers a query goes to: all of them, or for a site-scoped query those that keep to it. */
+export const searchersFor = (
+  searchers: readonly Source[],
+  q: { site?: string | undefined },
+): Source[] =>
+  q.site ? searchers.filter((s) => s.keeps?.(q.site as string) ?? true) : [...searchers];

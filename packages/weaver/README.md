@@ -21,7 +21,7 @@ Three more doors run the research engine (wren's `designs/2026-10-26-research-en
 | Import | Does |
 |---|---|
 | `@wrenautomation/weaver/engine` | `Source` (a name, `search` and/or `open`, a cost), `registry` and the plan's allow-list; the agent's calls (`planRound`, `search`, `open`, `extract`, `check`, `add`, `brief`), one step each; `run(deps, options)`: plan, fetch, triage, read, extract, check (a sample of findings against their documents), review, round after round until raven's edge says stop; `fold` rebuilds a run's state from its records, so a run resumes from the step it stopped on; `Transient`, the failure worth another try; raven's `Model`, `Ask`, `PlanFile` and record shapes re-exported, so a host pins weaver alone |
-| `@wrenautomation/weaver/sources` | `searxng`, `exa` (search), `youtube` (search and read, yt-dlp), `fetcher` (open, the polite fetcher), `ladder` (open, autobrowse's fetch ladder up to a browser), `reddit` and `facebook` (open a thread or a group post through autobrowse's site routes), `paste` (a person's URLs), `ledger` (hits earlier runs saw) |
+| `@wrenautomation/weaver/sources` | `searxng`, `exa` (search), `youtube` (search and read, yt-dlp), `fetcher` (open, the polite fetcher), `ladder` (open, autobrowse's fetch ladder up to a browser), `reddit` and `facebook` (open a thread or a group post through autobrowse's site routes), `paste` (a person's URLs), `ledger` (hits earlier runs saw). A query with a `site` skips a searcher that cannot keep to it (`Source.keeps`: `youtube` keeps to YouTube only) |
 | `@wrenautomation/weaver/ledger` | the records (`query`, `hit`, `document`, `finding`, `verdict`, `call`, `spend`, `snapshot`, `edge`, `done`, `steer`, `gap`, `check`, `pattern`, `found`), `FilesLedger` (a folder: `runs/<run>/<writer>.jsonl`, `plans/<kind>.json`), `MemoryLedger`, yield rows per source, person, channel and kind |
 
 Every record carries `from` (ai, human or tool) and `by` (a model id, a source, a person). A
@@ -53,6 +53,7 @@ run the runner made. Every command prints JSON.
 export WEAVER_AGENT=claude-code                     # the agent's id on every record it writes
 weaver plan "how do staffing firms win repeat clients" --known "referrals convert"   # a run; prints its id
 weaver brief 01M5YS...                              # the ask, budget, sources, what is open, hits, findings, cost
+weaver recall staffing repeat clients --not 01M5YS... # earlier runs' findings: quote, URL, source date, run; --also <ledger> per extra folder
 weaver search 01M5YS... "staffing repeat client rate" --why "the ask's words"       # one query, then every searcher
 echo '[{"terms":"...","why":"..."},{"terms":"...","why":"..."}]' | weaver search 01M5YS...   # a batch
 weaver search 01M5YS... < tree.json                 # a query tree, one tier: {facets: [{name, why, tries: [[{terms, why}], [...]]}]}
