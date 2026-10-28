@@ -126,8 +126,10 @@ records show done.
 5. **Check.** Read a sample of the kept findings again against their documents (`show`), a
    different page each: `add check <finding> --ok|--fail --why`. A fail drops it. For a bulk
    run, `check` does the same with a model over the budget's `checks` or a tenth of the kept
-   findings, whichever is more, plus each finding the judge doubts; put a finding back with
-   `add call <finding> keep --why` only if you read the page and the check is wrong.
+   findings, whichever is more, plus each finding the judge doubts. A fail's narrower
+   sentence on the same quote comes back as a new finding with `fixes` once a second check
+   backs it. Put a finding back with `add call <finding> keep --why` only if you read the page
+   and the check is wrong.
 6. **Patterns.** When kept findings from different sites say one thing, write it once:
    `add pattern` with the finding ids. The engine counts the distinct sites; one site is a
    claim, not a pattern, and it warns. A pattern is your sentence; the findings are its proof.

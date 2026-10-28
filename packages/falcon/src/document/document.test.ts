@@ -255,6 +255,13 @@ describe("sample check", () => {
         scripted([{ ok: false, why: "  the year is  the survey's " }]),
       ),
     ).toEqual({ ok: false, why: "the year is the survey's", usage: { usd: 0.01 } });
+    // A no's fix comes back folded; a yes drops one, and a fix that repeats the sentence is none.
+    const fail = { ok: false, why: "no", fix: "  Firms  said so. " };
+    expect((await checkFinding(finding, doc, scripted([fail])))?.fix).toBe("Firms said so.");
+    const yes = { ok: true, why: "ok", fix: "x" };
+    expect((await checkFinding(finding, doc, scripted([yes])))?.fix).toBeUndefined();
+    const same = { ok: false, why: "no", fix: finding.text };
+    expect((await checkFinding(finding, doc, scripted([same])))?.fix).toBeUndefined();
     const frame: Finding = { ...finding, proof: { url: doc.url, frame: "01:02" } };
     expect(await checkFinding(frame, doc, scripted([]))).toBeNull();
   });

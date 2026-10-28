@@ -1017,6 +1017,8 @@ export interface Brief {
       quote?: string;
       url: string;
       date?: string;
+      /** The failed finding this one narrows. */
+      fixes?: string;
     }[];
     dropped: number;
   };
@@ -1115,6 +1117,7 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
           ...(f.proof.quote ? { quote: f.proof.quote } : {}),
           url: f.proof.url,
           ...(f.date ? { date: f.date } : {}),
+          ...(f.fixes ? { fixes: f.fixes } : {}),
         })),
       dropped: state.findings.filter((f) => !kept(state, f)).length,
     },

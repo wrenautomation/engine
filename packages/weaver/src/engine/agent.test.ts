@@ -598,6 +598,49 @@ describe("agent commands", () => {
     expect(done.tree.facets[0]).toMatchObject({ kept: 3, fit: 3, enough: true });
   });
 
+  it("a failed check's fix lands as a new finding after the gate and a second check", async () => {
+    const fixer: Model = fakeModel((prompt) => {
+      if (!prompt.startsWith("You check")) throw new Error("only checks");
+      if (prompt.includes("Sentence: Most placements"))
+        return JSON.stringify({
+          ok: false,
+          why: "most is not 38%",
+          fix: "38% of placements came from repeat clients.",
+        });
+      if (prompt.includes("Sentence: Repeat clients drive"))
+        return JSON.stringify({ ok: false, why: "no", fix: "Repeat clients drive 60% of work." });
+      return JSON.stringify({ ok: true, why: "backed", fix: "" });
+    }, "m");
+    const d = { ...deps(), model: fixer };
+    const runId = (
+      await planRound(d, { ask: { text: "repeat clients", kind: "web" }, planFile, model: "m" })
+    ).run;
+    const opened = await open(d, runId, { urls: ["https://a.example/one"], why: "w" }, agent);
+    const doc = opened.wrote.find((r) => r.type === "document")?.id ?? "";
+    const quote = "38% of placements came from repeat clients";
+    const most = await add(
+      d,
+      runId,
+      { type: "finding", document: doc, text: "Most placements came from repeat clients.", quote },
+      agent,
+    );
+    const drive = await add(
+      d,
+      runId,
+      { type: "finding", document: doc, text: "Repeat clients drive the work.", quote },
+      agent,
+    );
+    const checked = await check(d, runId, { findings: [most.record.id, drive.record.id] });
+    expect(checked.note).toContain("2 not backed by their quote (1 fixed");
+    const kept = (await brief(d, runId)).findings.kept;
+    expect(kept).toEqual([
+      expect.objectContaining({
+        text: "38% of placements came from repeat clients.",
+        fixes: most.record.id,
+      }),
+    ]);
+  });
+
   it("a judge's failure writes its spend and the step goes on; a refused key stops the pass", async () => {
     const down = Object.assign(new Error("down"), { status: 503 });
     const refused = Object.assign(new Error("key"), { status: 401 });

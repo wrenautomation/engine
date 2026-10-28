@@ -8,7 +8,7 @@
  * document with a verdict, are not done twice.
  */
 
-import { checkFinding, type Document } from "@wrenautomation/falcon/document";
+import { checkFinding, type Document, gateFindings } from "@wrenautomation/falcon/document";
 import { isTransient, type Model, type Transient } from "@wrenautomation/models";
 import type { EntryType, Judged, JudgeFailure, Questions } from "@wrenautomation/models/judge";
 import {
@@ -534,7 +534,8 @@ export const checkStep: StepFn = (ctx, state) =>
 /**
  * Checks `findings` against their documents; the agent's `check` passes its own sample. The
  * judge first reads every kept, unchecked finding with a quote; each one it doubts joins the
- * sample. A judge's yes never takes a finding out of it.
+ * sample. A judge's yes never takes a finding out of it. A fail's fix (a narrower sentence on
+ * the same quote) passes the gate and a second check before it lands as a new finding.
  */
 export async function checkSample(
   ctx: StepContext,
@@ -562,6 +563,30 @@ export async function checkSample(
   };
   let ok = 0;
   let failed = 0;
+  let fixed = 0;
+  /** The fix as a finding when the gate passes it and a second check backs it. */
+  const repair = async (f: FindingRecord, fix: string, model: Model) => {
+    const d = docs.get(f.document) as DocumentRecord;
+    const gated = gateFindings({ findings: [{ text: fix, quote: f.proof.quote ?? "" }] }, d)
+      .findings[0];
+    if (!gated) return;
+    const again = await checkFinding(gated, d, model).catch(() => null);
+    if (!again) return;
+    const who = { from: "ai" as const, by: model.id };
+    const id = await ctx.write(
+      {
+        type: "finding",
+        ...gated,
+        document: d.id,
+        ...(f.date ? { date: f.date } : {}),
+        fixes: f.id,
+      },
+      who,
+    );
+    await ctx.write({ type: "check", on: id, ok: again.ok, why: again.why }, who);
+    if (again.ok) fixed++;
+    else await ctx.write({ type: "call", on: id, verdict: "drop", why: again.why }, who);
+  };
   const got = await batched([...findings], checkOne, async (f, g) => {
     if (!g.out) return;
     const who = { from: "ai" as const, by: g.model.id };
@@ -570,6 +595,7 @@ export async function checkSample(
     else {
       await ctx.write({ type: "call", on: f.id, verdict: "drop", why: g.out.why }, who);
       failed++;
+      if (g.out.fix) await repair(f, g.out.fix, g.model);
     }
   });
   if (got.transient) throw got.transient;
@@ -578,7 +604,7 @@ export async function checkSample(
     : "";
   return {
     ok: true,
-    note: `${ok + failed} checked${why}, ${failed} not backed by their quote${judgeNote}`,
+    note: `${ok + failed} checked${why}, ${failed} not backed by their quote${fixed ? ` (${fixed} fixed: a narrower sentence on the same quote)` : ""}${judgeNote}`,
   };
 }
 

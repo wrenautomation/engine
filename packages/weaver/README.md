@@ -221,7 +221,9 @@ The check step reads a sample of the round's kept findings (`budget.checks`, 3 b
 tenth of the kept findings, whichever is more; 0 is none; spread across documents);
 `check --patterns` reads every unchecked finding a pattern rests on, against the text around each quote. The extract gate proves a quote is
 on the page; the check asks whether it backs the sentence. A finding that fails gets a `check`
-record and a drop call; `add call <finding> keep` puts it back. The review sees every check, and a finding
+record and a drop call; `add call <finding> keep` puts it back. A fail comes with a fix when one
+fits: a narrower sentence the same quote backs. The fix passes the extract gate and a second
+check, then lands as a new finding with `fixes` naming the old one. The review sees every check, and a finding
 carries its document's date, so the review weighs age as the plan file's `age` line says.
 
 The judge (Jev, from `@wrenautomation/models/judge`) answers typed questions with probabilities

@@ -98,6 +98,8 @@ export const FindingRecord = Envelope.extend({ type: z.literal("finding") })
   .extend({
     document: z.string().min(1),
     date: z.string().optional(),
+    /** The finding a failed check dropped, that this narrower sentence repairs. */
+    fixes: z.string().optional(),
   });
 export type FindingRecord = z.infer<typeof FindingRecord>;
 
