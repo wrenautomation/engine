@@ -2,8 +2,8 @@
  * The sample check: does a finding's quote back what its sentence says? The extract gate already
  * proves the quote is on the document word for word and holds the sentence's numbers; it cannot
  * see a sentence that says more than its quote, or a quote torn from a context that turns it.
- * A model reads the quote in its context and says yes or no, with why. A run checks a sample,
- * never every finding: the share that fails is the read on the whole extract.
+ * A model reads the quote in its context and says yes or no, with why. A run checks a sample
+ * and every finding a pattern rests on: the share that fails is the read on the whole extract.
  *
  * The model sees the text around the quote, not the whole document: `WINDOW` characters each
  * side. A finding with no quote (a timestamp or a frame) is not checked here.

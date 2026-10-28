@@ -40,6 +40,8 @@ export const Query = z.object({
   /** The tree's facet it serves, and which try (1 = the first). Absent on a flat query. */
   facet: z.string().optional(),
   tier: z.number().int().positive().optional(),
+  /** The source classes the facet needs (a spend claim: survey, primary_data); weaver checks the names. */
+  needs: z.array(z.string().min(1)).optional(),
   from: From,
   /** Model id, plan file id or a person's name. */
   by: z.string(),
@@ -71,6 +73,8 @@ export const Facet = z.object({
   name: z.string().min(1),
   /** What this facet would prove. */
   why: z.string(),
+  /** The source classes that can prove it; a facet whose read pages have none of them is flagged. */
+  needs: z.array(z.string().min(1)).optional(),
   tries: z.array(z.array(Leaf).min(1)).min(1),
 });
 export type Facet = z.infer<typeof Facet>;

@@ -19,7 +19,7 @@ import {
 import { type Deps, registry, type Source } from "./ports.js";
 import { recall } from "./recall.js";
 import { run } from "./runner.js";
-import { fold } from "./state.js";
+import { checkCount, classesOf, echoOf, fold, type RunState, sourcesOf } from "./state.js";
 
 const pages: Record<string, string> = {
   "https://a.example/one":
@@ -241,6 +241,24 @@ describe("agent commands", () => {
     await add(d, runId, { type: "class", on: docOne.id, class: "forum", why: "a thread" }, agent);
     expect(await classes()).toEqual({ forum: 1, survey: 1 });
     expect((await brief(d, runId)).documents.unclassed).toEqual([]);
+    // Vendor echo: every classed source a vendor, flagged in brief and warned on a new pattern.
+    await add(d, runId, { type: "class", on: docOne.id, class: "vendor", why: "sells it" }, agent);
+    await add(d, runId, { type: "class", on: weekly.id, class: "vendor", why: "sells it" }, agent);
+    expect((await brief(d, runId)).patterns.at(-1)).toMatchObject({
+      classes: { vendor: 2 },
+      sources: 2,
+      echo: true,
+    });
+    const echo = await add(
+      d,
+      runId,
+      { type: "pattern", text: "Vendors agree.", findings: keptIds },
+      agent,
+    );
+    expect(echo.warnings).toContain(
+      "vendor echo: every classed source is a vendor; vendors cite each other",
+    );
+    expect((await check(d, runId, { patterns: true })).note).toBe("nothing to check");
     await expect(
       add(d, runId, { type: "class", on: "nope", class: "news", why: "x" }, agent),
     ).rejects.toThrow("no document or finding nope");
@@ -300,6 +318,7 @@ describe("agent commands", () => {
     expect(b.patterns.map((p) => [p.text, p.sources])).toEqual([
       ["Surveys agree.", 1],
       ["Repeat clients drive placements.", 2],
+      ["Vendors agree.", 2],
     ]);
     // Two searches, two reads, two extracts, two checks: every call a spend.
     expect(b.cost.total.calls).toBe(8);
@@ -425,6 +444,78 @@ describe("agent commands", () => {
       "https://x.example/e",
     ]);
     expect(b.gaps).toHaveLength(2);
+  });
+
+  it("counts forum threads, not the forum's site; checks at least a tenth; a facet flags the class it lacks", () => {
+    const f = (id: string, document: string, url: string) => ({
+      id,
+      document,
+      round: 1,
+      proof: { url, quote: "five words of a quote" },
+    });
+    const state = {
+      findings: [
+        f("f1", "d1", "https://reddit.com/r/hvac/comments/1"),
+        f("f2", "d2", "https://reddit.com/r/hvac/comments/2"),
+        f("f3", "d3", "https://vendor.example/a"),
+        f("f4", "d4", "https://vendor.example/b"),
+      ],
+      called: new Map(),
+      classOf: new Map([
+        ["d1", "forum"],
+        ["d2", "forum"],
+        ["d3", "vendor"],
+        ["d4", "vendor"],
+      ]),
+    } as unknown as RunState;
+    const forum = classesOf(state, ["f1", "f2"]);
+    expect(forum).toEqual({ forum: 2 });
+    expect(sourcesOf(forum)).toBe(2);
+    expect(echoOf(forum)).toBe(false);
+    const vendors = classesOf(state, ["f3", "f4"]);
+    expect(vendors).toEqual({ vendor: 1 });
+    expect(echoOf(vendors)).toBe(true);
+    expect(echoOf(classesOf(state, ["f1", "f3"]))).toBe(false);
+    expect(checkCount(700, 3)).toBe(70);
+    expect(checkCount(10, 3)).toBe(3);
+    expect(checkCount(700, 0)).toBe(0);
+  });
+
+  it("a facet names the classes it needs; a try pinned to one site is flagged", async () => {
+    const fake: Source = {
+      name: "fake",
+      kind: "search",
+      cost: "free",
+      search: async (q) => [{ url: `https://x.example/${q.terms}`, title: q.terms }],
+    };
+    const d = { ...deps(), sources: registry(fake, opener) };
+    const runId = (
+      await planRound(d, {
+        ask: { text: "what do owners spend", kind: "web" },
+        planFile,
+        model: "m",
+      })
+    ).run;
+    const facet = (needs: string[]) => ({
+      facets: [
+        {
+          name: "spend",
+          why: "what they pay",
+          needs,
+          tries: [[{ terms: "s1", site: "reddit.com", why: "w" }]],
+        },
+      ],
+    });
+    await expect(searchTree(d, runId, facet(["blog"]), agent)).rejects.toThrow(
+      'facet "spend" needs blog',
+    );
+    const one = await searchTree(d, runId, facet(["survey", "primary_data"]), agent);
+    expect(one.note).toContain("spend: every try pins reddit.com");
+    expect(one.tree.facets[0]).toMatchObject({
+      needs: ["survey", "primary_data"],
+      classes: {},
+      lacks: false,
+    });
   });
 
   it("a site's own reader opens its URLs before the general openers, whatever the list's order", async () => {
@@ -608,7 +699,7 @@ describe("agent commands", () => {
     expect(snap.ask.known).toEqual(
       expect.arrayContaining([
         `child run ${a} ("repeat clients placements") stopped: one niche checked`,
-        `Weekly calls keep clients. (run ${a}, pattern ${p.record.id}; sites: unclassed 1)`,
+        `Weekly calls keep clients. (run ${a}, pattern ${p.record.id}; sources: unclassed 1)`,
         `dead end, skip it: spend: consumers, not buyers (run ${a})`,
       ]),
     );

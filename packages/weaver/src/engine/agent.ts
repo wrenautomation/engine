@@ -24,10 +24,10 @@ import {
   type DocumentRecord,
   type DraftRecord,
   type Envelope,
-  type FindingRecord,
   type From,
   type HitRecord,
   LedgerRecord,
+  SOURCE_CLASSES,
   type SourceClass,
   type Step,
 } from "../ledger/records.js";
@@ -36,13 +36,17 @@ import { costOf } from "./cost.js";
 import type { Deps } from "./ports.js";
 import { context } from "./runner.js";
 import {
+  checkCount,
   classesOf,
+  echoOf,
   fold,
   kept,
   type Pointer,
   personRound,
   queriesOf,
   type RunState,
+  sourcesOf,
+  spreadSample,
 } from "./state.js";
 import {
   checkSample,
@@ -270,6 +274,12 @@ export interface FacetView {
   uncalled: number;
   /** The facet reached the guide's `thin` in kept hits: no more tries. */
   enough: boolean;
+  /** The source classes it needs, as its queries say. */
+  needs: string[];
+  /** Read pages with a kept finding, per class. */
+  classes: Partial<Record<SourceClass | "unclassed", number>>;
+  /** It needs classes; pages were read and none is of one. */
+  lacks: boolean;
 }
 
 export interface TreeView {
@@ -294,9 +304,20 @@ export function treeView(state: RunState, round: number, guide: TreeGuide): Tree
     queryFacet.set(q.id, q.facet);
     let facet = facets.find((f) => f.name === q.facet);
     if (!facet) {
-      facet = { name: q.facet, tries: [], hits: 0, kept: 0, uncalled: 0, enough: false };
+      facet = {
+        name: q.facet,
+        tries: [],
+        hits: 0,
+        kept: 0,
+        uncalled: 0,
+        enough: false,
+        needs: [],
+        classes: {},
+        lacks: false,
+      };
       facets.push(facet);
     }
+    for (const n of q.needs ?? []) if (!facet.needs.includes(n)) facet.needs.push(n);
     const tier = q.tier ?? 1;
     let t = facet.tries.find((x) => x.tier === tier);
     if (!t) {
@@ -309,8 +330,10 @@ export function treeView(state: RunState, round: number, guide: TreeGuide): Tree
     facet.hits += hits;
   }
   // A hit counts for every facet whose query found it: a page two facets reached is kept for both.
+  const facetsOf = new Map<string, Set<string>>();
   for (const [hit, queries] of queriesOf(state)) {
     const names = new Set([...queries].flatMap((q) => queryFacet.get(q) ?? []));
+    facetsOf.set(hit, names);
     const call = state.called.get(hit);
     for (const name of names) {
       const facet = facets.find((f) => f.name === name) as FacetView;
@@ -318,9 +341,22 @@ export function treeView(state: RunState, round: number, guide: TreeGuide): Tree
       else if (!call) facet.uncalled++;
     }
   }
+  const yielded = new Set(state.findings.filter((f) => kept(state, f)).map((f) => f.document));
+  for (const d of state.documents) {
+    if (!yielded.has(d.id)) continue;
+    const c = state.classOf.get(d.id) ?? "unclassed";
+    for (const name of facetsOf.get(d.hit) ?? []) {
+      const facet = facets.find((f) => f.name === name) as FacetView;
+      facet.classes[c] = (facet.classes[c] ?? 0) + 1;
+    }
+  }
   for (const f of facets) {
     f.tries.sort((a, b) => a.tier - b.tier);
     f.enough = f.kept >= guide.thin;
+    f.lacks =
+      f.needs.length > 0 &&
+      Object.keys(f.classes).length > 0 &&
+      !f.needs.some((n) => f.classes[n as SourceClass]);
   }
   const served = new Set(facets.map((f) => f.name));
   const dead = state.dead.map((d) => d.facet);
@@ -385,6 +421,9 @@ export async function searchTree(
   for (const f of tree.facets) {
     if (names.has(f.name)) throw new Error(`facet "${f.name}" twice`);
     names.add(f.name);
+    for (const n of f.needs ?? [])
+      if (!(SOURCE_CLASSES as readonly string[]).includes(n))
+        throw new Error(`facet "${f.name}" needs ${n}: not one of ${SOURCE_CLASSES.join(", ")}`);
   }
   const before = treeView(first, round, guide);
   const wrote: Shown[] = [];
@@ -397,6 +436,13 @@ export async function searchTree(
       continue;
     }
     const ran = before.facets.find((f) => f.name === facet.name);
+    const sites = new Set(facet.tries.flat().map((l) => l.site ?? ""));
+    if (sites.size === 1 && !sites.has(""))
+      lines.push(`${facet.name}: every try pins ${[...sites][0]}, one source class at most`);
+    if (ran?.lacks)
+      lines.push(
+        `${facet.name}: needs ${ran.needs.join(" or ")}, read pages are ${Object.keys(ran.classes).join(", ")}`,
+      );
     const tier = (ran?.tries.at(-1)?.tier ?? 0) + 1;
     const next = facet.tries[tier - 1];
     if (ran && !options.all) {
@@ -434,6 +480,7 @@ export async function searchTree(
             facet: facet.name,
             tier,
             ...(leaf.site ? { site: leaf.site } : {}),
+            ...(facet.needs?.length ? { needs: facet.needs } : {}),
           },
           who,
         ),
@@ -557,36 +604,40 @@ export async function extract(
  * At most `n` kept, unchecked findings with a quote, from any round, spread across documents:
  * each document's first, then each one's second, and so on.
  */
-export function sampleToCheck(state: RunState, n: number): FindingRecord[] {
+/** Kept findings the run's patterns rest on that no check has read. */
+export const uncheckedOf = (state: RunState, ids: readonly string[]): string[] => {
   const checked = new Set(state.checks.map((c) => c.on));
-  const byDoc = new Map<string, FindingRecord[]>();
-  for (const f of state.findings)
-    if (f.proof.quote && !checked.has(f.id) && kept(state, f))
-      byDoc.set(f.document, [...(byDoc.get(f.document) ?? []), f]);
-  const out: FindingRecord[] = [];
-  const lists = [...byDoc.values()];
-  for (let i = 0; out.length < n && lists.some((l) => i < l.length); i++)
-    for (const l of lists) {
-      const f = l[i];
-      if (f && out.length < n) out.push(f);
-    }
-  return out;
-}
+  const byId = new Map(state.findings.map((f) => [f.id, f]));
+  return ids.filter((id) => {
+    const f = byId.get(id);
+    return !!f?.proof.quote && kept(state, f) && !checked.has(id);
+  });
+};
 
-/** The check step over the findings named, else a sample of `n` (the budget's `checks` by default). */
+/**
+ * The check over the findings named; else, with `patterns`, every unchecked finding a pattern
+ * rests on; else a sample spread over documents: `n`, or the budget's `checks` or a tenth of
+ * the kept findings, whichever is more.
+ */
 export async function check(
   deps: Deps,
   run: string,
-  input: { findings?: readonly string[]; n?: number } = {},
+  input: { findings?: readonly string[]; n?: number; patterns?: boolean } = {},
 ): Promise<Did> {
   return stepRun(deps, run, "check", (c, s) => {
+    const byId = new Map(s.findings.map((f) => [f.id, f]));
+    const named = (ids: readonly string[]) =>
+      ids.map((id) => {
+        const f = byId.get(id);
+        if (!f) throw new Error(`no finding ${id}`);
+        return f;
+      });
+    const reach = s.findings.filter((f) => f.proof.quote && kept(s, f)).length;
     const sample = input.findings
-      ? input.findings.map((id) => {
-          const f = s.findings.find((x) => x.id === id);
-          if (!f) throw new Error(`no finding ${id}`);
-          return f;
-        })
-      : sampleToCheck(s, input.n ?? s.snapshot?.budget.checks ?? 3);
+      ? named(input.findings)
+      : input.patterns
+        ? named(uncheckedOf(s, [...new Set(s.patterns.flatMap((p) => p.findings))]))
+        : spreadSample(s, input.n ?? checkCount(reach, s.snapshot?.budget.checks ?? 3));
     return checkSample(c, s, sample);
   });
 }
@@ -755,7 +806,13 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
         return f;
       });
       const pattern = patternOf(a.text, on);
-      if (pattern.sources < 2) warnings.push("one source: a claim, not a pattern yet");
+      const classes = classesOf(state, pattern.findings);
+      if (sourcesOf(classes) < 2) warnings.push("one source: a claim, not a pattern yet");
+      if (echoOf(classes))
+        warnings.push("vendor echo: every classed source is a vendor; vendors cite each other");
+      const unchecked = uncheckedOf(state, pattern.findings);
+      if (unchecked.length)
+        warnings.push(`unchecked: ${unchecked.join(" ")}; run check --patterns`);
       return { record: await write({ type: "pattern", ...pattern }), warnings };
     }
     case "dead": {
@@ -876,15 +933,20 @@ export interface Brief {
     dropped: number;
   };
   checks: { on: string; ok: boolean; why: string }[];
-  /** What the agent says several findings say together, with the count of distinct sites. */
+  /** What the agent says several findings say together, its sources counted now over kept findings. */
   patterns: {
     id: string;
     round: number;
     text: string;
     findings: string[];
+    /** Distinct sites over its kept findings; each forum thread counts on its own. */
     sources: number;
-    /** Distinct sites per class over its kept findings; `unclassed` counts the sites with none. */
+    /** Sources per class; `unclassed` counts the sites with none. */
     classes: Partial<Record<SourceClass | "unclassed", number>>;
+    /** Every classed source is a vendor. */
+    echo: boolean;
+    /** Kept findings it rests on that no check has read. */
+    unchecked: string[];
   }[];
   /** The run this one is a child of. */
   parent: { run: string; round: number; why: string } | null;
@@ -962,14 +1024,19 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
       dropped: state.findings.filter((f) => !kept(state, f)).length,
     },
     checks: state.checks.map(({ on, ok, why }) => ({ on, ok, why })),
-    patterns: state.patterns.map(({ id, round, text, findings, sources }) => ({
-      id,
-      round,
-      text,
-      findings,
-      sources,
-      classes: classesOf(state, findings),
-    })),
+    patterns: state.patterns.map(({ id, round, text, findings }) => {
+      const classes = classesOf(state, findings);
+      return {
+        id,
+        round,
+        text,
+        findings,
+        sources: sourcesOf(classes),
+        classes,
+        echo: echoOf(classes),
+        unchecked: uncheckedOf(state, findings),
+      };
+    }),
     parent: s?.parent ?? null,
     children: family.children,
     treeCost: family.children.length ? family.cost : null,

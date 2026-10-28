@@ -68,6 +68,7 @@ weaver add finding 01M5YS... 01M5YV... --text "412 firms were surveyed." --quote
 weaver add check 01M5YS... 01M5YW... --ok --why "the quote says it"   # the agent's own check; --fail also drops
 weaver extract 01M5YS...                            # or a model behind the quote gate, every document without a verdict
 weaver check 01M5YS... -n 3                         # or a model's sample of findings read against their documents
+weaver check 01M5YS... --patterns                   # every unchecked finding a pattern rests on
 weaver add gap 01M5YS... "no UK numbers yet"
 weaver add steer 01M5YS... "numbers only" --human will                                # the person's word, relayed
 weaver add pattern 01M5YS... "Repeat clients come from referrals." --on 01M5YV... 01M5YW...   # what findings say together; sites counted
@@ -204,13 +205,17 @@ most. The plan file's `runs` caps the depth (2) and the children per parent roun
 stopped child's stop, patterns and dead ends (`add dead`) reach the parent's next plan as
 known lines; a running child is open. A `class` (`add class`) says what kind of source a document is (primary data, survey,
 practitioner, vendor, forum, news, other), with why; its findings take it, and a class on one
-finding overrides it. `brief.patterns[].classes` counts distinct sites per class. Only the
-agent or a person writes a class. A `draft` (`add draft`, JSON items on stdin) is a rough draft over the kept
+finding overrides it. `brief.patterns[].classes` counts sources per class: distinct sites,
+but each forum thread on its own; `echo` flags a pattern whose classed sources are all vendors,
+and `unchecked` lists its findings no check has read. Only the agent or a person writes a
+class. A tree facet's `needs` names the classes that can prove it; `tree.facets[].lacks` says
+its read pages have none, and a facet whose every try pins one site is flagged. A `draft` (`add draft`, JSON items on stdin) is a rough draft over the kept
 findings and patterns: falcon's draft gate drops an item that cites nothing kept or has a number
 no cited quote has. `brief.draft` shows the latest. It is never the final write.
 
-The check step reads a sample of the round's kept findings (`budget.checks`, 3 by default;
-spread across documents) against the text around each quote. The extract gate proves a quote is
+The check step reads a sample of the round's kept findings (`budget.checks`, 3 by default, or a
+tenth of the kept findings, whichever is more; 0 is none; spread across documents);
+`check --patterns` reads every unchecked finding a pattern rests on, against the text around each quote. The extract gate proves a quote is
 on the page; the check asks whether it backs the sentence. A finding that fails gets a `check`
 record and a drop call; `add call <finding> keep` puts it back. The review sees every check, and a finding
 carries its document's date, so the review weighs age as the plan file's `age` line says.

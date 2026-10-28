@@ -56,9 +56,14 @@ Return ONLY a JSON object, no prose, exactly this shape:
 
 Rules:
 - Every finding that serves the ask and is not known already, in document order.
-- text: one plain sentence a person would say out loud. Specific: a number, a named practice, a stated cause. State the fact itself, never "The document says" or "The page notes". Name the source only when it carries weight ("A 2025 survey of 400 firms found ...", "IANA says ...").
+- text: one plain sentence a person would say out loud. Specific: a number, a named practice, a stated cause. Never "The document says" or "The page notes".
+- Say who says it, as the page shows it: "A 2025 survey of 400 firms found ...", "One commenter says ...", "A vendor of X says ...". One person is one person: never "owners say" or "commenters" for one voice.
+- Name a speaker's role, trade, size or place only when the page states it.
+- Keep the quote's hedge and scope: "probably", "sometimes", "a lot of", "in my experience" stay; never turn them into "most", "often" or a rule.
+- Advice, a question, a promise or a sales pitch is not a report of what happens. Take it only as what it is ("A seller claims ...").
 - quote: the exact words from the document that the finding rests on, copied character for character, at least 5 words, no more than the finding needs.
-- Every number in the text must appear in the quote.
+- Every part of the text must be in the quote: no cause, ranking, detail or second fact the quote lacks. Two facts from two places are two findings.
+- Every number in the text must appear in the quote. A table cell without its row and column labels is not a quote.
 - A company's marketing about itself is not a fact about the market.
 - Nothing in the document serves the ask: return {"findings": [], "quality": "off", "gap": "..."}.
 - quality: "rich" when the document answers much of the ask, "thin" when it serves it a little, "off" when it is about something else.

@@ -662,16 +662,26 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
 
   agent(machine(common(program.command("check <run> [finding...]"))))
     .description(
-      "a model reads each finding against its document: the findings named, else a sample spread across documents. One that fails gets a drop call",
+      "a model reads each finding against its document: the findings named, else with --patterns every unchecked finding a pattern rests on, else a sample spread across documents. One that fails gets a drop call",
     )
-    .option("-n <n>", "the sample's size (default: the budget's checks)", (v) => Number(v))
+    .option(
+      "-n <n>",
+      "the sample's size (default: the budget's checks or a tenth of the kept findings, whichever is more)",
+      (v) => Number(v),
+    )
+    .option("--patterns", "every unchecked finding a pattern rests on")
     .action(
-      async (runId: string, findings: string[], o: Common & Machine & Agent & { n?: number }) => {
+      async (
+        runId: string,
+        findings: string[],
+        o: Common & Machine & Agent & { n?: number; patterns?: boolean },
+      ) => {
         const s = setup(o);
         printDid(
           await check(depsOf(s, agentOf(o)), runId, {
             ...(findings.length ? { findings } : {}),
             ...(o.n !== undefined ? { n: o.n } : {}),
+            ...(o.patterns ? { patterns: true } : {}),
           }),
         );
       },

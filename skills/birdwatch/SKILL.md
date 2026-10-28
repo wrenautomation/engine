@@ -31,7 +31,7 @@ weaver show <run> <document> [--head N]              # the page's text: read it 
 weaver add finding <run> <document> --text "<sentence>" --quote "<quote on the page>"
 weaver add check <run> <finding> --ok|--fail --why "<why>"    # your own check; a fail drops it
 weaver extract <run>                                 # bulk only: a model behind the quote gate
-weaver check <run> [-n 3]                            # bulk only: a model's sample check
+weaver check <run> [-n N] [--patterns]               # bulk only: a model's check; --patterns: every finding a pattern rests on
 weaver add gap <run> "<what is still missing>"
 weaver add class <run> <document|finding> <class> --why "<why>"   # primary_data, survey, practitioner, vendor, forum, news, other
 weaver add pattern <run> "<what several findings say together>" --on <finding> <finding>...
@@ -78,13 +78,21 @@ records show done.
    it". A facet that still returns the inverse after its tries: `add dead` with the why. The
    budget is a guard rail, not a cap.
 
+   A facet names the source classes that can prove it in `needs`: a spend or price claim
+   needs `survey` or `primary_data`, not a forum. Its tries then go where those live, not
+   only to new words: public price pages, job ads for the role the buyer would replace (the
+   wage), an ad library, a trade association's survey, a filing. Never pin every try of a
+   facet to one site: the search says so, and the facet ends with one class. `tree.facets[]`
+   shows `classes` (read pages with a kept finding) and `lacks` (none of its `needs`).
+
    ```json
    {"facets": [
      {"name": "number", "why": "how often it happens", "tries": [
        [{"terms": "<plain words> rate", "why": "..."}],
        [{"terms": "<plain words> survey 2025", "why": "..."}, {"terms": "...", "site": "reddit.com", "why": "..."}]
      ]},
-     {"name": "counter", "why": "who says it fails", "tries": [[{"terms": "...", "why": "..."}]]}
+     {"name": "counter", "why": "who says it fails", "tries": [[{"terms": "...", "why": "..."}]]},
+     {"name": "spend", "why": "what the buyer pays", "needs": ["survey", "primary_data"], "tries": [[{"terms": "...", "why": "..."}]]}
    ]}
    ```
 3. **Triage.** `brief` lists `hits.uncalled` with title, snippet and `facets`: the facets whose
@@ -102,13 +110,17 @@ records show done.
    class that finding too.
 5. **Check.** Read a sample of the kept findings again against their documents (`show`), a
    different page each: `add check <finding> --ok|--fail --why`. A fail drops it. For a bulk
-   run, `check` does the same with a model; put a finding back with `add call <finding> keep
-   --why` only if you read the page and the check is wrong.
+   run, `check` does the same with a model over the budget's `checks` or a tenth of the kept
+   findings, whichever is more; put a finding back with `add call <finding> keep --why` only
+   if you read the page and the check is wrong.
 6. **Patterns.** When kept findings from different sites say one thing, write it once:
    `add pattern` with the finding ids. The engine counts the distinct sites; one site is a
    claim, not a pattern, and it warns. A pattern is your sentence; the findings are its proof.
-   `brief.patterns[].classes` counts its sites per class. Three vendor pages are weaker than
-   one survey: weigh the classes, not the total.
+   `brief.patterns[].classes` counts its sources per class: a site, but each forum thread on
+   its own. Three vendor pages are weaker than one survey: weigh the classes, not the total.
+   `echo` says every classed source is a vendor: vendors cite each other, so find the source
+   they cite or call it a claim. Every finding a pattern rests on gets checked: `check
+   --patterns` (bulk) or your own `add check`; `brief.patterns[].unchecked` lists the rest.
 7. **Review.** Ask: does what is kept answer the ask? What is missing? Write each hole as a gap.
    Then the edge: `again` with a why that names the hole (the next round's plan reads it), or
    `stop` with a why that says what the run has and what it still lacks. The budget's rounds

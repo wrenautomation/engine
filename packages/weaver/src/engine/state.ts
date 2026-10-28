@@ -204,25 +204,43 @@ export const toRead = (state: RunState, round: number): HitRecord[] => {
 };
 
 /**
- * The kept findings of a round to check, at most `n`, spread across documents: each document's
- * first unchecked finding, then each one's second, and so on. A finding with no quote, or one
- * checked already, is not in it. Findings come in record order, so the sample is the same on a rerun.
+ * The kept findings to check, at most `n`, spread across documents: each document's first
+ * unchecked finding, then each one's second, and so on. A finding with no quote, or one checked
+ * already, is not in it. Findings come in record order, so the sample is the same on a rerun.
  */
-export const toCheck = (state: RunState, round: number, n: number): FindingRecord[] => {
+export function spreadSample(
+  state: RunState,
+  n: number,
+  only: (f: FindingRecord) => boolean = () => true,
+): FindingRecord[] {
   const checked = new Set(state.checks.map((c) => c.on));
-  const done = state.checks.filter((c) => c.round === round).length;
   const byDoc = new Map<string, FindingRecord[]>();
   for (const f of state.findings)
-    if (f.round === round && f.proof.quote && !checked.has(f.id) && kept(state, f))
+    if (only(f) && f.proof.quote && !checked.has(f.id) && kept(state, f))
       byDoc.set(f.document, [...(byDoc.get(f.document) ?? []), f]);
   const out: FindingRecord[] = [];
   const lists = [...byDoc.values()];
-  for (let i = 0; out.length < n - done && lists.some((l) => i < l.length); i++)
+  for (let i = 0; out.length < n && lists.some((l) => i < l.length); i++)
     for (const l of lists) {
       const f = l[i];
-      if (f && out.length < n - done) out.push(f);
+      if (f && out.length < n) out.push(f);
     }
   return out;
+}
+
+/** Share of kept findings a check reads at least: the budget's `checks` is the floor under it. */
+export const CHECK_SHARE = 0.1;
+
+/** The sample's size: the budget's `checks`, or a tenth of the kept findings in reach, whichever is more; 0 checks is none. */
+export const checkCount = (inReach: number, budget: number): number =>
+  budget ? Math.max(budget, Math.ceil(inReach * CHECK_SHARE)) : 0;
+
+/** A round's sample for the check step, less what the round checked already. */
+export const toCheck = (state: RunState, round: number, budget: number): FindingRecord[] => {
+  const inRound = (f: FindingRecord) => f.round === round;
+  const done = state.checks.filter((c) => c.round === round).length;
+  const reach = state.findings.filter((f) => inRound(f) && f.proof.quote && kept(state, f)).length;
+  return spreadSample(state, checkCount(reach, budget) - done, inRound);
 };
 
 /** The documents of a round without a verdict: the extract step has not finished them. */
@@ -235,16 +253,28 @@ export const toExtract = (state: RunState, round: number): DocumentRecord[] => {
 export const classOfFinding = (state: RunState, f: FindingRecord): SourceClass | undefined =>
   state.classOf.get(f.id) ?? state.classOf.get(f.document);
 
-/** Distinct sites per class over a pattern's findings still kept. */
+/**
+ * Sources per class over findings still kept: distinct sites, but each forum thread (a
+ * document) counts on its own, so 31 threads on one forum are 31 voices, not one site.
+ */
 export function classesOf(
   state: RunState,
   ids: readonly string[],
 ): Partial<Record<SourceClass | "unclassed", number>> {
-  const sites = new Map<SourceClass | "unclassed", Set<string>>();
+  const sources = new Map<SourceClass | "unclassed", Set<string>>();
   for (const f of state.findings) {
     if (!ids.includes(f.id) || !kept(state, f)) continue;
     const c = classOfFinding(state, f) ?? "unclassed";
-    sites.set(c, (sites.get(c) ?? new Set()).add(hostOf(f.proof.url)));
+    const key = c === "forum" ? f.document : hostOf(f.proof.url);
+    sources.set(c, (sources.get(c) ?? new Set()).add(key));
   }
-  return Object.fromEntries([...sites].map(([c, s]) => [c, s.size]));
+  return Object.fromEntries([...sources].map(([c, s]) => [c, s.size]));
 }
+
+/** The sources a set of findings rests on: the sum over `classesOf`. */
+export const sourcesOf = (classes: ReturnType<typeof classesOf>): number =>
+  Object.values(classes).reduce((a, b) => a + (b ?? 0), 0);
+
+/** Vendor echo: every classed source is a vendor, and vendors cite each other. */
+export const echoOf = (classes: ReturnType<typeof classesOf>): boolean =>
+  !!classes.vendor && Object.keys(classes).every((c) => c === "vendor" || c === "unclassed");
