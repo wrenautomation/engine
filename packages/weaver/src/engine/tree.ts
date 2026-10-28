@@ -111,7 +111,7 @@ export async function fromChildren(
       const classes = Object.entries(classesOf(s, p.findings))
         .map(([k, n]) => `${k} ${n}`)
         .join(", ");
-      known.push(`${p.text} (run ${c.run}, pattern ${p.id}; sites: ${classes || "none kept"})`);
+      known.push(`${p.text} (run ${c.run}, pattern ${p.id}; sources: ${classes || "none kept"})`);
     }
     for (const d of s.dead) known.push(`dead end, skip it: ${d.facet}: ${d.why} (run ${c.run})`);
   }
