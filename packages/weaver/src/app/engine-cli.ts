@@ -569,18 +569,27 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     )
     .option("--url <url...>", "pages the agent names itself")
     .option("--why <why>", "why read these (with hits or --url)")
+    .option(
+      "--with <source...>",
+      "open sources this machine has that the run's allow-list lacks (`sources` lists them)",
+    )
     .action(
       async (
         runId: string,
         hits: string[],
-        o: Common & Machine & Agent & { url?: string[]; why?: string },
+        o: Common & Machine & Agent & { url?: string[]; why?: string; with?: string[] },
       ) => {
         const s = setup(o);
         printDid(
           await open(
             depsOf(s, agentOf(o)),
             runId,
-            { hits, ...(o.url ? { urls: o.url } : {}), ...(o.why ? { why: o.why } : {}) },
+            {
+              hits,
+              ...(o.url ? { urls: o.url } : {}),
+              ...(o.why ? { why: o.why } : {}),
+              ...(o.with ? { with: o.with } : {}),
+            },
             whoOf(o),
           ),
         );

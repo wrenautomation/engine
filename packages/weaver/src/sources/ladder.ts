@@ -14,6 +14,7 @@ import { Transient } from "@wrenautomation/models";
 import type { Source } from "../engine/ports.js";
 import { fetchLadder, type LadderClient, type LadderTier } from "../fetch/ladder.js";
 import { isPage } from "./fetcher.js";
+import { junkReason } from "./junk.js";
 
 export function ladderSource(o: {
   sites: LadderClient;
@@ -48,6 +49,8 @@ export function ladderSource(o: {
         ...(h.title ? { title: h.title } : {}),
       });
       if (!doc) throw new Error("ladder: nothing to read in the page");
+      const junk = junkReason(doc, r.fetched.status);
+      if (junk) throw new Error(`ladder: ${junk} at ${r.fetched.tier}`);
       return doc;
     },
   };

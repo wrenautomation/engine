@@ -60,6 +60,7 @@ weaver search 01M5YS... < tree.json                 # after triage, the same fil
 weaver add call 01M5YS... 01M5YT... keep --why "a survey with numbers"               # triage: a hit kept
 weaver add call 01M5YS... 01M5YU... drop --why "a vendor page"
 weaver open 01M5YS... 01M5YT... --url https://a.example/report --why "numbers"      # keep these, read every kept hit
+weaver open 01M5YS... --with ladder                                                  # an opener the run's allow-list lacks joins it
 weaver show 01M5YS... 01M5YV...                     # a document's text, for the agent to read itself
 weaver add finding 01M5YS... 01M5YV... --text "412 firms were surveyed." --quote "A 2025 survey of 412 firms"
 weaver add check 01M5YS... 01M5YW... --ok --why "the quote says it"   # the agent's own check; --fail also drops
@@ -144,7 +145,11 @@ Each open source claims the URLs it opens (`opens`): `youtube` a YouTube page, `
 going to open a hit writes no spend. A page that was fetched with nothing usable (a 403, a block
 the ladder's last rung still hit, a media no reader takes, a ladder answer that is not HTML such
 as a PDF) is a miss: the source throws, its `spend` says `ok: false` with the reason, the next
-opener gets its turn, and a hit every opener missed is a `gap` that lists each reason. The
+opener gets its turn, and a hit every opener missed is a `gap` that lists each reason. A page
+that answered 200 and still holds nothing (a captcha wall, a "not found" shell, under 200
+characters of text) is the same miss, with the title or the count as the reason. A run's
+allow-list pins its openers at `plan`; `open --with <source>` writes a new snapshot that adds
+one the registry has (the read note names them when hits missed). The
 ladder costs browser time and one of the worker's daily `fetch` bucket per call. Exa's search
 asks for one highlight per result (three sentences, billed per result) as the hit's `snippet`.
 

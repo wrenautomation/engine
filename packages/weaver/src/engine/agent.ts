@@ -429,6 +429,11 @@ export interface OpenInput {
   urls?: readonly string[];
   /** Why these: required with `hits` or `urls`. */
   why?: string;
+  /**
+   * Open sources this machine has that the run's allow-list lacks (a ladder that came after the
+   * plan). Written as a new snapshot in the agent's name, so the ledger says when the list grew.
+   */
+  with?: readonly string[];
 }
 
 /** Kept hits of any round with no document yet. */
@@ -464,6 +469,17 @@ export async function open(deps: Deps, run: string, input: OpenInput, who: Who):
   }
   for (const id of new Set(named))
     await ctx.write({ type: "call", on: id, verdict: "keep", why: input.why as string }, who);
+  const snapshot = state.snapshot;
+  const joining = (input.with ?? []).filter((n) => !snapshot?.sources.includes(n));
+  if (joining.length && snapshot) {
+    for (const n of joining) {
+      const s = deps.sources.get(n);
+      if (!s) throw new Error(`no source named ${n}`);
+      if (!s.open) throw new Error(`${n} opens nothing: only an open source joins a read`);
+    }
+    const { id: _id, at: _at, from: _from, by: _by, ...rest } = snapshot;
+    await ctx.write({ ...rest, sources: [...snapshot.sources, ...joining] }, who);
+  }
   return stepRun(deps, run, "read", (c, s) => readHits(c, s, unread(s)));
 }
 

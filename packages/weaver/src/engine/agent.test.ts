@@ -149,6 +149,16 @@ describe("agent commands", () => {
     // The same page again: no new hit, no new read.
     const again = await open(d, runId, { urls: ["https://b.example/four"], why: "x" }, agent);
     expect(again.wrote.filter((r) => r.type === "hit" || r.type === "document")).toEqual([]);
+    // An opener that came after the plan joins the run by name: a new snapshot says so.
+    const late: Source = { ...opener, name: "late" };
+    const seeker: Source = { ...fake, name: "seeker" };
+    const dl = { ...d, sources: registry(...d.sources.values(), late, seeker) };
+    const joined = await open(dl, runId, { with: ["late"] }, agent);
+    expect(joined.step).toBe("read");
+    const grew = fold(runId, await dl.ledger.trace(runId)).snapshot;
+    expect(grew?.sources).toEqual(["fake", "opener", "late"]);
+    expect(grew?.by).toBe(agent.by);
+    await expect(open(dl, runId, { with: ["seeker"] }, agent)).rejects.toThrow("opens nothing");
 
     const extracted = await extract(d, runId);
     const findings = extracted.wrote.filter((r) => r.type === "finding");

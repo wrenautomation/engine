@@ -22,6 +22,7 @@ weaver brief <run>                                   # read it after every step
 weaver search <run> < tree.json                      # the round's query tree (below); or "<terms>" --why, or a JSON array
 weaver add call <run> <hit> keep|drop --why "<why>"  # triage, one per hit
 weaver open <run> [<hit>...] [--url <url>...] --why "<why>"   # then reads every kept hit without a document
+weaver open <run> --with <source>                    # an opener `sources` lists but the run's allow-list lacks (a ladder that came later)
 weaver show <run> <document> [--head N]              # the page's text: read it yourself
 weaver add finding <run> <document> --text "<sentence>" --quote "<quote on the page>"
 weaver add check <run> <finding> --ok|--fail --why "<why>"    # your own check; a fail drops it

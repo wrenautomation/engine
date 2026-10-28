@@ -128,7 +128,7 @@ describe("exa", () => {
 });
 
 describe("fetcher", () => {
-  const html = `<html><head><title>Hello</title></head><body><main><h1>Hello</h1><p>${"word ".repeat(40)}</p></main></body></html>`;
+  const html = `<html><head><title>Hello</title></head><body><main><h1>Hello</h1><p>${"word ".repeat(60)}</p></main></body></html>`;
   const opener = (status: number, body: string, type: string) => ({
     open: async (url: string) =>
       new Response(body, { status, headers: { "content-type": type, "x-url": url } }),
@@ -165,7 +165,7 @@ describe("ladder", () => {
         ({
           finalUrl: "https://e.example/final",
           status: 200,
-          html: "<html><head><title>E</title></head><body><p>ladder text here for the page</p></body></html>",
+          html: `<html><head><title>E</title></head><body><p>ladder text here for the page ${"word ".repeat(50)}</p></body></html>`,
           tier: "render",
           block,
           tries: [],
@@ -194,6 +194,44 @@ describe("ladder", () => {
       ladderSource({ sites: pdf }).open?.(hit("https://e.example/a.pdf")),
     ).rejects.toThrow("ladder: application/pdf is not html");
     expect(ladderSource({ sites: pdf }).opens?.("https://youtu.be/abc123def45")).toBe(false);
+  });
+  it("a wall, a 404 shell or an empty body is a miss with a reason, never a document", async () => {
+    const page = (html: string, status = 200): LadderClient => ({
+      call: async <T>() =>
+        ({
+          finalUrl: "https://e.example",
+          status,
+          html,
+          tier: "render",
+          block: null,
+          tries: [],
+        }) as T,
+    });
+    const url = hit("https://e.example");
+    const wall = `<html><head><title>Reddit - Prove your humanity</title></head><body><p>${"word ".repeat(60)}</p></body></html>`;
+    await expect(ladderSource({ sites: page(wall) }).open?.(url)).rejects.toThrow(
+      'ladder: a wall, not a page: "Reddit - Prove your humanity" at render',
+    );
+    await expect(
+      ladderSource({ sites: page("<html><body><p>thin</p></body></html>") }).open?.(url),
+    ).rejects.toThrow("ladder: only 4 characters of text, no page at render");
+    await expect(ladderSource({ sites: page(wall, 404) }).open?.(url)).rejects.toThrow(
+      "ladder: HTTP 404 at render",
+    );
+    // The fetcher asks the same question of a 200.
+    const shell = {
+      open: async () =>
+        new Response(
+          `<html><head><title>Page Not Found | Framer</title></head><body><p>${"word ".repeat(60)}</p></body></html>`,
+          {
+            status: 200,
+            headers: { "content-type": "text/html" },
+          },
+        ),
+    };
+    await expect(fetcherSource({ fetcher: shell }).open?.(url)).rejects.toThrow(
+      'fetcher: a wall, not a page: "Page Not Found | Framer"',
+    );
   });
   it("speaks the Restate ingress: POST $service/call with the site call, a bearer, Restate's message", async () => {
     const seen: { url: string; init: RequestInit | undefined }[] = [];

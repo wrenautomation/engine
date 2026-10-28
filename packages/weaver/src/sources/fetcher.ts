@@ -9,6 +9,7 @@ import { transport } from "@wrenautomation/models";
 import { youtubeId } from "../engine/canonical.js";
 import type { Source } from "../engine/ports.js";
 import type { PoliteFetcher } from "../fetch/fetcher.js";
+import { junkReason } from "./junk.js";
 
 export interface Opener {
   open(url: string): Promise<Response>;
@@ -62,6 +63,8 @@ export async function readResponse(
     media === "pdf" ? { bytes } : { text: new TextDecoder("utf8", { fatal: false }).decode(bytes) };
   const doc = await reader.read({ url: res.url || url, ...input, ...free(hit) });
   if (!doc) throw new Error(`${what}: nothing to read in the ${media}`);
+  const junk = junkReason(doc);
+  if (junk) throw new Error(`${what}: ${junk}`);
   return doc;
 }
 

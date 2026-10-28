@@ -381,9 +381,16 @@ export async function readHits(
     read++;
   });
   if (transient && !read) throw transient;
+  // Openers this machine has outside the run's allow-list: the agent can let them in.
+  const allowed = new Set(openers.map((s) => s.name));
+  const outside = [...ctx.deps.sources.values()].filter((s) => s.open && !allowed.has(s.name));
+  const hint =
+    missed && outside.length
+      ? `; not in the allow-list: ${outside.map((s) => s.name).join(", ")} (open --with)`
+      : "";
   return {
     ok: true,
-    note: `${read} of ${hits.length} hits read${missed ? `, ${missed} no source could open` : ""}`,
+    note: `${read} of ${hits.length} hits read${missed ? `, ${missed} no source could open` : ""}${hint}`,
   };
 }
 
