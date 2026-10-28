@@ -20,7 +20,7 @@ picks that account, never you.
 ## One run
 
 ```sh
-weaver recall <terms> [--not <run>] [--also <ledger>...]   # what earlier runs found: quote, URL, source date, run
+weaver recall <terms> [--not <run>] [--also <ledger>...]   # what earlier runs found: quote, URL, source date, run, who wrote it
 weaver plan "<the ask>" [--kind web|video|site|channel|person] [--known "<fact>"...] [--site <host>]
 weaver brief <run>                                   # read it after every step
 weaver search <run> < tree.json                      # the round's query tree (below); or "<terms>" --why, or a JSON array

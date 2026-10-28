@@ -518,6 +518,7 @@ describe("agent commands", () => {
       ask: "where do placements come from",
       quote: "38% of placements came from repeat clients",
       url: "https://a.example/one",
+      by: agent.by,
       state: "open",
       alsoIn: [first.run],
     });

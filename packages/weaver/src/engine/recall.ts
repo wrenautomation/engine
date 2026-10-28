@@ -22,7 +22,9 @@ export interface Recalled {
   date: string | null;
   /** When the run found it. */
   found: string;
-  /** `kept`: a call kept it; `open`: no call on it yet. */
+  /** Who wrote it: the agent's id for a finding it read and added, a model's id for `extract`. */
+  by: string;
+  /** `kept`: a call kept it; `open`: no call on it yet. Ranking ignores it. */
   state: "kept" | "open";
   /** Other runs that found the same quote on the same page, newest first. */
   alsoIn: string[];
@@ -80,6 +82,7 @@ export async function recall(
       url: f.proof.url,
       date: f.date ?? null,
       found: f.at,
+      by: f.by,
       state: calls.get(f.id) === "keep" ? "kept" : "open",
       alsoIn: [],
       score: 0,
