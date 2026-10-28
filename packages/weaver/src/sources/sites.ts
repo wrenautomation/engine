@@ -73,10 +73,15 @@ const things = (listing: unknown): Obj[] => {
   return children.filter(isObj).map((c) => (isObj(c.data) ? c.data : {}));
 };
 
+/** Reddit says the thread is not there (404): no account would read it either. */
+class Gone extends Error {}
+
 /** A thread (`[post listing, comments listing]`) as text: the post, then each comment. */
 export function threadDocument(url: string, body: unknown): Document {
-  if (isObj(body) && "error" in body)
-    throw new Error(`reddit: ${str(body.message) || `error ${String(body.error)}`}`);
+  if (isObj(body) && "error" in body) {
+    const said = `reddit: ${str(body.message) || `error ${String(body.error)}`}`;
+    throw body.error === 404 ? new Gone(said) : new Error(said);
+  }
   const [postListing, commentListing] = Array.isArray(body) ? body : [body, null];
   const post = things(postListing)[0];
   if (!post) throw new Error("reddit: the thread came back without its post");
@@ -197,7 +202,7 @@ export function redditSource(o: { sites: LadderClient; account?: string }): Sour
       try {
         return await read(h.url, false);
       } catch (err) {
-        if (err instanceof Transient) throw err;
+        if (err instanceof Transient || err instanceof Gone) throw err;
         try {
           return await read(h.url, true);
         } catch (again) {

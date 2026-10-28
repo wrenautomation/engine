@@ -172,6 +172,17 @@ describe("site readers", () => {
       redditSource({ sites: alone.sites }).open?.(hit("https://redd.it/1abc2d")),
     ).rejects.toThrow("reddit signed out: reddit-public GET /comments/1abc2d: 500 HTTP 403");
     expect(alone.calls).toHaveLength(1);
+    // Not there signed out: not there signed in either, so no second read.
+    const gone = worker({
+      "reddit-public": { error: 404, message: "no such thing" },
+      reddit: thread,
+    });
+    await expect(
+      redditSource({ sites: gone.sites, account: "reddit@alt" }).open?.(
+        hit("https://redd.it/1abc2d"),
+      ),
+    ).rejects.toThrow("reddit: no such thing");
+    expect(gone.calls).toHaveLength(1);
     // Both missed: both reasons.
     const both = worker({
       "reddit-public": refused,
