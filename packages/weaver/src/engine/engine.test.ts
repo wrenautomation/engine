@@ -7,7 +7,7 @@ import { MemoryLedger } from "../ledger/memory.js";
 import { canonical } from "./canonical.js";
 import { type Deps, pick, registry, type Source } from "./ports.js";
 import { run } from "./runner.js";
-import { fold } from "./state.js";
+import { fold, personRound } from "./state.js";
 
 const pages: Record<string, string> = {
   "https://a.example/one":
@@ -550,7 +550,7 @@ describe("gaps, checks and age", () => {
       )[q.terms]?.map((url) => ({ url })) ?? [],
   };
   /** Answers by the prompt's kind, so parallel calls need no order. */
-  const routed = (prompts: string[]) =>
+  const routed = (prompts: string[], review: object = { next: "stop", why: "enough" }) =>
     fakeModel((p) => {
       prompts.push(p);
       const a = p.startsWith("You plan")
@@ -587,7 +587,7 @@ describe("gaps, checks and age", () => {
                 ? { ok: true, why: "the quote says so" }
                 : p.startsWith("You check")
                   ? { ok: false, why: "cheaper is not half" }
-                  : { next: "stop", why: "enough" };
+                  : review;
       return JSON.stringify(a);
     }, "m");
 
@@ -652,5 +652,53 @@ describe("gaps, checks and age", () => {
     expect(second.state.checks).toHaveLength(2);
     expect(prompts.filter((p) => p.startsWith("You check"))).toHaveLength(2);
     expect(prompts.filter((p) => p.startsWith("You decide what happens"))).toHaveLength(2);
+  });
+  it("after a pause, a person's gap reaches the next plan and a back edge reruns the closed round", async () => {
+    const paused = async () => {
+      const prompts: string[] = [];
+      const d: Deps = {
+        ...deps(routed(prompts, { next: "again", why: "thin" })),
+        sources: registry(search, dated),
+      };
+      const file = {
+        ...planFile,
+        sources: ["fake", "dated"],
+        budget: { ...planFile.budget, rounds: 2 },
+      };
+      const first = await run(d, {
+        ask: { text: "repeat clients", kind: "web" },
+        planFile: file,
+        pause: true,
+      });
+      expect(first.paused).toBe(true);
+      expect(first.state.next).toEqual({ round: 2, step: "plan" });
+      expect(personRound(first.state)).toBe(1);
+      const human = {
+        run: first.run,
+        round: 1,
+        at: d.clock().toISOString(),
+        from: "human" as const,
+        by: "will",
+      };
+      return { d, file, prompts, run: first.run, human };
+    };
+
+    const a = await paused();
+    await a.d.ledger.append({ ...a.human, type: "gap", id: "g1", note: "no UK numbers" });
+    await run(a.d, { resume: a.run, planFile: a.file, steps: 1 });
+    expect(a.prompts.filter((p) => p.startsWith("You plan")).at(-1)).toContain(
+      "- read: no source could open https://c.example/missing\n- will: no UK numbers\n",
+    );
+
+    const b = await paused();
+    await b.d.ledger.append({
+      ...b.human,
+      type: "edge",
+      id: "b1",
+      next: "back",
+      to: "fetch",
+      why: "searxng was down",
+    });
+    expect(fold(b.run, await b.d.ledger.trace(b.run)).next).toEqual({ round: 1, step: "fetch" });
   });
 });

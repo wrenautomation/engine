@@ -149,6 +149,15 @@ export const found = (state: RunState, round?: number): string[] =>
     .filter((f) => (round === undefined || f.round === round) && kept(state, f))
     .map((f) => f.text);
 
+/**
+ * The round a person's gap or back edge is about. Between rounds (a pause, a stop) the pointer
+ * is one ahead of the last review, so it is the round that review closed; mid-round, the current one.
+ */
+export const personRound = (state: RunState): number => {
+  const last = state.edges.at(-1);
+  return last && (!state.next || state.next.step === "plan") ? last.round : state.round;
+};
+
 /** The hits of a round, the ones no call has named yet. */
 export const uncalledHits = (state: RunState, round: number): HitRecord[] =>
   state.hits.filter((h) => h.round === round && !state.called.has(h.id));

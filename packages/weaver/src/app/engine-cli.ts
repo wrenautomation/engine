@@ -26,7 +26,15 @@ import {
   Step as RavenStep,
 } from "@wrenautomation/raven";
 import type { Command } from "commander";
-import { fold, registry, run, type Source, type Sources, type StepEvent } from "../engine/index.js";
+import {
+  fold,
+  personRound,
+  registry,
+  run,
+  type Source,
+  type Sources,
+  type StepEvent,
+} from "../engine/index.js";
 import { PoliteFetcher, userAgent } from "../fetch/fetcher.js";
 import {
   FilesLedger,
@@ -450,7 +458,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
         type: "gap",
         id: ulids()(),
         run: runId,
-        round: state.round,
+        round: personRound(state),
         at: new Date().toISOString(),
         from: "human",
         by: o.writer,
@@ -474,7 +482,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
         type: "edge",
         id: ulids()(),
         run: runId,
-        round: state.round,
+        round: personRound(state),
         at: new Date().toISOString(),
         from: "human",
         by: o.writer,
