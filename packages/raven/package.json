@@ -1,6 +1,6 @@
 {
   "name": "@wrenautomation/raven",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "description": "Ask in, plan out. The planner of Wren's research engine: typed queries with who proposed them and why, proposals merged into one plan under a plan file per ask kind, read-or-skip on hits, and the edge to take after a round. Pure functions and prompts; the model is injected.",
   "license": "PolyForm-Strict-1.0.0",
   "repository": {
