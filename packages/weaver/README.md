@@ -133,9 +133,20 @@ anthropic:sonnet|opus|id` for another), `--model gateway[:alias]` for Wren's LLM
 and prints the answer (`claude -p --output-format json` is Claude Code headless). Sources come
 from the environment: `SEARXNG_URL` (and `SEARXNG_TOKEN`, a bearer, for an instance behind a
 proxy), `EXA_API_KEY` (or `_1..n`), `GEMINI_API_KEY` for videos without captions,
-`WEAVER_CONTACT` for the fetcher (no contact, no page opens), `AUTOBROWSE_URL` and
-`AUTOBROWSE_TOKEN` for the ladder. The ledger folder is `--ledger` or `WEAVER_LEDGER` (default
-`./ledger`); `--writer` or `WEAVER_WRITER` names your file in it.
+`WEAVER_CONTACT` for the fetcher (no contact, no page opens), and for the ladder either
+`AUTOBROWSE_URL` and `AUTOBROWSE_TOKEN` (a worker's HTTP face) or `RESTATE_INGRESS_URL` and
+`RESTATE_AUTH_TOKEN` (the Restate ingress a desk worker sits behind: `POST /desk/call`;
+`AUTOBROWSE_SERVICE` for another service name). The ledger folder is `--ledger` or
+`WEAVER_LEDGER` (default `./ledger`); `--writer` or `WEAVER_WRITER` names your file in it.
+
+Each open source claims the URLs it opens (`opens`): `youtube` a YouTube page, `fetcher` and
+`ladder` any other http(s) page. The read step asks before a call, so a source that was never
+going to open a hit writes no spend. A page that was fetched with nothing usable (a 403, a block
+the ladder's last rung still hit, a media no reader takes, a ladder answer that is not HTML such
+as a PDF) is a miss: the source throws, its `spend` says `ok: false` with the reason, the next
+opener gets its turn, and a hit every opener missed is a `gap` that lists each reason. The
+ladder costs browser time and one of the worker's daily `fetch` bucket per call. Exa's search
+asks for one highlight per result (three sentences, billed per result) as the hit's `snippet`.
 
 Every model call is a `spend` record with the model id, the tokens in and out, and `usd` from
 the list price (`src/app/prices.ts`: Claude Haiku, Sonnet and Opus 5.5; the gateway's `free`

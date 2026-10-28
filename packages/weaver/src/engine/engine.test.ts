@@ -36,13 +36,25 @@ const opener = (fail: Set<string> = new Set()): Source => ({
   open: async (h) => {
     if (fail.has(h.url)) throw new Error("boom");
     const text = pages[h.url];
-    return text ? { url: h.url, media: "text", text } : null;
+    if (!text) throw new Error("not on file");
+    return { url: h.url, media: "text", text };
   },
 });
 
+/** An opener that claims only YouTube pages: never asked for the test's pages, so no spend. */
+const video: Source = {
+  name: "video",
+  kind: "open",
+  cost: "metered",
+  opens: (url) => url.includes("youtube.com"),
+  open: async () => {
+    throw new Error("video: never called");
+  },
+};
+
 const planFile = {
   ...defaultPlanFile("web"),
-  sources: ["fake", "opener"],
+  sources: ["fake", "video", "opener"],
   budget: { queries: 4, reads: 3, rounds: 3, checks: 0 },
 };
 
@@ -102,7 +114,7 @@ const recorded = (
 const deps = (model: Model | null, open = opener()): Deps => {
   let t = 0;
   return {
-    sources: registry(fake, open),
+    sources: registry(fake, video, open),
     ledger: new MemoryLedger(),
     model,
     extractor: claimExtractor,
@@ -198,7 +210,9 @@ describe("runner", () => {
     ]);
     expect(s.findings[0]).toMatchObject({ from: "ai", by: "m", step: "extract", round: 1 });
     expect(s.spends.filter((x) => x.op === "search")).toHaveLength(3);
+    // The video opener claims no page: it was asked before every call and wrote no spend.
     expect(s.spends.filter((x) => x.op === "open")).toHaveLength(3);
+    expect(s.spends.filter((x) => x.op === "open" && x.source === "video")).toHaveLength(0);
     expect(s.spends.filter((x) => x.op === "ask").map((x) => x.on ?? "-")).toEqual([
       "-",
       "-",
@@ -290,7 +304,10 @@ describe("runner", () => {
         return (results[q.terms] ?? []).map((url) => ({ url, title: url }));
       },
     };
-    const d = { ...deps(scriptedModel([a.plan1], "m")), sources: registry(counting, opener()) };
+    const d = {
+      ...deps(scriptedModel([a.plan1], "m")),
+      sources: registry(counting, video, opener()),
+    };
     const first = await run(d, {
       ask: { text: "x", kind: "web" },
       planFile,
@@ -528,7 +545,7 @@ describe("gaps, checks and age", () => {
     cost: "free",
     open: async (h) => {
       const text = pages[h.url];
-      if (!text) return null;
+      if (!text) throw new Error("not on file");
       return {
         url: h.url,
         media: "text",
@@ -603,7 +620,7 @@ describe("gaps, checks and age", () => {
     const s = out.state;
     expect(s.gaps.map((g) => [g.step, g.note])).toEqual([
       ["fetch", 'query "zzz": no new hits'],
-      ["read", "no source could open https://c.example/missing"],
+      ["read", "no source could open https://c.example/missing: dated: not on file"],
     ]);
     expect(s.findings.find((f) => f.text.startsWith("38%"))?.date).toBe("2025-03-01");
     expect(s.checks.map((c) => c.ok)).toEqual([true, false]);
@@ -614,7 +631,7 @@ describe("gaps, checks and age", () => {
       "Found (the source's date in brackets when it gives one):\n- 38% of placements came from repeat clients. [2025-03-01]\nRead",
     );
     expect(review).toContain(
-      '- fetch: query "zzz": no new hits\n- read: no source could open https://c.example/missing',
+      '- fetch: query "zzz": no new hits\n- read: no source could open https://c.example/missing: dated: not on file',
     );
     expect(review).toContain("- failed: Referrals cost half what ads cost. (cheaper is not half)");
     expect(review).toContain("- Age: Prices, tools and numbers that move");
@@ -698,7 +715,7 @@ describe("gaps, checks and age", () => {
     });
     await run(a.d, { resume: a.run, planFile: a.file, steps: 1 });
     expect(a.prompts.filter((p) => p.startsWith("You plan")).at(-1)).toContain(
-      '- read: no source could open https://c.example/missing\n- will: no UK numbers\n- will drops "38% of placements came from repeat clients.": a forecast, not a result\n',
+      '- read: no source could open https://c.example/missing: dated: not on file\n- will: no UK numbers\n- will drops "38% of placements came from repeat clients.": a forecast, not a result\n',
     );
 
     const b = await paused();

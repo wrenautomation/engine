@@ -43,7 +43,8 @@ const opener: Source = {
   cost: "free",
   open: async (h) => {
     const text = pages[h.url];
-    return text ? { url: h.url, media: "text", text } : null;
+    if (!text) throw new Error("not on file");
+    return { url: h.url, media: "text", text };
   },
 };
 

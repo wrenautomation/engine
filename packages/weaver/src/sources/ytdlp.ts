@@ -35,6 +35,15 @@ export const entryHit = (e: YtDlpEntry) => {
   };
 };
 
+/** A YouTube watch URL (or youtu.be): what the `youtube` source opens. */
+export function isYoutube(url: string): boolean {
+  try {
+    return Boolean(youtubeId(new URL(url)));
+  } catch {
+    return false;
+  }
+}
+
 export function ytdlpSource(o: {
   ytDlp: string;
   /**
@@ -62,14 +71,9 @@ export function ytdlpSource(o: {
       const entries = await list(o.ytDlp, `ytsearch${o.n ?? 10}:${q.terms}`);
       return entries.map(entryHit).filter((h): h is NonNullable<typeof h> => h !== null);
     },
+    opens: isYoutube,
     async open(h) {
-      let u: URL;
-      try {
-        u = new URL(h.url);
-      } catch {
-        return null;
-      }
-      if (!youtubeId(u)) return null;
+      if (!isYoutube(h.url)) throw new Error(`youtube: not a YouTube page: ${h.url}`);
       return videoDocument(
         await read(h.url, {
           ytDlp: o.ytDlp,

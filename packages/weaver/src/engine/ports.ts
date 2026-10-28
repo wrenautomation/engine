@@ -21,8 +21,18 @@ export interface Source {
   by?: string;
   /** Hits as the source shows them for free. Throw on failure: the runner writes the spend. */
   search?(query: QueryRecord): Promise<HitViewIn[]>;
-  /** The hit read whole, or null when this source does not open that kind of hit. */
-  open?(hit: HitRecord): Promise<Document | null>;
+  /**
+   * Whether this source opens that URL at all (a YouTube page, an http(s) page). The read step
+   * asks before a call, so a source that was never going to open it writes no spend. Absent: it
+   * opens everything.
+   */
+  opens?(url: string): boolean;
+  /**
+   * The hit read whole. Throw with the reason when it was fetched and nothing usable came back
+   * (a 403, a block, no reader for the media): the runner writes the spend `ok: false` with the
+   * reason and the next opener gets its turn.
+   */
+  open?(hit: HitRecord): Promise<Document>;
 }
 
 export type Sources = Map<string, Source>;

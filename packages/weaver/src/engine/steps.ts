@@ -34,6 +34,8 @@ import {
   uncalledHits,
 } from "./state.js";
 
+const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
 export interface StepContext {
   deps: Deps;
   options: RunOptions;
@@ -330,27 +332,33 @@ export async function readHits(
     return { ok: false, note: "no open source in the allow-list" };
   let transient: Transient | null = null;
   /**
-   * The openers in order; the first document wins. A Transient from one leaves the next its
-   * turn. No document: `missed` when every opener said no, so the hit is a gap; a Transient
-   * leaves it to the next try.
+   * The openers that claim the URL, in order; the first document wins. A miss (the source threw:
+   * a 403, a block) has its spend `ok: false` and leaves the next its turn, its reason kept for
+   * the gap. A Transient leaves it to the next try. No document and no Transient: `missed`, so
+   * the hit is a gap.
    */
   const openOne = async (
     h: HitRecord,
-  ): Promise<{ doc: Document; source: Source } | { missed: boolean }> => {
-    let missed = true;
+  ): Promise<{ doc: Document; source: Source } | { missed: string[] | null }> => {
+    const why: string[] = [];
+    let retrying = false;
     for (const s of openers) {
+      if (s.opens && !s.opens(h.url)) continue;
       try {
         const doc = await ctx.invoke(s, "open", h.url, h.id, () =>
-          (s.open as NonNullable<Source["open"]>)(h),
+          (s.open as NonNullable<Source["open"]>)(h).catch((err: unknown) => {
+            if (!isTransient(err)) why.push(`${s.name}: ${message(err)}`);
+            throw err;
+          }),
         );
         if (doc) return { doc, source: s };
       } catch (err) {
         if (!isTransient(err)) throw err;
         transient ??= err;
-        missed = false;
+        retrying = true;
       }
     }
-    return { missed };
+    return { missed: retrying ? null : why };
   };
   const gapOn = new Set(state.gaps.map((g) => g.on));
   let read = 0;
@@ -358,8 +366,9 @@ export async function readHits(
   await batched([...hits], openOne, async (h, g) => {
     if (!("doc" in g)) {
       if (!g.missed || gapOn.has(h.id)) return;
+      const why = g.missed.length ? `: ${g.missed.join("; ")}` : "";
       await ctx.write(
-        { type: "gap", on: h.id, note: `no source could open ${h.url}` },
+        { type: "gap", on: h.id, note: `no source could open ${h.url}${why}` },
         tool(ctx.deps.runner),
       );
       missed++;

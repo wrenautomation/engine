@@ -1,13 +1,19 @@
 /**
  * The fetch ladder as an open source: `web GET /fetch` on a site client, up to a browser. Only
  * worth a call after the plain fetcher came back empty or blocked, so it sits after `fetcher` in
- * a plan file's sources. Browser cost. `httpLadderClient` is the wire to an autobrowse worker
- * for a terminal run: `GET $url/api/sites/web/fetch?url=&from=` with a bearer token.
+ * a plan file's sources. Browser cost, and one of the worker's daily `fetch` bucket per call. A
+ * block the last rung still hit, a spent bucket or a page that is not HTML is a miss (a throw
+ * with the reason); a worker that did not answer is a Transient.
+ *
+ * Two wires to an autobrowse worker for a terminal run: `httpLadderClient` for its HTTP face
+ * (`GET $url/api/sites/web/fetch?url=&from=`, a bearer token); `ingressLadderClient` for the
+ * Restate ingress the desk worker sits behind (`POST $url/desk/call`, the same bearer).
  */
 import { defaultReaders, type Media, type Reader } from "@wrenautomation/falcon/document";
 import { Transient } from "@wrenautomation/models";
 import type { Source } from "../engine/ports.js";
 import { fetchLadder, type LadderClient, type LadderTier } from "../fetch/ladder.js";
+import { isPage } from "./fetcher.js";
 
 export function ladderSource(o: {
   sites: LadderClient;
@@ -19,23 +25,30 @@ export function ladderSource(o: {
     name: "ladder",
     kind: "open",
     cost: "browser",
+    opens: isPage,
     async open(h) {
-      if (!/^https?:/.test(h.url)) return null;
+      if (!isPage(h.url)) throw new Error(`ladder: not a page: ${h.url}`);
       const r = await fetchLadder(o.sites, h.url, o.from ?? "impersonate");
       // offline: the worker did not answer, worth another try. The rest is a miss, like the
       // fetcher's 403: the read step writes a gap and goes on to the next hit.
       if ("failed" in r) {
         if (r.failed === "offline") throw new Transient("ladder: offline");
-        return null;
+        throw new Error("ladder: the worker's fetch bucket is spent for today");
       }
-      if (r.fetched.block) return null;
+      if (r.fetched.block) throw new Error(`ladder: ${r.fetched.block} at ${r.fetched.tier}`);
+      // The ladder answers the body as text: only HTML reads right that way.
+      const type = r.fetched.type?.split(";")[0]?.trim().toLowerCase();
+      if (type && type !== "text/html" && type !== "application/xhtml+xml")
+        throw new Error(`ladder: ${type} is not html`);
       const html = readers.get("html");
-      if (!html) return null;
-      return html.read({
+      if (!html) throw new Error("ladder: no html reader");
+      const doc = await html.read({
         url: r.fetched.finalUrl || h.url,
         text: r.fetched.html,
         ...(h.title ? { title: h.title } : {}),
       });
+      if (!doc) throw new Error("ladder: nothing to read in the page");
+      return doc;
     },
   };
 }
@@ -84,6 +97,54 @@ export function httpLadderClient(o: {
           `${site} ${method} ${path}: ${res.status} ${(body as { error?: string } | null)?.error ?? res.statusText}`,
           res.status,
         );
+      return body as T;
+    },
+  };
+}
+
+/**
+ * The Restate ingress wire to an autobrowse worker: `POST $url/$service/call` with the site
+ * call as its body, the way wren's CLI reaches the desk. `service` is `desk` (the Mac) or
+ * `sites` (a box); `caller` names who asks, for the worker's per-caller usage. Restate answers a
+ * refused call as `{"code":429,"message":"…"}` under that status: a 429 is the ladder's "cap".
+ */
+export function ingressLadderClient(o: {
+  url: string;
+  token?: string | null;
+  service?: string;
+  caller?: string;
+  fetchFn?: typeof fetch;
+}): LadderClient {
+  const fetchFn = o.fetchFn ?? fetch;
+  const base = o.url.replace(/\/$/, "");
+  const service = o.service ?? "desk";
+  const caller = o.caller ?? "weaver";
+  return {
+    async call<T>(site: string, method: string, path: string, input?: unknown): Promise<T> {
+      const res = await fetchFn(`${base}/${service}/call`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": crypto.randomUUID(),
+          ...(o.token ? { authorization: `Bearer ${o.token}` } : {}),
+        },
+        body: JSON.stringify({ site, method, path, input: input ?? {}, caller }),
+        signal: AbortSignal.timeout(180_000),
+      });
+      const text = await res.text();
+      let body: unknown = null;
+      try {
+        body = text ? JSON.parse(text) : null;
+      } catch {
+        body = text;
+      }
+      if (!res.ok) {
+        const said =
+          body && typeof body === "object" && "message" in body
+            ? String((body as { message: unknown }).message)
+            : text || res.statusText;
+        throw new LadderCallError(`${site} ${method} ${path}: ${res.status} ${said}`, res.status);
+      }
       return body as T;
     },
   };

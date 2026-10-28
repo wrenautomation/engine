@@ -26,6 +26,8 @@ interface Fetched {
   finalUrl: string;
   status: number | null;
   html: string;
+  /** The content-type the page answered with, when the worker says. */
+  type?: string | null;
   /** The rung that answered: the last one tried. */
   tier: LadderTier;
   /** null: a usable page; else the signal the last rung still hit. */

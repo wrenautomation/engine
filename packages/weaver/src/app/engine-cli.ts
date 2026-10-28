@@ -58,6 +58,7 @@ import {
   exa,
   fetcherSource,
   httpLadderClient,
+  ingressLadderClient,
   ladderSource,
   ledgerSource,
   paste,
@@ -149,6 +150,17 @@ export function sourcesHere(
         sites: httpLadderClient({
           url: printed.AUTOBROWSE_URL,
           token: printed.AUTOBROWSE_TOKEN ?? null,
+        }),
+      }),
+    );
+  else if (printed.RESTATE_INGRESS_URL)
+    out.push(
+      ladderSource({
+        sites: ingressLadderClient({
+          url: printed.RESTATE_INGRESS_URL,
+          token: printed.RESTATE_AUTH_TOKEN ?? null,
+          ...(printed.AUTOBROWSE_SERVICE ? { service: printed.AUTOBROWSE_SERVICE } : {}),
+          caller: `weaver:${printed.WEAVER_AGENT ?? "runner"}`,
         }),
       }),
     );

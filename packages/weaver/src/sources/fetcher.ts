@@ -1,7 +1,8 @@
 /**
  * The polite fetcher as an open source: one GET, the body read by falcon's reader for its media.
- * A 4xx or an empty page is null (the next source may try); a transport failure throws a
- * Transient.
+ * It opens http(s) pages that are not videos. A 4xx, a media no reader takes or an empty page is
+ * a miss (a throw with the reason: the spend says so, the next source may try); a transport
+ * failure throws a Transient.
  */
 import { defaultReaders, type Media, mediaOf, type Reader } from "@wrenautomation/falcon/document";
 import { transport } from "@wrenautomation/models";
@@ -28,26 +29,40 @@ const free = (h: Shown) => ({
   ...(h.length !== undefined ? { length: h.length } : {}),
 });
 
+/** An http(s) URL that is not a YouTube page: the `youtube` source reads those. */
+export function isPage(url: string): boolean {
+  if (!/^https?:/.test(url)) return false;
+  try {
+    return !youtubeId(new URL(url));
+  } catch {
+    return false;
+  }
+}
+
 export async function readResponse(
   res: Response,
   url: string,
   readers: Map<Media, Reader>,
   hit: Shown = {},
+  what = "fetcher",
 ) {
   if (res.status >= 400) {
     await res.body?.cancel().catch(() => {});
-    return null;
+    throw new Error(`${what}: HTTP ${res.status}`);
   }
-  const media = mediaOf(res.headers.get("content-type"), res.url || url);
+  const type = res.headers.get("content-type");
+  const media = mediaOf(type, res.url || url);
   const reader = media ? readers.get(media) : undefined;
   if (!reader || media === "video" || media === "audio") {
     await res.body?.cancel().catch(() => {});
-    return null;
+    throw new Error(`${what}: no reader for ${media ?? type ?? "an unknown media"}`);
   }
   const bytes = new Uint8Array(await res.arrayBuffer());
   const input =
     media === "pdf" ? { bytes } : { text: new TextDecoder("utf8", { fatal: false }).decode(bytes) };
-  return reader.read({ url: res.url || url, ...input, ...free(hit) });
+  const doc = await reader.read({ url: res.url || url, ...input, ...free(hit) });
+  if (!doc) throw new Error(`${what}: nothing to read in the ${media}`);
+  return doc;
 }
 
 export function fetcherSource(o: {
@@ -59,10 +74,9 @@ export function fetcherSource(o: {
     name: "fetcher",
     kind: "open",
     cost: "free",
+    opens: isPage,
     async open(h) {
-      if (!/^https?:/.test(h.url)) return null;
-      // A video page is not a document: the `youtube` source reads it, when it is in the allow-list.
-      if (youtubeId(new URL(h.url))) return null;
+      if (!isPage(h.url)) throw new Error(`fetcher: not a page: ${h.url}`);
       const res = await o.fetcher.open(h.url).catch((err) => {
         throw transport("fetcher", err);
       });

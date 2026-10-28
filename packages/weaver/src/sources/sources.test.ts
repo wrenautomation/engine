@@ -7,6 +7,8 @@ import {
   exa,
   fetcherSource,
   httpLadderClient,
+  ingressLadderClient,
+  LadderCallError,
   ladderSource,
   ledgerSource,
   paste,
@@ -94,6 +96,7 @@ describe("exa", () => {
               title: "C",
               author: "Cy",
               publishedDate: "2025-12-31T00:00:00.000Z",
+              highlights: [" Exit interviews show why people leave. "],
             },
           ],
         });
@@ -108,10 +111,17 @@ describe("exa", () => {
       query: "exit interviews",
       numResults: 10,
       type: "auto",
+      contents: { highlights: { numSentences: 3, highlightsPerUrl: 1 } },
       includeDomains: ["example.com"],
     });
     expect(first).toEqual([
-      { url: "https://c.example", title: "C", channel: "Cy", date: "2025-12-31" },
+      {
+        url: "https://c.example",
+        title: "C",
+        channel: "Cy",
+        date: "2025-12-31",
+        snippet: "Exit interviews show why people leave.",
+      },
     ]);
     expect(() => exa({ keys: [] })).toThrow("no key");
   });
@@ -132,27 +142,19 @@ describe("fetcher", () => {
     expect(doc?.date).toBe("2026-02-03");
     expect(doc?.text).toContain("word");
   });
-  it("is null on a 4xx, on a video, on a YouTube page and on a non-http hit", async () => {
-    expect(
-      await fetcherSource({ fetcher: opener(200, html, "text/html") }).open?.(
-        hit("https://www.youtube.com/watch?v=abc123def45"),
-      ),
-    ).toBeNull();
-    expect(
-      await fetcherSource({ fetcher: opener(404, "no", "text/html") }).open?.(
+  it("opens only pages; a 4xx or a video is a miss with its reason", async () => {
+    const src = fetcherSource({ fetcher: opener(200, html, "text/html") });
+    expect(src.opens?.("https://www.youtube.com/watch?v=abc123def45")).toBe(false);
+    expect(src.opens?.("ftp://d.example/v")).toBe(false);
+    expect(src.opens?.("https://d.example/p")).toBe(true);
+    await expect(
+      fetcherSource({ fetcher: opener(404, "no", "text/html") }).open?.(
         hit("https://d.example/gone"),
       ),
-    ).toBeNull();
-    expect(
-      await fetcherSource({ fetcher: opener(200, "x", "video/mp4") }).open?.(
-        hit("https://d.example/v"),
-      ),
-    ).toBeNull();
-    expect(
-      await fetcherSource({ fetcher: opener(200, html, "text/html") }).open?.(
-        hit("ftp://d.example/v"),
-      ),
-    ).toBeNull();
+    ).rejects.toThrow("fetcher: HTTP 404");
+    await expect(
+      fetcherSource({ fetcher: opener(200, "x", "video/mp4") }).open?.(hit("https://d.example/v")),
+    ).rejects.toThrow("fetcher: no reader for video");
   });
 });
 
@@ -173,9 +175,57 @@ describe("ladder", () => {
     expect(ok?.url).toBe("https://e.example/final");
     expect(ok?.text).toContain("ladder text");
     // A block is a miss, like the fetcher's 403: the read step writes a gap and goes on.
+    await expect(
+      ladderSource({ sites: fetched("captcha") }).open?.(hit("https://e.example")),
+    ).rejects.toThrow("ladder: captcha at render");
+    const pdf: LadderClient = {
+      call: async <T>() =>
+        ({
+          finalUrl: "https://e.example/a.pdf",
+          status: 200,
+          html: "%PDF",
+          type: "application/pdf",
+          tier: "render",
+          block: null,
+          tries: [],
+        }) as T,
+    };
+    await expect(
+      ladderSource({ sites: pdf }).open?.(hit("https://e.example/a.pdf")),
+    ).rejects.toThrow("ladder: application/pdf is not html");
+    expect(ladderSource({ sites: pdf }).opens?.("https://youtu.be/abc123def45")).toBe(false);
+  });
+  it("speaks the Restate ingress: POST $service/call with the site call, a bearer, Restate's message", async () => {
+    const seen: { url: string; init: RequestInit | undefined }[] = [];
+    const sites = ingressLadderClient({
+      url: "https://ingress.local/",
+      token: "t",
+      caller: "weaver:test",
+      fetchFn: async (u, init) => {
+        seen.push({ url: String(u), init });
+        return seen.length === 1
+          ? json({ finalUrl: "https://e.example" })
+          : json({ code: 429, message: "fetch: 1500 of 1500 today" }, 429);
+      },
+    });
     expect(
-      await ladderSource({ sites: fetched("captcha") }).open?.(hit("https://e.example")),
-    ).toBeNull();
+      await sites.call("web", "GET", "/fetch", { url: "https://e.example", from: "impersonate" }),
+    ).toEqual({ finalUrl: "https://e.example" });
+    expect(seen[0]?.url).toBe("https://ingress.local/desk/call");
+    const h = new Headers(seen[0]?.init?.headers);
+    expect(h.get("authorization")).toBe("Bearer t");
+    expect(h.get("idempotency-key")).toMatch(/[0-9a-f-]{36}/);
+    expect(JSON.parse(String(seen[0]?.init?.body))).toEqual({
+      site: "web",
+      method: "GET",
+      path: "/fetch",
+      input: { url: "https://e.example", from: "impersonate" },
+      caller: "weaver:test",
+    });
+    const err = await sites.call("web", "GET", "/fetch", {}).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(LadderCallError);
+    expect((err as LadderCallError).status).toBe(429);
+    expect((err as Error).message).toContain("429 fetch: 1500 of 1500 today");
   });
   it("speaks autobrowse's wire: GET with a query, a bearer token, errors by status", async () => {
     const seen: { url: string; init: RequestInit | undefined }[] = [];
@@ -249,7 +299,9 @@ describe("youtube", () => {
       date: "2026-01-01",
       length: 61,
     });
-    expect(await src.open?.(hit("https://other.example/v"))).toBeNull();
+    expect(src.opens?.("https://other.example/v")).toBe(false);
+    expect(src.opens?.("https://youtu.be/abc123def45")).toBe(true);
+    await expect(src.open?.(hit("https://other.example/v"))).rejects.toThrow("not a YouTube page");
     expect(entryHit({})).toBeNull();
   });
 });
