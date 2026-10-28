@@ -37,7 +37,7 @@ Rules:
 - "why" is one short line a person reads to agree or not. On "again" it is what the next plan reads first.
 
 Ask: {ask}
-{steer}Round {round} of at most {rounds}. Hits {hits}, reads {reads}, findings proposed {proposed}, kept {kept}.
+{steer}Round {round}; the budget is {rounds} rounds, a guard rail (past it the runner parks and a person decides), not a stop rule. Hits {hits}, reads {reads}, findings proposed {proposed}, kept {kept}.
 Found (the source's date in brackets when it gives one):
 {found}
 Read (quality: rich, thin, off or empty; then the gap, what the ask still lacks):
@@ -52,7 +52,7 @@ Notes:
 const web: PlanFile = {
   id: "raven/web",
   kind: "web",
-  version: 4,
+  version: 5,
   propose: `You plan web searches for one research ask.
 
 ${SHAPE_QUERIES}
@@ -85,7 +85,7 @@ Hits:
 const video: PlanFile = {
   id: "raven/video",
   kind: "video",
-  version: 4,
+  version: 5,
   propose: `You plan video searches for one research ask: talks, walkthroughs, interviews and reviews on YouTube and podcast feeds.
 
 ${SHAPE_QUERIES}
@@ -118,7 +118,7 @@ Hits:
 const channel: PlanFile = {
   id: "raven/channel",
   kind: "channel",
-  version: 4,
+  version: 5,
   propose: `You plan searches that find the people and channels worth following for one research ask: creators, newsletters, podcasts, forums.
 
 ${SHAPE_QUERIES}
@@ -149,7 +149,7 @@ Hits:
 const person: PlanFile = {
   id: "raven/person",
   kind: "person",
-  version: 4,
+  version: 5,
   propose: `You plan searches about one person or company for one research ask: what they do, what they said, what others say about them.
 
 ${SHAPE_QUERIES}
@@ -182,7 +182,7 @@ Hits:
 const site: PlanFile = {
   id: "raven/site",
   kind: "site",
-  version: 4,
+  version: 5,
   propose: `You plan searches inside one website for one research ask. Every query runs on {site} only.
 
 ${SHAPE_QUERIES}
@@ -218,7 +218,7 @@ export function defaultPlanFile(kind: AskKind): PlanFile {
   return PlanFileShape.parse(structuredClone(DEFAULTS[kind]));
 }
 
-/** The plan file's word on age; a stored file from before version 4 takes its kind's default. */
+/** The plan file's word on age; a stored file from before version 4 takes its kind's default. Version 5: the review no longer says "at most". */
 export const ageOf = (planFile: PlanFile): string | undefined =>
   planFile.age ?? DEFAULTS[planFile.kind].age;
 
