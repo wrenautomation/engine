@@ -203,6 +203,8 @@ export function redditSource(o: { sites: LadderClient; account?: string }): Sour
         return await read(h.url, false);
       } catch (err) {
         if (err instanceof Transient || err instanceof Gone) throw err;
+        // Say it: a signed-in read spends the account's standing, and the agent counts it.
+        console.warn(`${h.url}: ${(err as Error).message}; reading as ${o.account}`);
         try {
           return await read(h.url, true);
         } catch (again) {

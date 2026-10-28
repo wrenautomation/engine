@@ -209,7 +209,12 @@ interface Agent {
   human?: string | true;
 }
 
-const kindOf = (kind: string): AskKind => defaultPlanFile(kind as never).kind;
+/** A kind the engine plans for; anything else is the caller's mistake, said in words. */
+export const kindOf = (kind: string): AskKind => {
+  const k = PLAN_KINDS.find((p) => p === kind);
+  if (!k) throw new Error(`no kind "${kind}": the kinds are ${PLAN_KINDS.join(", ")}`);
+  return k;
+};
 
 /** Prints what a command did as JSON; a step that gave up exits 2, like `run`. */
 function printDid(did: Did): void {

@@ -134,7 +134,8 @@ async function screenText(
     } catch (err) {
       // One unread clip must not lose the other 23: leave a marker and carry on.
       const why = err instanceof Error ? err.message : String(err);
-      console.warn(`${model.id} ${clock(start)}: unread, ${why}`);
+      // The document is written all the same: its text keeps the marker below at this time.
+      console.warn(`${url} ${clock(start)}: a clip left unread by ${model.id} (${why})`);
       return `[${clock(start)}] (not read: ${why})`;
     }
   };
