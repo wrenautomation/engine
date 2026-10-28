@@ -153,7 +153,10 @@ export const found = (state: RunState, round?: number): string[] =>
 export const uncalledHits = (state: RunState, round: number): HitRecord[] =>
   state.hits.filter((h) => h.round === round && !state.called.has(h.id));
 
-/** The hits to read: kept by triage in this round, no document yet, no failed open on record. */
+/**
+ * The hits to read: kept by triage in this round, no document yet. A failed open is tried again
+ * on a rerun (`weaver back <run> read`).
+ */
 export const toRead = (state: RunState, round: number): HitRecord[] => {
   const read = new Set(state.documents.map((d) => d.hit));
   return state.hits.filter(
