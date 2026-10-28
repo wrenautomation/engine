@@ -1,10 +1,12 @@
 import { claimExtractor } from "@wrenautomation/falcon/document";
 import { fakeModel, type Model } from "@wrenautomation/models";
+import { fakeJudge } from "@wrenautomation/models/judge";
 import { defaultPlanFile } from "@wrenautomation/raven";
 import { describe, expect, it } from "vitest";
 import { countingIds } from "../ledger/ids.js";
 import { MemoryLedger } from "../ledger/memory.js";
 import {
+  accept,
   add,
   brief,
   check,
@@ -479,6 +481,143 @@ describe("agent commands", () => {
     expect(checkCount(700, 3)).toBe(70);
     expect(checkCount(10, 3)).toBe(3);
     expect(checkCount(700, 0)).toBe(0);
+  });
+
+  it("a judge hints and routes, never calls: hit order, class guesses, accept, doubted findings join the check", async () => {
+    // Page two serves the ask, page one not; every page reads as a survey; every finding doubted.
+    const judge = fakeJudge((state) => {
+      const x = state as { page?: { url: string }; sentence?: string };
+      if (x.page)
+        return {
+          serves: x.page.url.endsWith("two") ? { yes: 0.9, no: 0.1 } : { yes: 0.2, no: 0.8 },
+          class: { survey: 0.9, other: 0.1 },
+        };
+      if (x.sentence) return { backs: { yes: 0.3, no: 0.7 }, cites: { yes: 0.9, no: 0.1 } };
+      return { class: { survey: 0.85, other: 0.15 } };
+    });
+    const d = { ...deps(), judge };
+    const runId = (
+      await planRound(d, { ask: { text: "repeat clients", kind: "web" }, planFile, model: "m" })
+    ).run;
+    const searched = await search(d, runId, [{ terms: "a", why: "w" }], agent);
+    expect(searched.note).toContain("judge: 2 judged");
+    expect(searched.wrote.filter((r) => r.type === "judge")).toHaveLength(2);
+
+    // The brief ranks the hit the judge says serves first and shows its answers.
+    const uncalled = (await brief(d, runId)).hits.uncalled;
+    expect(uncalled.map((h) => h.url)).toEqual(["https://a.example/two", "https://a.example/one"]);
+    expect(uncalled[0]?.judge).toMatchObject({ class: "survey", side: expect.any(String) });
+
+    // accept is the agent's bulk call at its own bar; each record carries the judge's number.
+    await expect(accept(d, runId, { take: "keep", over: 2, why: "w" }, agent)).rejects.toThrow(
+      "probability",
+    );
+    const kept = await accept(d, runId, { take: "keep", over: 0.8, why: "serves" }, agent);
+    expect(kept.skipped).toBe(1);
+    expect(kept.wrote.map((r) => r.type === "call" && r.why)).toEqual([
+      "serves (judge: serves 0.90)",
+    ]);
+    const dropped = await accept(d, runId, { take: "drop", under: 0.3, why: "off" }, agent);
+    expect(dropped.wrote).toHaveLength(1);
+    expect(dropped.skipped).toBe(0);
+
+    await open(
+      d,
+      runId,
+      { urls: ["https://a.example/one", "https://b.example/four"], why: "w" },
+      agent,
+    );
+    await extract(d, runId);
+    const b = await brief(d, runId);
+    expect(b.documents.unclassed.map((x) => x.guess?.class)).toEqual(["survey", "survey"]);
+    const classed = await accept(d, runId, { take: "class", min: 0.8, why: "head" }, agent);
+    // Every page read, a finding or not: page two is a kept hit the open read too.
+    expect(classed.wrote.map((r) => r.type === "class" && r.why)).toEqual(
+      Array(3).fill("head (judge: survey 0.85)"),
+    );
+
+    // A sample of one, and the judge doubts both: the model checks both, the note says why.
+    const checked = await check(d, runId, { n: 1 });
+    expect(checked.wrote.filter((r) => r.type === "check")).toHaveLength(2);
+    expect(checked.note).toContain("2 checked (1 sampled, 1 the judge doubted)");
+
+    const stats = (await brief(d, runId)).judge;
+    expect(stats).toMatchObject({
+      judge: "fake-judge",
+      failed: 0,
+      // The agent opened page one after the drop: a keep against the judge.
+      hits: { both: 2, agree: 1 },
+      classes: { both: 3, agree: 3 },
+      checks: { both: 2, agree: 0, doubted: 2, doubtedFailed: 0 },
+    });
+    expect(stats.calls).toBe(7);
+
+    // A pattern's findings the judge says credit another source.
+    const ids = (await brief(d, runId)).findings.kept.map((f) => f.id);
+    await add(d, runId, { type: "pattern", text: "Repeat clients matter.", findings: ids }, agent);
+    expect((await brief(d, runId)).patterns.at(-1)?.cites).toEqual(ids);
+  });
+
+  it("a facet that needs a class is not enough on kept hits the judge guesses as another", async () => {
+    const three: Source = {
+      name: "fake",
+      kind: "search",
+      cost: "free",
+      search: async (q) =>
+        [1, 2, 3].map((i) => ({ url: `https://x${i}.example/${q.terms}`, title: q.terms })),
+    };
+    let guess = "forum";
+    const judge = fakeJudge(() => ({ class: { [guess]: 0.9 } }));
+    const d = { ...deps(), sources: registry(three, opener), judge };
+    const runId = (
+      await planRound(d, { ask: { text: "what owners spend", kind: "web" }, planFile, model: "m" })
+    ).run;
+    const tree = {
+      facets: [
+        {
+          name: "spend",
+          why: "what they pay",
+          needs: ["survey"],
+          tries: [[{ terms: "s1", why: "w" }], [{ terms: "s2", why: "w" }]],
+        },
+      ],
+    };
+    await searchTree(d, runId, tree, agent);
+    await accept(d, runId, { take: "keep", over: 0, why: "all" }, agent);
+    const second = await searchTree(d, runId, tree, agent);
+    expect(second.note).toContain("spend: try 2 (3 kept, none of them survey)");
+    expect(second.tree.facets[0]).toMatchObject({ kept: 3, guessed: 3, fit: 0, enough: false });
+    // A new run whose kept hits the judge guesses as a survey: the facet is done.
+    guess = "survey";
+    const runId2 = (
+      await planRound(d, { ask: { text: "what owners spend", kind: "web" }, planFile, model: "m" })
+    ).run;
+    await searchTree(d, runId2, tree, agent);
+    await accept(d, runId2, { take: "keep", over: 0, why: "all" }, agent);
+    const done = await searchTree(d, runId2, tree, agent);
+    expect(done.tree.facets[0]).toMatchObject({ kept: 3, fit: 3, enough: true });
+  });
+
+  it("a judge's failure writes its spend and the step goes on; a refused key stops the pass", async () => {
+    const down = Object.assign(new Error("down"), { status: 503 });
+    const refused = Object.assign(new Error("key"), { status: 401 });
+    let n = 0;
+    const flaky = {
+      id: "flaky",
+      judge: async () => {
+        n++;
+        throw n === 1 ? down : refused;
+      },
+    };
+    const d = { ...deps(), judge: flaky };
+    const runId = (
+      await planRound(d, { ask: { text: "repeat clients", kind: "web" }, planFile, model: "m" })
+    ).run;
+    const searched = await search(d, runId, [{ terms: "a", why: "w" }], agent);
+    expect(searched.ok).toBe(true);
+    expect(searched.note).toContain("judge: 0 judged, 2 failed");
+    const spends = searched.wrote.filter((r) => r.type === "spend" && r.source === "flaky");
+    expect(spends.map((r) => r.type === "spend" && r.ok)).toEqual([false, false]);
   });
 
   it("a facet names the classes it needs; a try pinned to one site is flagged", async () => {

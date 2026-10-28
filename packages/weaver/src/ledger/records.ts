@@ -51,6 +51,7 @@ export const RECORD_TYPES = [
   "draft",
   "class",
   "dead",
+  "judge",
 ] as const;
 export const RecordType = z.enum(RECORD_TYPES);
 export type RecordType = z.infer<typeof RecordType>;
@@ -94,7 +95,10 @@ export type DocumentRecord = z.infer<typeof DocumentRecord>;
 /** One fact drawn from a document, with its proof, and the document's date when it has one. */
 export const FindingRecord = Envelope.extend({ type: z.literal("finding") })
   .extend(FalconFinding.shape)
-  .extend({ document: z.string().min(1), date: z.string().optional() });
+  .extend({
+    document: z.string().min(1),
+    date: z.string().optional(),
+  });
 export type FindingRecord = z.infer<typeof FindingRecord>;
 
 /**
@@ -290,6 +294,18 @@ export const DeadRecord = Envelope.extend({
 });
 export type DeadRecord = z.infer<typeof DeadRecord>;
 
+/**
+ * A judge's answers on one hit, document or finding: each question's label probabilities (a
+ * yes or no as `yes` and `no`). A hint and a router, never a call: the agent or a model decides.
+ * `by` is the judge's model id; its spend carries the cost.
+ */
+export const JudgeRecord = Envelope.extend({
+  type: z.literal("judge"),
+  on: z.string().min(1),
+  answers: z.record(z.string(), z.record(z.string(), z.number())),
+});
+export type JudgeRecord = z.infer<typeof JudgeRecord>;
+
 export const LedgerRecord = z.discriminatedUnion("type", [
   QueryRecord,
   HitRecord,
@@ -309,6 +325,7 @@ export const LedgerRecord = z.discriminatedUnion("type", [
   DraftRecord,
   ClassRecord,
   DeadRecord,
+  JudgeRecord,
 ]);
 export type LedgerRecord = z.infer<typeof LedgerRecord>;
 

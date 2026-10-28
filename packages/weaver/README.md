@@ -20,9 +20,9 @@ Three more doors run the research engine (wren's `designs/2026-10-26-research-en
 
 | Import | Does |
 |---|---|
-| `@wrenautomation/weaver/engine` | `Source` (a name, `search` and/or `open`, a cost), `registry` and the plan's allow-list; the agent's calls (`planRound`, `search`, `open`, `extract`, `check`, `add`, `brief`), one step each; `run(deps, options)`: plan, fetch, triage, read, extract, check (a sample of findings against their documents), review, round after round until raven's edge says stop; `fold` rebuilds a run's state from its records, so a run resumes from the step it stopped on; `Transient`, the failure worth another try; raven's `Model`, `Ask`, `PlanFile` and record shapes re-exported, so a host pins weaver alone |
+| `@wrenautomation/weaver/engine` | `Source` (a name, `search` and/or `open`, a cost), `registry` and the plan's allow-list; the agent's calls (`planRound`, `search`, `open`, `extract`, `check`, `add`, `accept`, `brief`), one step each; the judge's passes (`judgeHits`, `judgeDocuments`, `judgeFindings`, `judgeStats`); `run(deps, options)`: plan, fetch, triage, read, extract, check (a sample of findings against their documents), review, round after round until raven's edge says stop; `fold` rebuilds a run's state from its records, so a run resumes from the step it stopped on; `Transient`, the failure worth another try; raven's `Model`, `Ask`, `PlanFile` and record shapes re-exported, so a host pins weaver alone |
 | `@wrenautomation/weaver/sources` | `searxng`, `exa` (search), `youtube` (search and read, yt-dlp), `fetcher` (open, the polite fetcher), `ladder` (open, autobrowse's fetch ladder up to a browser), `reddit` and `facebook` (open a thread or a group post through autobrowse's site routes), `paste` (a person's URLs), `ledger` (hits earlier runs saw). A query with a `site` skips a searcher that cannot keep to it (`Source.keeps`: `youtube` keeps to YouTube only) |
-| `@wrenautomation/weaver/ledger` | the records (`query`, `hit`, `document`, `finding`, `verdict`, `call`, `spend`, `snapshot`, `edge`, `done`, `steer`, `gap`, `check`, `pattern`, `found`), `FilesLedger` (a folder: `runs/<run>/<writer>.jsonl`, `plans/<kind>.json`), `MemoryLedger`, yield rows per source, person, channel and kind |
+| `@wrenautomation/weaver/ledger` | the records (`query`, `hit`, `document`, `finding`, `verdict`, `call`, `spend`, `snapshot`, `edge`, `done`, `steer`, `gap`, `check`, `pattern`, `found`, `judge`), `FilesLedger` (a folder: `runs/<run>/<writer>.jsonl`, `plans/<kind>.json`), `MemoryLedger`, yield rows per source, person, channel and kind |
 
 Every record carries `from` (ai, human or tool) and `by` (a model id, a source, a person). A
 person's pasted URL, a person's keep or drop, are the same records as the model's. The plan
@@ -69,6 +69,8 @@ weaver add check 01M5YS... 01M5YW... --ok --why "the quote says it"   # the agen
 weaver extract 01M5YS...                            # or a model behind the quote gate, every document without a verdict
 weaver check 01M5YS... -n 3                         # or a model's sample of findings read against their documents
 weaver check 01M5YS... --patterns                   # every unchecked finding a pattern rests on
+weaver accept 01M5YS... keep --over 0.8 --why "serves the ask"   # the judge's hints in bulk, at the agent's bar
+weaver accept 01M5YS... class --min 0.8 --why "head of page"   # also: drop --under 0.2
 weaver add gap 01M5YS... "no UK numbers yet"
 weaver add steer 01M5YS... "numbers only" --human will                                # the person's word, relayed
 weaver add pattern 01M5YS... "Repeat clients come from referrals." --on 01M5YV... 01M5YW...   # what findings say together; sites counted
@@ -146,6 +148,8 @@ proxy), `EXA_API_KEY` (or `_1..n`), `GEMINI_API_KEY` for videos without captions
 `facebook` readers. `WEAVER_ACCOUNTS` names the account each site reader may sign in as
 (`reddit=reddit@alt`); a site with no entry reads signed out only. The ledger folder is `--ledger` or
 `WEAVER_LEDGER` (default `./ledger`); `--writer` or `WEAVER_WRITER` names your file in it.
+The judge is `--judge` or `WEAVER_JUDGE` (`jev`, `jev:<model>`, `fake`, `off`); with neither,
+`jev` when `TYPESAFE_API_KEY` is set, else none. `--no-judge` turns it off for one command.
 
 Each open source claims the URLs it opens (`opens`): `youtube` a YouTube page, `fetcher` and
 `ladder` any other http(s) page, `reddit` a Reddit thread or comment permalink, `facebook` a
@@ -219,6 +223,20 @@ tenth of the kept findings, whichever is more; 0 is none; spread across document
 on the page; the check asks whether it backs the sentence. A finding that fails gets a `check`
 record and a drop call; `add call <finding> keep` puts it back. The review sees every check, and a finding
 carries its document's date, so the review weighs age as the plan file's `age` line says.
+
+The judge (Jev, from `@wrenautomation/models/judge`) answers typed questions with probabilities
+and no text, so it never writes a call or a check. `search` asks it of each new hit: does it
+serve the ask, whose side wrote it (the people the ask is about, or a seller to them), what
+class. `open` asks each new page its class. `check` asks each kept finding with a quote: does the
+quote back it, does it credit another source. Each answer is a `judge` record and each call a
+spend. They hint and route: `brief.hits.uncalled` sorts by facets then the judge's serves, and
+shows its answers; `documents.unclassed[].guess` shows its class; a facet with `needs` is not
+enough while its kept hits have a class (the agent's, else the judge's) and none is needed;
+`patterns[].cites` lists findings that credit another source, and the vendor echo warning names
+them. `check` reads the sample plus each finding the judge backs under 0.8: a judge's yes never
+takes one out. `accept` turns the hints into records at the agent's own bar, each with the
+judge's number in its why. `brief.judge` counts its calls, cost, and how often the agent and the
+check agreed with it.
 
 ## Library
 

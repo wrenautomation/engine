@@ -17,6 +17,7 @@ import type { Extractor } from "@wrenautomation/falcon/document";
 import { claimExtractor } from "@wrenautomation/falcon/document";
 import { geminiVideo } from "@wrenautomation/falcon/video";
 import { isTransient, type Model } from "@wrenautomation/models";
+import { type Judge, judgeFromSpec } from "@wrenautomation/models/judge";
 import { modelFromSpec } from "@wrenautomation/models/spec";
 import {
   type AskKind,
@@ -31,7 +32,9 @@ import {
 } from "@wrenautomation/raven";
 import type { Command } from "commander";
 import {
+  type Acceptance,
   type Addition,
+  accept,
   add,
   brief,
   check,
@@ -124,6 +127,8 @@ export interface EngineCliDeps {
   sources?(o: Common, ledger: HostLedger): Sources;
   /** The model for a `--model` spec; the default is models' `modelFromSpec`. */
   model?(spec: string, printed: NodeJS.ProcessEnv): Model;
+  /** The judge for a `--judge` spec; the default is models' `judgeFromSpec`. */
+  judge?(spec: string, printed: NodeJS.ProcessEnv): Judge | null;
   extractor?: Extractor;
   /** The pause before a resume; a test passes a stub. */
   sleep?(ms: number): Promise<void>;
@@ -210,6 +215,7 @@ const progress = (e: StepEvent) =>
 /** The options a command that runs sources or a model takes. */
 interface Machine {
   model: string | false;
+  judge: string | false;
   ytDlp: string;
 }
 
@@ -261,6 +267,12 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
         process.env.WEAVER_MODEL ?? DEFAULT_MODEL,
       )
       .option("--no-model", "no model: nothing extracted or checked")
+      .option(
+        "--judge <spec>",
+        "cheap typed answers on every hit, page and finding (a hint and a router): jev[:model], fake, off",
+        process.env.WEAVER_JUDGE ?? (process.env.TYPESAFE_API_KEY ? "jev" : "off"),
+      )
+      .option("--no-judge", "no judge")
       .option("--yt-dlp <cmd>", "the yt-dlp command", process.env.WEAVER_YTDLP ?? "yt-dlp");
   const agent = (c: Command) =>
     c
@@ -277,7 +289,9 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       : sourcesHere(process.env, ledger as FilesLedger, o.ytDlp);
     const model: Model | null =
       o.model === false ? null : (deps.model ?? modelFromSpec)(o.model, process.env);
-    return { ledger, sources, model };
+    const judge: Judge | null =
+      o.judge === false ? null : (deps.judge ?? judgeFromSpec)(o.judge, process.env);
+    return { ledger, sources, model, judge };
   };
   /**
    * The ledger's tuned plan file for the kind (the stock one when none), its sources the run's
@@ -662,7 +676,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
 
   agent(machine(common(program.command("check <run> [finding...]"))))
     .description(
-      "a model reads each finding against its document: the findings named, else with --patterns every unchecked finding a pattern rests on, else a sample spread across documents. One that fails gets a drop call",
+      "a model reads each finding against its document: the findings named, else with --patterns every unchecked finding a pattern rests on, else a sample spread across documents. The judge first reads every kept finding; each one it doubts joins the sample. One that fails gets a drop call",
     )
     .option(
       "-n <n>",
@@ -688,7 +702,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     );
 
   const added = async (o: Common & Agent, runId: string, a: Addition) => {
-    const s = { ledger: ledgerOf(o), sources: registry(), model: null };
+    const s = { ledger: ledgerOf(o), sources: registry(), model: null, judge: null };
     const { record, warnings } = await add(depsOf(s, agentOf(o)), runId, a, whoOf(o));
     for (const w of warnings) console.error(`${runId}: ${w}`);
     console.log(JSON.stringify(record));
@@ -801,6 +815,41 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       added(o, runId, { type: "class", on, class: SourceClass.parse(cls), why: o.why }),
     );
 
+  agent(common(program.command("accept <run> <take>")))
+    .description(
+      "take the judge's guesses over a bar, in your name with your why: `class --min p` classes every unclassed document whose guess is at least p; `keep --over p` and `drop --under p` call every uncalled hit by how likely it serves the ask",
+    )
+    .requiredOption("--why <why>", "why this bar")
+    .option("--min <p>", "class: the guess's least probability", (v) => Number(v))
+    .option("--over <p>", "keep: serves the ask over p", (v) => Number(v))
+    .option("--under <p>", "drop: serves the ask under p", (v) => Number(v))
+    .action(
+      async (
+        runId: string,
+        take: string,
+        o: Common & Agent & { why: string; min?: number; over?: number; under?: number },
+      ) => {
+        const bar = (v: number | undefined, flag: string) => {
+          if (v === undefined) throw new Error(`accept ${take}: ${flag} <p>`);
+          return v;
+        };
+        const a: Acceptance =
+          take === "class"
+            ? { take, min: bar(o.min, "--min"), why: o.why }
+            : take === "keep"
+              ? { take, over: bar(o.over, "--over"), why: o.why }
+              : take === "drop"
+                ? { take, under: bar(o.under, "--under"), why: o.why }
+                : (() => {
+                    throw new Error(`accept: class, keep or drop; got ${take}`);
+                  })();
+        const s = { ledger: ledgerOf(o), sources: registry(), model: null, judge: null };
+        const out = await accept(depsOf(s, agentOf(o)), runId, a, whoOf(o));
+        console.error(`${runId}: ${out.wrote.length} taken, ${out.skipped} under the bar`);
+        console.log(JSON.stringify(out, null, 2));
+      },
+    );
+
   agent(common(adds.command("draft <run>")))
     .description(
       "a rough draft over the run's kept findings and patterns, on stdin as JSON [{title, body, cites: [finding or pattern id...]}]: an item that cites nothing kept, or has a number no cited finding has, is dropped. A draft, never the final",
@@ -887,7 +936,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       "the run as the agent needs it: the ask, what is known, what the last round left open, hits to call, documents to extract, findings, checks, edges, yield, cost",
     )
     .action(async (runId: string, o: Common) => {
-      const s = { ledger: ledgerOf(o), sources: registry(), model: null };
+      const s = { ledger: ledgerOf(o), sources: registry(), model: null, judge: null };
       console.log(JSON.stringify(await brief(depsOf(s, o.writer), runId), null, 2));
     });
 

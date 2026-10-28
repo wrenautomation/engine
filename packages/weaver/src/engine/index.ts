@@ -5,6 +5,7 @@
 export * from "./agent.js";
 export * from "./canonical.js";
 export * from "./cost.js";
+export * from "./judge.js";
 export * from "./ports.js";
 export * from "./raven.js";
 export * from "./recall.js";

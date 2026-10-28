@@ -18,6 +18,7 @@ import {
   type FoundRecord,
   type GapRecord,
   type HitRecord,
+  type JudgeRecord,
   type LedgerRecord,
   type PatternRecord,
   type QueryRecord,
@@ -69,6 +70,9 @@ export interface RunState {
   dead: DeadRecord[];
   /** The latest class on each document and finding. */
   classOf: Map<string, SourceClass>;
+  /** The judge's latest answers on each hit, document and finding. */
+  judged: Map<string, JudgeRecord["answers"]>;
+  judges: JudgeRecord[];
   /** A known hit found again by another query. */
   founds: FoundRecord[];
   /** The hit record for each canonical URL: a hit seen again, in any round, is a `found`, not a new record. */
@@ -129,6 +133,8 @@ export function fold(run: string, records: readonly LedgerRecord[]): RunState {
     classes: ofType(records, "class"),
     dead: ofType(records, "dead"),
     classOf: new Map(ofType(records, "class").map((c) => [c.on, c.class])),
+    judged: new Map(ofType(records, "judge").map((j) => [j.on, j.answers])),
+    judges: ofType(records, "judge"),
     founds: ofType(records, "found"),
     hitByKey: new Map(hits.map((h) => [h.key, h.id])),
     called: latestCalls(records),

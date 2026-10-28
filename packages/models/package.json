@@ -1,7 +1,7 @@
 {
   "name": "@wrenautomation/models",
   "version": "0.19.0",
-  "description": "One door to every model: a Model takes text, image, video, audio and PDF parts, answers with text, tokens and USD, and parses an answer to a zod shape. Adapters for Anthropic, Gemini, Cohere, any OpenAI-compatible server and a shell command (claude -p); ears for speech to text; one price table; one key ring.",
+  "description": "One door to every model: a Model takes text, image, video, audio and PDF parts, answers with text, tokens and USD, and parses an answer to a zod shape. Adapters for Anthropic, Gemini, Cohere, any OpenAI-compatible server and a shell command (claude -p); ears for speech to text; a judge (Jev) for typed yes, no, pick and score answers; one price table; one key ring.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/wrenautomation/engine.git",
@@ -38,6 +38,10 @@
     "./spec": {
       "types": "./dist/spec.d.ts",
       "import": "./dist/spec.js"
+    },
+    "./judge": {
+      "types": "./dist/judge.d.ts",
+      "import": "./dist/judge.js"
     }
   },
   "engines": {
@@ -52,6 +56,7 @@
     "@ai-sdk/cohere": "4.0.71",
     "@ai-sdk/google": "4.0.107",
     "@ai-sdk/openai-compatible": "3.0.80",
+    "@typesafe-ai/sdk": "0.6.0",
     "ai": "7.0.155",
     "zod": "4.6.5"
   }

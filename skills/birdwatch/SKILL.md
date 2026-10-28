@@ -17,6 +17,12 @@ group post open through their own readers (`reddit`, `facebook`) before the page
 reads signed out, then as the account `WEAVER_ACCOUNTS` names (`reddit=reddit@alt`); the person
 picks that account, never you.
 
+A judge (Jev) answers cheap typed questions on every hit, page and finding: probabilities, no
+text. It is a hint and a router, never a decision: you call, class and check; it ranks, guesses
+and sends doubted findings to the check. It runs when `TYPESAFE_API_KEY` is set (`--judge`,
+`WEAVER_JUDGE`; `--no-judge` for one command). `brief.judge` says what it cost and how often
+you and the check agreed with it: a low agreement means read its hints less.
+
 ## One run
 
 ```sh
@@ -34,6 +40,7 @@ weaver extract <run>                                 # bulk only: a model behind
 weaver check <run> [-n N] [--patterns]               # bulk only: a model's check; --patterns: every finding a pattern rests on
 weaver add gap <run> "<what is still missing>"
 weaver add class <run> <document|finding> <class> --why "<why>"   # primary_data, survey, practitioner, vendor, forum, news, other
+weaver accept <run> keep --over P | drop --under P | class --min P --why "<why>"   # the judge's hints in bulk, at your bar
 weaver add pattern <run> "<what several findings say together>" --on <finding> <finding>...
 weaver add edge <run> again|stop --why "<why>"       # your review of the round
 echo '[{"title":"..","body":"..","cites":["<pattern or finding>"]}]' | weaver add draft <run> --for "<a decision memo>"   # a rough draft, gated
@@ -96,10 +103,15 @@ records show done.
    ]}
    ```
 3. **Triage.** `brief` lists `hits.uncalled` with title, snippet and `facets`: the facets whose
-   queries found it, most first. A page two facets found is worth a look first. Call every one
-   (the tree's next tier waits on it):
+   queries found it, most first, then the judge's `serves`. `judge` shows its answers: `serves`
+   (yes), `side` (subject, seller, other) and `class`. A page two facets found is worth a look
+   first. A `side` of seller on a buyer facet is the inverse the facet's why names. Call every
+   one (the tree's next tier waits on it):
    keep what can hold a fact that answers the ask, drop the rest (vendor pages, listicles, a
    page the ask does not need). One why per call, short. A page you know of yourself: `open --url`.
+   Tens of hits: read the top and the bottom of the judge's order, then set a bar from what you
+   saw: `accept keep --over 0.8 --why` and `accept drop --under 0.2 --why`. Call the middle
+   yourself. Your bar, your why: the records are yours.
 4. **Read.** `open`, then `show` each document and read it. Write each fact that answers the
    ask as `add finding` with its exact quote; a quote that is not on the page fails. Say what
    the page lacks as `add gap --on <document>`. For a run too big to read (tens of pages), or
@@ -107,19 +119,23 @@ records show done.
    `wrote` and drop what does not answer the ask (`add call <finding> drop --why`). Class each
    page with a kept finding (`brief.documents.unclassed`): `add class <document> <class> --why`.
    Its findings take the class. When one finding differs (a vendor page that quotes a survey),
-   class that finding too.
+   class that finding too. `unclassed[].guess` is the judge's class; spot-check a few, then
+   `accept class --min 0.8 --why`. A facet's `enough` counts the judge's class guess: kept hits
+   that are all the wrong class keep the facet's next try open, and `search` says "none of them
+   <needs>".
 5. **Check.** Read a sample of the kept findings again against their documents (`show`), a
    different page each: `add check <finding> --ok|--fail --why`. A fail drops it. For a bulk
    run, `check` does the same with a model over the budget's `checks` or a tenth of the kept
-   findings, whichever is more; put a finding back with `add call <finding> keep --why` only
-   if you read the page and the check is wrong.
+   findings, whichever is more, plus each finding the judge doubts; put a finding back with
+   `add call <finding> keep --why` only if you read the page and the check is wrong.
 6. **Patterns.** When kept findings from different sites say one thing, write it once:
    `add pattern` with the finding ids. The engine counts the distinct sites; one site is a
    claim, not a pattern, and it warns. A pattern is your sentence; the findings are its proof.
    `brief.patterns[].classes` counts its sources per class: a site, but each forum thread on
    its own. Three vendor pages are weaker than one survey: weigh the classes, not the total.
    `echo` says every classed source is a vendor: vendors cite each other, so find the source
-   they cite or call it a claim. Every finding a pattern rests on gets checked: `check
+   they cite or call it a claim. `cites` lists the findings the judge says credit another
+   source: search for that source by name. Every finding a pattern rests on gets checked: `check
    --patterns` (bulk) or your own `add check`; `brief.patterns[].unchecked` lists the rest.
 7. **Review.** Ask: does what is kept answer the ask? What is missing? Write each hole as a gap.
    Then the edge: `again` with a why that names the hole (the next round's plan reads it), or

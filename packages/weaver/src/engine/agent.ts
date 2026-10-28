@@ -33,6 +33,7 @@ import {
 } from "../ledger/records.js";
 import { canonical } from "./canonical.js";
 import { costOf } from "./cost.js";
+import { classGuess, type JudgeStats, judgeStats, pickOf, yesOf } from "./judge.js";
 import type { Deps } from "./ports.js";
 import { context } from "./runner.js";
 import {
@@ -276,6 +277,10 @@ export interface FacetView {
   enough: boolean;
   /** The source classes it needs, as its queries say. */
   needs: string[];
+  /** Kept hits whose class (the agent's, else the judge's guess) is one it needs. */
+  fit: number;
+  /** Kept hits with any class known or guessed: `fit` counts only when one is. */
+  guessed: number;
   /** Read pages with a kept finding, per class. */
   classes: Partial<Record<SourceClass | "unclassed", number>>;
   /** It needs classes; pages were read and none is of one. */
@@ -312,6 +317,8 @@ export function treeView(state: RunState, round: number, guide: TreeGuide): Tree
         uncalled: 0,
         enough: false,
         needs: [],
+        fit: 0,
+        guessed: 0,
         classes: {},
         lacks: false,
       };
@@ -335,10 +342,14 @@ export function treeView(state: RunState, round: number, guide: TreeGuide): Tree
     const names = new Set([...queries].flatMap((q) => queryFacet.get(q) ?? []));
     facetsOf.set(hit, names);
     const call = state.called.get(hit);
+    const guess = call === "keep" ? classGuess(state, hit) : undefined;
     for (const name of names) {
       const facet = facets.find((f) => f.name === name) as FacetView;
-      if (call === "keep") facet.kept++;
-      else if (!call) facet.uncalled++;
+      if (call === "keep") {
+        facet.kept++;
+        if (guess) facet.guessed++;
+        if (guess && facet.needs.includes(guess)) facet.fit++;
+      } else if (!call) facet.uncalled++;
     }
   }
   const yielded = new Set(state.findings.filter((f) => kept(state, f)).map((f) => f.document));
@@ -352,7 +363,8 @@ export function treeView(state: RunState, round: number, guide: TreeGuide): Tree
   }
   for (const f of facets) {
     f.tries.sort((a, b) => a.tier - b.tier);
-    f.enough = f.kept >= guide.thin;
+    // A facet that needs classes is enough only with one kept hit of them, once any class is known.
+    f.enough = f.kept >= guide.thin && (!f.needs.length || !f.guessed || f.fit > 0);
     f.lacks =
       f.needs.length > 0 &&
       Object.keys(f.classes).length > 0 &&
@@ -486,7 +498,11 @@ export async function searchTree(
         ),
       );
     }
-    lines.push(`${facet.name}: try ${tier}${ran ? ` (${ran.kept} kept)` : ""}`);
+    const unfit =
+      ran && ran.kept >= before.thin && !ran.enough
+        ? `, none of them ${ran.needs.join(" or ")}`
+        : "";
+    lines.push(`${facet.name}: try ${tier}${ran ? ` (${ran.kept} kept${unfit})` : ""}`);
   }
   if (!ids.length) {
     const end = await stateOf(deps, run);
@@ -600,10 +616,6 @@ export async function extract(
   });
 }
 
-/**
- * At most `n` kept, unchecked findings with a quote, from any round, spread across documents:
- * each document's first, then each one's second, and so on.
- */
 /** Kept findings the run's patterns rest on that no check has read. */
 export const uncheckedOf = (state: RunState, ids: readonly string[]): string[] => {
   const checked = new Set(state.checks.map((c) => c.on));
@@ -613,6 +625,10 @@ export const uncheckedOf = (state: RunState, ids: readonly string[]): string[] =
     return !!f?.proof.quote && kept(state, f) && !checked.has(id);
   });
 };
+
+/** Findings the judge says credit another named source. */
+export const citesOf = (state: RunState, ids: readonly string[]): string[] =>
+  ids.filter((id) => (yesOf(state, id, "cites") ?? 0) > 0.5);
 
 /**
  * The check over the findings named; else, with `patterns`, every unchecked finding a pattern
@@ -808,8 +824,11 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
       const pattern = patternOf(a.text, on);
       const classes = classesOf(state, pattern.findings);
       if (sourcesOf(classes) < 2) warnings.push("one source: a claim, not a pattern yet");
+      const cites = citesOf(state, pattern.findings);
       if (echoOf(classes))
-        warnings.push("vendor echo: every classed source is a vendor; vendors cite each other");
+        warnings.push(
+          `vendor echo: every classed source is a vendor; vendors cite each other${cites.length ? `; the judge says ${cites.join(" ")} credit another source: read that source` : ""}`,
+        );
       const unchecked = uncheckedOf(state, pattern.findings);
       if (unchecked.length)
         warnings.push(`unchecked: ${unchecked.join(" ")}; run check --patterns`);
@@ -870,6 +889,63 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
   }
 }
 
+/** What the agent takes from the judge in bulk: classes over a bar, or calls on uncalled hits. */
+export type Acceptance =
+  | { take: "class"; min: number; why: string }
+  | { take: "keep"; over: number; why: string }
+  | { take: "drop"; under: number; why: string };
+
+/**
+ * The judge's guesses over a bar, written in the agent's name with its why and the judge's
+ * number: a class on each document with none, or a keep or drop on each uncalled hit by how
+ * likely it serves the ask. The agent sets the bar and owns the records; the judge decides none.
+ */
+export async function accept(
+  deps: Deps,
+  run: string,
+  a: Acceptance,
+  who: Who,
+): Promise<{ wrote: Shown[]; skipped: number }> {
+  const state = await stateOf(deps, run);
+  if (!a.why.trim()) throw new Error(`accept ${a.take}: why?`);
+  const bar = a.take === "class" ? a.min : a.take === "keep" ? a.over : a.under;
+  if (!(bar >= 0 && bar <= 1))
+    throw new Error(`accept ${a.take}: the bar is a probability, 0 to 1`);
+  const wrote: Shown[] = [];
+  let skipped = 0;
+  if (a.take === "class") {
+    for (const d of state.documents) {
+      if (state.classOf.has(d.id)) continue;
+      const g = pickOf(state, d.id, "class");
+      if (!g) continue;
+      if (g.p < a.min || !(SOURCE_CLASSES as readonly string[]).includes(g.pick)) {
+        skipped++;
+        continue;
+      }
+      const why = `${a.why} (judge: ${g.pick} ${g.p.toFixed(2)})`;
+      wrote.push(
+        (await add(deps, run, { type: "class", on: d.id, class: g.pick as SourceClass, why }, who))
+          .record,
+      );
+    }
+    return { wrote, skipped };
+  }
+  for (const h of state.hits) {
+    if (state.called.has(h.id)) continue;
+    const yes = yesOf(state, h.id, "serves");
+    if (yes === undefined) continue;
+    if (a.take === "keep" ? yes <= a.over : yes >= a.under) {
+      skipped++;
+      continue;
+    }
+    const why = `${a.why} (judge: serves ${yes.toFixed(2)})`;
+    wrote.push(
+      (await add(deps, run, { type: "call", on: h.id, verdict: a.take, why }, who)).record,
+    );
+  }
+  return { wrote, skipped };
+}
+
 /** What `learn` changes on a plan file. Every field is optional; the version always moves. */
 export interface PlanChanges {
   sources?: string[];
@@ -907,8 +983,13 @@ export function tunePlan(current: PlanFile, changes: PlanChanges): PlanFile {
 
 /** A hit as the brief shows it: the view, its id, round and queries. */
 export type HitBrief = Omit<HitRecord, "type" | "run" | "step" | "at" | "from" | "by" | "key"> & {
-  /** The facets whose queries found it; the brief lists hits by this count, most first. */
+  /** The facets whose queries found it. */
   facets: string[];
+  /**
+   * The judge's hint: how likely it serves the ask, whose side wrote it, its class. The brief
+   * lists hits by facets plus `serves`, most first. A hint: the agent calls each.
+   */
+  judge?: { serves: number; side: string; class: string };
 };
 
 export interface Brief {
@@ -929,7 +1010,14 @@ export interface Brief {
   /** This round's gaps, as lines. */
   gaps: string[];
   findings: {
-    kept: { id: string; round: number; text: string; quote?: string; url: string; date?: string }[];
+    kept: {
+      id: string;
+      round: number;
+      text: string;
+      quote?: string;
+      url: string;
+      date?: string;
+    }[];
     dropped: number;
   };
   checks: { on: string; ok: boolean; why: string }[];
@@ -947,6 +1035,8 @@ export interface Brief {
     echo: boolean;
     /** Kept findings it rests on that no check has read. */
     unchecked: string[];
+    /** Findings the judge says credit another source (a survey, a report): read that one. */
+    cites: string[];
   }[];
   /** The run this one is a child of. */
   parent: { run: string; round: number; why: string } | null;
@@ -968,13 +1058,18 @@ export interface Brief {
   };
   documents: {
     toExtract: { id: string; url: string }[];
-    /** Documents with a kept finding and no class: class them before the patterns count. */
-    unclassed: { id: string; url: string }[];
+    /**
+     * Documents with a kept finding and no class: class them before the patterns count. `guess`
+     * is the judge's; `accept <run> class` takes every guess over a bar.
+     */
+    unclassed: { id: string; url: string; guess?: { class: string; p: number } }[];
     total: number;
   };
   edges: { round: number; next: string; to?: string; why: string; by: string }[];
   /** What the allow-list's sources yielded over every run. */
   yield: YieldRow[];
+  /** What the judge did and how often the agent and the check agreed with it. */
+  judge: JudgeStats;
   cost: ReturnType<typeof costOf>;
 }
 
@@ -1035,6 +1130,7 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
         classes,
         echo: echoOf(classes),
         unchecked: uncheckedOf(state, findings),
+        cites: citesOf(state, findings),
       };
     }),
     parent: s?.parent ?? null,
@@ -1055,11 +1151,22 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
     hits: {
       uncalled: state.hits
         .filter((h) => !state.called.has(h.id))
-        .map(({ type: _t, run: _r, step: _s, at: _a, from: _f, by: _b, key: _k, ...view }) => ({
-          ...view,
-          facets: facetsOf(view.id),
-        }))
-        .sort((a, b) => b.facets.length - a.facets.length),
+        .map(({ type: _t, run: _r, step: _s, at: _a, from: _f, by: _b, key: _k, ...view }) => {
+          const serves = yesOf(state, view.id, "serves");
+          const side = pickOf(state, view.id, "side");
+          const cls = pickOf(state, view.id, "class");
+          return {
+            ...view,
+            facets: facetsOf(view.id),
+            ...(serves !== undefined
+              ? { judge: { serves, side: side?.pick ?? "", class: cls?.pick ?? "" } }
+              : {}),
+          };
+        })
+        .sort(
+          (a, b) =>
+            b.facets.length + (b.judge?.serves ?? 0) - (a.facets.length + (a.judge?.serves ?? 0)),
+        ),
       toRead: unread(state).map(({ id, url }) => ({ id, url })),
       read: state.documents.length,
       total: state.hits.length,
@@ -1072,7 +1179,10 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
             !state.classOf.has(d.id) &&
             state.findings.some((f) => f.document === d.id && kept(state, f)),
         )
-        .map(({ id, url }) => ({ id, url })),
+        .map(({ id, url }) => {
+          const g = pickOf(state, id, "class");
+          return { id, url, ...(g ? { guess: { class: g.pick, p: g.p } } : {}) };
+        }),
       total: state.documents.length,
     },
     edges: state.edges.map(({ round, next, to, why, by }) => ({
@@ -1083,6 +1193,7 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
       by,
     })),
     yield: yieldRows,
+    judge: judgeStats(state, deps.judge?.id ?? state.judges.at(-1)?.by ?? null),
     cost: costOf(state.spends),
   };
 }

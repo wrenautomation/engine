@@ -100,6 +100,13 @@ export const MODEL_PRICES: readonly ModelPrice[] = [
     vendor: "google",
     tiers: [{ upTo: null, rate: { input: 0.3, output: 2.5 } }],
   },
+  {
+    // typesafe.ai pricing, read 2026-10-16: input only, answers free.
+    model: "jev-1.13.0",
+    name: "Jev 1.13",
+    vendor: "typesafe",
+    tiers: [{ upTo: null, rate: { input: 0.042, output: 0 } }],
+  },
 ];
 
 /** Speech to text, USD per hour of audio. */

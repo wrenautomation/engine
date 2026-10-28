@@ -10,6 +10,7 @@
 
 import { checkFinding, type Document } from "@wrenautomation/falcon/document";
 import { isTransient, type Model, type Transient } from "@wrenautomation/models";
+import type { EntryType, Judged, JudgeFailure, Questions } from "@wrenautomation/models/judge";
 import {
   dedupeHits,
   defaultPlanFile,
@@ -29,8 +30,10 @@ import type {
   Step,
 } from "../ledger/records.js";
 import { canonical } from "./canonical.js";
+import { DOUBT, judgeDocuments, judgeFindings, judgeHits, passNote, yesOf } from "./judge.js";
 import { type Deps, pick, type RunOptions, type Source, searchersFor } from "./ports.js";
 import {
+  fold,
   found,
   kept,
   planOf,
@@ -54,6 +57,16 @@ export interface StepContext {
   run: string;
   round: number;
   step: Step;
+  /**
+   * One judge call with its spend written; its answers, or the failure's kind (`off`: no judge).
+   * Never throws.
+   */
+  judge(
+    on: string,
+    about: string,
+    state: EntryType,
+    questions: Questions,
+  ): Promise<Judged | { failure: JudgeFailure | "off" }>;
   /** Appends one record with the envelope filled in. */
   write<T extends Omit<LedgerRecord, keyof Envelope>>(
     record: T,
@@ -305,9 +318,10 @@ export const fetchStep: StepFn = async (ctx, state) => {
     );
     empty++;
   }
+  const judged = await judgeHits(ctx, fold(ctx.run, await ctx.deps.ledger.trace(ctx.run)));
   return {
     ok: true,
-    note: `${written} new hits${again ? `, ${again} found again,` : ""} from ${calls} searches${empty ? `, ${empty} queries with none` : ""}`,
+    note: `${written} new hits${again ? `, ${again} found again,` : ""} from ${calls} searches${empty ? `, ${empty} queries with none` : ""}${passNote(judged)}`,
   };
 };
 
@@ -434,9 +448,12 @@ export async function readHits(
     missed && outside.length
       ? `; not in the allow-list: ${outside.map((s) => s.name).join(", ")} (open --with)`
       : "";
+  const judged = read
+    ? await judgeDocuments(ctx, fold(ctx.run, await ctx.deps.ledger.trace(ctx.run)))
+    : { judged: 0, failed: 0 };
   return {
     ok: true,
-    note: `${read} of ${hits.length} hits read${missed ? `, ${missed} no source could open` : ""}${hint}`,
+    note: `${read} of ${hits.length} hits read${missed ? `, ${missed} no source could open` : ""}${hint}${passNote(judged)}`,
   };
 }
 
@@ -514,14 +531,28 @@ export async function extractDocuments(
 export const checkStep: StepFn = (ctx, state) =>
   checkSample(ctx, state, toCheck(state, ctx.round, planOf(state, ctx.round).budget.checks));
 
-/** Checks `findings` against their documents; the agent's `check` passes its own sample. */
+/**
+ * Checks `findings` against their documents; the agent's `check` passes its own sample. The
+ * judge first reads every kept, unchecked finding with a quote; each one it doubts joins the
+ * sample. A judge's yes never takes a finding out of it.
+ */
 export async function checkSample(
   ctx: StepContext,
   state: RunState,
-  findings: readonly FindingRecord[],
+  sample: readonly FindingRecord[],
 ): Promise<StepResult> {
-  if (!findings.length) return { ok: true, note: "nothing to check" };
-  if (!ctx.model) return { ok: true, note: "no model: no checks" };
+  const checked = new Set(state.checks.map((c) => c.on));
+  const pool = state.findings.filter((f) => f.proof.quote && kept(state, f) && !checked.has(f.id));
+  const judged = await judgeFindings(ctx, state, pool);
+  const now = judged.judged ? fold(ctx.run, await ctx.deps.ledger.trace(ctx.run)) : state;
+  const inSample = new Set(sample.map((f) => f.id));
+  const doubted = pool.filter(
+    (f) => !inSample.has(f.id) && (yesOf(now, f.id, "backs") ?? 1) < DOUBT,
+  );
+  const findings = [...sample, ...doubted];
+  const judgeNote = passNote(judged);
+  if (!findings.length) return { ok: true, note: `nothing to check${judgeNote}` };
+  if (!ctx.model) return { ok: true, note: `no model: no checks${judgeNote}` };
   const docs = new Map(state.documents.map((d) => [d.id, d]));
   const checkOne = async (f: (typeof findings)[number]) => {
     const d = docs.get(f.document);
@@ -542,7 +573,13 @@ export async function checkSample(
     }
   });
   if (got.transient) throw got.transient;
-  return { ok: true, note: `${ok + failed} checked, ${failed} not backed by their quote` };
+  const why = doubted.length
+    ? ` (${sample.length} sampled, ${doubted.length} the judge doubted)`
+    : "";
+  return {
+    ok: true,
+    note: `${ok + failed} checked${why}, ${failed} not backed by their quote${judgeNote}`,
+  };
 }
 
 export const reviewStep: StepFn = async (ctx, state) => {

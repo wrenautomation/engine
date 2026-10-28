@@ -15,6 +15,7 @@ a new price goes here, never in the caller. No guard enforces this; this file an
 | `@wrenautomation/models/prices` | one price table: `MODEL_PRICES`, `SPEECH_PRICES`, `priceUsd`, `priced`, `speechUsd`, `addUsage`, `pricesText` | Node, Workers |
 | `@wrenautomation/models/command` | a shell command as a model (`commandModel`), Claude Code on the subscription (`claudeCode`) | Node |
 | `@wrenautomation/models/spec` | a model from a setting string: `modelFromSpec("anthropic:sonnet", env)` | Node |
+| `@wrenautomation/models/judge` | a judge: typed questions (`noul` yes or no, `choice`, `score`) answered with each label's probability, no text; `jevJudge` (TypeSafe's Jev, `TYPESAFE_API_KEY`; Laya with `TYPESAFE_BASE_URL`), `judgeFromSpec("jev", env)`, `fakeJudge`, `judgeFailure`, `top`. A hint or a router, never the final call | Node, Workers |
 
 ## Use
 
@@ -84,10 +85,11 @@ USD per million tokens, as of `PRICES_AS_OF`. A call on a free key ring (Cohere,
 OpenRouter `:free`, the gateway's `free`, Claude Code on the subscription) records `usd: 0`,
 `free: true`, and `listUsd` (what it would have cost). Anthropic cache writes are 1.25x input
 (5 minutes) or 2x (1 hour); reads are 0.1x (0.05x on Opus 5.5). Haiku 5.5 has two tiers: a
-prompt over 100K tokens costs 5x. A model with no row keeps its tokens and has no `usd`.
+prompt over 100K tokens costs 5x. Jev costs input only: its answers are free. A model with no
+row keeps its tokens and has no `usd`.
 
 Sources: Anthropic's pricing page; Cohere from activepieces.com and pricepertoken.com; Groq from
-groq.com/pricing; Gemini from anotherwrapper.com and benchlm.ai.
+groq.com/pricing; Gemini from anotherwrapper.com and benchlm.ai; Jev from typesafe.ai.
 
 ## Why the AI SDK
 

@@ -6,6 +6,7 @@
  */
 import type { Document, Extractor } from "@wrenautomation/falcon/document";
 import type { Model } from "@wrenautomation/models";
+import type { Judge } from "@wrenautomation/models/judge";
 import type { HitViewIn, PlanFile, Proposal } from "@wrenautomation/raven";
 import type { Ids } from "../ledger/ids.js";
 import type { Ledger } from "../ledger/ledger.js";
@@ -62,6 +63,8 @@ export interface Deps {
   /** null: no model. The plan is the proposals given; every hit is read; nothing is extracted. */
   model: Model | null;
   extractor: Extractor;
+  /** Cheap typed answers on every hit, page and finding: a hint and a router. Absent or null: none. */
+  judge?: Judge | null;
   clock: () => Date;
   ids: Ids;
   /** `by` on the records the runner itself writes. */

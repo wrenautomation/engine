@@ -16,6 +16,7 @@ import {
   promptText,
   type Usage,
 } from "@wrenautomation/models";
+import { judgeFailure } from "@wrenautomation/models/judge";
 import { type Envelope, type From, LedgerRecord, type Step } from "../ledger/records.js";
 import type { Deps, RunOptions, Source } from "./ports.js";
 import { fold, type RunState } from "./state.js";
@@ -243,7 +244,21 @@ export function context(
       },
     });
   };
-  return { deps, options, model: modelOn(), modelOn, run, round, step, write, invoke };
+  const judge: StepContext["judge"] = async (on, about, state, questions) => {
+    const j = deps.judge;
+    if (!j) return { failure: "off" };
+    const t0 = performance.now();
+    const spender = { name: j.id, cost: "metered" as const };
+    try {
+      const r = await j.judge(state, questions);
+      await spend(spender, "ask", about, on, t0, { ok: true, ...tokens(r.usage) });
+      return r;
+    } catch (err) {
+      await spend(spender, "ask", about, on, t0, { ok: false, error: message(err) });
+      return { failure: judgeFailure(err) };
+    }
+  };
+  return { deps, options, model: modelOn(), modelOn, run, round, step, write, invoke, judge };
 }
 
 export type { Envelope, From };
