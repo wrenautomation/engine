@@ -10,7 +10,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { type RotateOptions, rotating } from "./keys.js";
 import { TEXT_ONLY } from "./model.js";
 import { sdkModel } from "./sdk.js";
-import type { Clip, Model, PartKind } from "./types.js";
+import type { Clip, Model, Part, PartKind } from "./types.js";
 
 const kinds = (...k: PartKind[]): ReadonlySet<PartKind> => new Set(k);
 const keyList = (key: string | readonly string[]) => (typeof key === "string" ? [key] : key);
@@ -114,6 +114,84 @@ export function withClips(clips: readonly (Clip | undefined)[], go: typeof fetch
       }
     return go(url, { ...init, body: JSON.stringify(body) });
   };
+}
+
+/** A file in Gemini's Files API: read it with a Gemini model on `key` alone. */
+export interface GeminiFile {
+  /** The file lives in this key's project; another key cannot read it. */
+  key: string;
+  /** `files/<id>`. */
+  name: string;
+  part: Part;
+  /** Deletes it now. The API also deletes it after 48 hours. */
+  drop(): Promise<void>;
+}
+
+const GEMINI_API = "https://generativelanguage.googleapis.com/v1beta";
+
+function filePart(uri: string, mediaType: string): Part {
+  const data = new URL(uri);
+  if (mediaType === "application/pdf") return { type: "pdf", data };
+  const kind = mediaType.split("/")[0];
+  if (kind === "video" || kind === "audio" || kind === "image")
+    return { type: kind, data, mediaType };
+  throw new Error(`gemini file: no part kind for ${mediaType}`);
+}
+
+/**
+ * Uploads bytes too large to send inline (a long video) to Gemini's Files API, through the SDK's
+ * uploader, and waits until the file can be read. It tries each key in turn: a key that refuses
+ * passes to the next.
+ */
+export async function geminiFile(
+  data: Uint8Array,
+  o: {
+    key: string | readonly string[];
+    mediaType: string;
+    displayName?: string;
+    pollMs?: number;
+    fetch?: typeof fetch;
+  },
+): Promise<GeminiFile> {
+  const keys = keyList(o.key);
+  if (!keys.length) throw new Error("gemini file needs at least one key");
+  let last = "";
+  for (const key of keys) {
+    try {
+      const up = await createGoogle({ apiKey: key, ...wire(o) })
+        .files()
+        .uploadFile({
+          data: { type: "data", data },
+          mediaType: o.mediaType,
+          providerOptions: {
+            google: {
+              ...(o.displayName ? { displayName: o.displayName } : {}),
+              ...(o.pollMs ? { pollIntervalMs: o.pollMs } : {}),
+            },
+          },
+        });
+      const uri = up.providerReference.google;
+      const name = String(up.providerMetadata?.google?.name ?? "");
+      if (!uri || !name) throw new Error("no file uri in the reply");
+      const go = o.fetch ?? fetch;
+      return {
+        key,
+        name,
+        part: filePart(uri, o.mediaType),
+        drop: async () => {
+          await go(`${GEMINI_API}/${name}`, {
+            method: "DELETE",
+            headers: { "x-goog-api-key": key },
+          }).catch(() => {});
+        },
+      };
+    } catch (err) {
+      last = (err instanceof Error ? err.message : String(err))
+        .replaceAll(key, "<key>")
+        .slice(0, 200);
+    }
+  }
+  throw new Error(`gemini file: every key refused, last ${last}`);
 }
 
 const GEMINI_MODELS = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1";

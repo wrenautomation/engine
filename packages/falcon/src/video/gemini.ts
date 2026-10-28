@@ -41,10 +41,17 @@ export async function geminiVideo(
   o: { fetch?: typeof fetch } = {},
 ): Promise<Model | null> {
   const live = await geminiLiveKeys(keys, o);
-  if (!live.length) return null;
+  return live.length ? geminiReader(live, o) : null;
+}
+
+/**
+ * `geminiVideo` with no key check: for keys known to work, or a proxy that holds the keys and
+ * passes only generate calls (the check lists models, which such a proxy refuses).
+ */
+export function geminiReader(keys: readonly string[], o: { fetch?: typeof fetch } = {}): Model {
   const wire = o.fetch ? { fetch: o.fetch } : {};
   return fallback(
-    GEMINI_MODELS.map((model) => gemini({ key: live, model, limitMs: CALL_MS, ...wire })),
+    GEMINI_MODELS.map((model) => gemini({ key: keys, model, limitMs: CALL_MS, ...wire })),
     { passes: 3 },
   );
 }

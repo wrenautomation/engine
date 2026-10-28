@@ -1,6 +1,6 @@
 import { Cut, Filtered, fakeModel } from "@wrenautomation/models";
 import { describe, expect, it, vi } from "vitest";
-import { geminiVideo, readMedia } from "./gemini.js";
+import { geminiReader, geminiVideo, readMedia } from "./gemini.js";
 
 const clip = [
   { type: "video" as const, data: new URL("https://example.com/v"), mediaType: "video/mp4" },
@@ -22,6 +22,21 @@ describe("geminiVideo", () => {
     const m = await geminiVideo(["g1"], { fetch: live });
     expect(m?.takes.has("video")).toBe(true);
     expect(m?.takes.has("audio")).toBe(true);
+  });
+
+  it("geminiReader lists no models: a proxy that passes only generate calls still reads", async () => {
+    const asked: string[] = [];
+    const proxy = (async (url: string) => {
+      asked.push(String(url));
+      return Response.json({
+        candidates: [
+          { content: { role: "model", parts: [{ text: "read" }] }, finishReason: "STOP" },
+        ],
+      });
+    }) as unknown as typeof fetch;
+    expect(await readMedia(geminiReader(["gateway"], { fetch: proxy }), clip, "look")).toBe("read");
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toContain(":generateContent");
   });
 });
 
