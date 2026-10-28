@@ -496,16 +496,19 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
 
   agent(machine(common(program.command("search <run> [terms]"))))
     .description(
-      "one query in the agent's name, then every searcher on every unsearched query of the round; the new hits as JSON. No terms: on stdin, a JSON array of {terms, why, site?}, or a tree {facets: [{name, why, tries: [[{terms, why, site?}]]}]}: every facet's first try, then the next try of each facet still thin",
+      "one query in the agent's name, then every searcher on every unsearched query of the round; the new hits as JSON. No terms: on stdin, a JSON array of {terms, why, site?}, or a tree {facets: [{name, why, tries: [[{terms, why, site?}]]}]}: one tier. First call: every facet's first try. After triage, the same tree again: the next try of each facet under the guide's thin in kept hits; a facet with uncalled hits waits",
     )
     .option("--why <why>", "why this query serves the ask")
     .option("--site <host>", "keep the query on one host")
     .option("--facet <name>", "the tree's facet this query serves")
+    .option("--all", "tree: the next try of every facet that has one, whatever triage kept")
     .action(
       async (
         runId: string,
         terms: string | undefined,
-        o: Common & Machine & Agent & { why?: string; site?: string; facet?: string },
+        o: Common &
+          Machine &
+          Agent & { why?: string; site?: string; facet?: string; all?: boolean },
       ) => {
         if (!terms && process.stdin.isTTY)
           throw new Error("search: terms, or a JSON array of {terms, why} or a tree on stdin");
@@ -527,7 +530,9 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
           printDid(await search(deps, runId, input, whoOf(o)));
           return;
         }
-        const did = await searchTree(deps, runId, QueryTree.parse(input), whoOf(o));
+        const did = await searchTree(deps, runId, QueryTree.parse(input), whoOf(o), {
+          all: o.all ?? false,
+        });
         printDid(did);
       },
     );

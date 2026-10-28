@@ -251,7 +251,7 @@ describe("agent commands", () => {
     expect(fold(runId, await d.ledger.trace(runId)).next).toBeNull();
   });
 
-  it("searches a tree: every first try, then the next try of a thin facet; a found hit ranks higher", async () => {
+  it("searches a tree one tier per call: first tries, then after triage the next try of each thin facet; a found hit ranks higher", async () => {
     const answers: Record<string, string[]> = {
       n1: ["https://x.example/a", "https://x.example/b"],
       n2: ["https://x.example/c", "https://x.example/d", "https://x.example/e"],
@@ -264,62 +264,97 @@ describe("agent commands", () => {
       c1: [],
       c2: ["https://x.example/a"],
     };
-    const tree: Source = {
+    const fake: Source = {
       name: "fake",
       kind: "search",
       cost: "free",
       search: async (q) => (answers[q.terms] ?? []).map((url) => ({ url, title: url })),
     };
-    const d = { ...deps(), sources: registry(tree, opener) };
+    const d = { ...deps(), sources: registry(fake, opener) };
     const planned = await planRound(d, {
       ask: { text: "what does a tree find", kind: "web" },
       planFile,
       model: "m",
     });
     const runId = planned.run;
-    const did = await searchTree(
-      d,
-      runId,
-      {
-        facets: [
-          {
-            name: "number",
-            why: "a figure",
-            tries: [[{ terms: "n1", why: "w" }], [{ terms: "n2", why: "w" }]],
-          },
-          { name: "how", why: "a method", tries: [[{ terms: "h1", why: "w" }]] },
-          {
-            name: "counter",
-            why: "the case against",
-            tries: [[{ terms: "c1", why: "w" }], [{ terms: "c2", why: "w" }]],
-          },
-        ],
-      },
-      agent,
-    );
-    expect(did.ok).toBe(true);
-    // Two tiers: number and counter fell through, how had enough (thin is 3) on its first try.
-    expect(
-      did.wrote.filter((r) => r.type === "done").map((r) => r.type === "done" && r.ok),
-    ).toEqual([true, true]);
-    expect(did.tree.facets.map((f) => [f.name, f.tries.length, f.hits, f.enough])).toEqual([
-      ["number", 2, 5, true],
-      ["how", 1, 3, true],
-      ["counter", 2, 0, false],
+    const tree = {
+      facets: [
+        {
+          name: "number",
+          why: "a figure",
+          tries: [[{ terms: "n1", why: "w" }], [{ terms: "n2", why: "w" }]],
+        },
+        { name: "how", why: "a method", tries: [[{ terms: "h1", why: "w" }]] },
+        {
+          name: "counter",
+          why: "the case against",
+          tries: [[{ terms: "c1", why: "w" }], [{ terms: "c2", why: "w" }]],
+        },
+      ],
+    };
+    // Tier 1: every facet's first try, one fetch.
+    const one = await searchTree(d, runId, tree, agent);
+    expect(one.ok).toBe(true);
+    expect(one.wrote.filter((r) => r.type === "done")).toHaveLength(1);
+    expect(one.tree.facets.map((f) => [f.name, f.tries.length, f.hits, f.uncalled])).toEqual([
+      ["number", 1, 2, 2],
+      ["how", 1, 3, 4],
+      ["counter", 1, 0, 0],
     ]);
-    expect(did.tree.uncovered).toEqual(["who", "primary"]);
-    expect(did.wrote.filter((r) => r.type === "found")).toHaveLength(2);
-    const gaps = did.wrote.filter((r) => r.type === "gap");
-    expect(gaps.map((g) => g.type === "gap" && g.note)).toEqual([
-      'facet "counter": no new hits in 2 tries',
-    ]);
-    const b = await brief(d, runId);
-    expect(b.tree?.facets.map((f) => f.name)).toEqual(["number", "how", "counter"]);
-    expect(b.hits.uncalled[0]).toMatchObject({
+    expect(one.tree.uncovered).toEqual(["who", "primary"]);
+    // Again before triage: number and how wait on their calls; counter had nothing to call and
+    // falls through to its second try, which finds page a again: a found, no new hit.
+    const two = await searchTree(d, runId, tree, agent);
+    expect(two.ok).toBe(true);
+    expect(two.note).toContain("number: 2 uncalled, triage first");
+    expect(two.note).toContain("counter: try 2 (0 kept)");
+    expect(two.wrote.filter((r) => r.type === "found")).toHaveLength(1);
+    expect(two.wrote.filter((r) => r.type === "hit")).toHaveLength(0);
+    // Triage: how keeps three (enough), number keeps one (thin), counter's one hit is page a.
+    const hits = (await brief(d, runId)).hits.uncalled;
+    expect(hits[0]).toMatchObject({
       url: "https://x.example/a",
       facets: ["counter", "how", "number"],
     });
+    const idOf = (url: string) => hits.find((h) => h.url === url)?.id as string;
+    for (const [url, verdict] of [
+      ["https://x.example/a", "keep"],
+      ["https://x.example/b", "drop"],
+      ["https://x.example/f", "keep"],
+      ["https://x.example/g", "keep"],
+      ["https://x.example/h", "drop"],
+    ] as const)
+      await add(d, runId, { type: "call", on: idOf(url), verdict, why: "t" }, agent);
+    // Tier 2 of number only; how is enough; counter is thin and out of tries: a gap.
+    const three = await searchTree(d, runId, tree, agent);
+    expect(three.ok).toBe(true);
+    expect(three.note).toContain("number: try 2 (1 kept)");
+    expect(three.note).toContain("how: 3 kept, enough");
+    expect(three.wrote.map((r) => r.type === "gap" && r.note).filter(Boolean)).toEqual([
+      'facet "counter": 1 kept in 2 tries, none left',
+    ]);
+    expect(
+      three.tree.facets.map((f) => [f.name, f.tries.length, f.hits, f.kept, f.enough]),
+    ).toEqual([
+      ["number", 2, 5, 1, false],
+      ["how", 1, 3, 3, true],
+      ["counter", 2, 0, 1, false],
+    ]);
+    // --all with nothing left: number's gap once, counter's not again, how enough; exit as gave up.
+    const none = await searchTree(d, runId, tree, agent, { all: true });
+    expect(none.ok).toBe(false);
+    expect(none.note).toContain("nothing to search");
+    expect(none.wrote.map((r) => r.type === "gap" && r.note).filter(Boolean)).toEqual([
+      'facet "number": 1 kept in 2 tries, none left',
+    ]);
+    const b = await brief(d, runId);
     expect(b.hits.total).toBe(8);
+    expect(b.hits.uncalled.map((h) => h.url)).toEqual([
+      "https://x.example/c",
+      "https://x.example/d",
+      "https://x.example/e",
+    ]);
+    expect(b.gaps).toHaveLength(2);
   });
 
   it("learns: the next plan file version carries the changes, and nothing else moves", () => {

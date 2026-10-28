@@ -238,7 +238,11 @@ export interface FacetView {
   tries: TryView[];
   /** New hits over every try. */
   hits: number;
-  /** The last try that ran reached the guide's `thin`: the facet stopped there. */
+  /** Hits a query of this facet found (written or found again) that triage kept. */
+  kept: number;
+  /** Hits of this facet no call has named yet: the next try waits on them. */
+  uncalled: number;
+  /** The facet reached the guide's `thin` in kept hits: no more tries. */
   enough: boolean;
 }
 
@@ -249,18 +253,20 @@ export interface TreeView {
   uncovered: string[];
 }
 
-/** The round's queries by facet and try, with what each wrote: rebuilt from the records. */
+/** The round's queries by facet and try, with what each wrote and what triage kept: rebuilt from the records. */
 export function treeView(state: RunState, round: number, guide: TreeGuide): TreeView {
   const hitsOf = new Map<string, number>();
   const againOf = new Map<string, number>();
   for (const h of state.hits) for (const q of h.queries) hitsOf.set(q, (hitsOf.get(q) ?? 0) + 1);
   for (const f of state.founds) againOf.set(f.query, (againOf.get(f.query) ?? 0) + 1);
   const facets: FacetView[] = [];
+  const queryFacet = new Map<string, string>();
   for (const q of state.queries) {
     if (q.round !== round || !q.facet) continue;
+    queryFacet.set(q.id, q.facet);
     let facet = facets.find((f) => f.name === q.facet);
     if (!facet) {
-      facet = { name: q.facet, tries: [], hits: 0, enough: false };
+      facet = { name: q.facet, tries: [], hits: 0, kept: 0, uncalled: 0, enough: false };
       facets.push(facet);
     }
     const tier = q.tier ?? 1;
@@ -274,9 +280,19 @@ export function treeView(state: RunState, round: number, guide: TreeGuide): Tree
     t.hits += hits;
     facet.hits += hits;
   }
+  // A hit counts for every facet whose query found it: a page two facets reached is kept for both.
+  for (const [hit, queries] of queriesOf(state)) {
+    const names = new Set([...queries].flatMap((q) => queryFacet.get(q) ?? []));
+    const call = state.called.get(hit);
+    for (const name of names) {
+      const facet = facets.find((f) => f.name === name) as FacetView;
+      if (call === "keep") facet.kept++;
+      else if (!call) facet.uncalled++;
+    }
+  }
   for (const f of facets) {
     f.tries.sort((a, b) => a.tier - b.tier);
-    f.enough = (f.tries.at(-1)?.hits ?? 0) >= guide.thin;
+    f.enough = f.kept >= guide.thin;
   }
   const served = new Set(facets.map((f) => f.name));
   return {
@@ -295,18 +311,27 @@ export interface TreeDid extends Did {
   tree: TreeView;
 }
 
+export interface TreeOptions {
+  /** The next try of every facet that has one, whatever triage kept: no thin rule, no wait. */
+  all?: boolean;
+}
+
 /**
- * The round's search as a tree: every facet's first try in one fetch, then the next try of each
- * facet still thin (fewer new hits than the guide's `thin`), until every facet has enough or
- * runs out of tries. Breadth first, so a page two facets both found is a `found` on the first
- * facet's hit, and the brief ranks it above one facet's. A facet whose every try wrote no hit is
- * a gap. Never capped: the agent wrote the tree.
+ * One tier of the round's query tree: for each facet in the tree, its next try, in one fetch.
+ * A facet with no query yet this round runs its first try. A facet that ran one waits for
+ * triage (a call on each of its hits); then, under the guide's `thin` in kept hits, it runs the
+ * next try; at `thin` it is done; out of tries, it is a gap. So the agent runs the same tree
+ * again after each triage, and the tree falls through on what the agent kept, never on what a
+ * searcher returned (every searcher returns a page). `all` runs every facet's next try at once.
+ * A page two facets reached is a `found` on the first facet's hit, and the brief ranks it above
+ * one facet's. Never capped: the agent wrote the tree.
  */
 export async function searchTree(
   deps: Deps,
   run: string,
   tree: QueryTree,
   who: Who,
+  options: TreeOptions = {},
 ): Promise<TreeDid> {
   QueryTree.parse(tree);
   const first = await stateOf(deps, run);
@@ -319,72 +344,80 @@ export async function searchTree(
     if (names.has(f.name)) throw new Error(`facet "${f.name}" twice`);
     names.add(f.name);
   }
-  const live = tree.facets.map((facet) => ({ facet, tier: 0, done: false }));
+  const before = treeView(first, round, guide);
   const wrote: Shown[] = [];
-  const gapIds: string[] = [];
-  let last: Did | null = null;
-  while (live.some((x) => !x.done)) {
-    const ctx = context(deps, {}, run, round, "plan");
-    const ran = live.filter((x) => !x.done);
-    const ids: string[] = [];
-    for (const x of ran) {
-      x.tier++;
-      for (const leaf of x.facet.tries[x.tier - 1] ?? []) {
-        const terms = leaf.terms.replace(/\s+/g, " ").trim();
-        if (!terms) throw new Error(`facet "${x.facet.name}": a query needs terms`);
-        if (!leaf.why.trim()) throw new Error(`query "${terms}": why?`);
-        ids.push(
-          await ctx.write(
-            {
-              type: "query",
-              kind,
-              terms,
-              why: leaf.why,
-              facet: x.facet.name,
-              tier: x.tier,
-              ...(leaf.site ? { site: leaf.site } : {}),
-            },
-            who,
-          ),
-        );
+  const lines: string[] = [];
+  const ctx = context(deps, {}, run, round, "plan");
+  const ids: string[] = [];
+  for (const facet of tree.facets) {
+    const ran = before.facets.find((f) => f.name === facet.name);
+    const tier = (ran?.tries.at(-1)?.tier ?? 0) + 1;
+    const next = facet.tries[tier - 1];
+    if (ran && !options.all) {
+      if (ran.enough) {
+        lines.push(`${facet.name}: ${ran.kept} kept, enough`);
+        continue;
+      }
+      if (ran.uncalled) {
+        lines.push(`${facet.name}: ${ran.uncalled} uncalled, triage first`);
+        continue;
       }
     }
-    const trace = await deps.ledger.trace(run);
-    for (const id of ids) wrote.push(shown(trace.find((r) => r.id === id) as LedgerRecord));
-    last = await stepRun(deps, run, "fetch", fetchStep);
-    wrote.push(...last.wrote);
-    if (!last.ok) break;
-    const view = treeView(await stateOf(deps, run), round, guide);
-    for (const x of ran) {
-      const facet = view.facets.find((f) => f.name === x.facet.name);
-      const got = facet?.tries.find((t) => t.tier === x.tier)?.hits ?? 0;
-      if (got >= guide.thin) x.done = true;
-      else if (x.tier >= x.facet.tries.length) {
-        x.done = true;
-        if (!facet?.hits) {
-          const fetch = context(deps, {}, run, round, "fetch");
-          gapIds.push(
-            await fetch.write(
-              {
-                type: "gap",
-                note: `facet "${x.facet.name}": no new hits in ${x.tier} ${x.tier === 1 ? "try" : "tries"}`,
-              },
-              { from: "tool", by: deps.runner },
-            ),
-          );
-        }
+    if (!next) {
+      const note = `facet "${facet.name}": ${ran?.kept ?? 0} kept in ${tier - 1} ${tier === 2 ? "try" : "tries"}, none left`;
+      if (ran && !ran.enough && !first.gaps.some((g) => g.round === round && g.note === note)) {
+        const fetch = context(deps, {}, run, round, "fetch");
+        const id = await fetch.write({ type: "gap", note }, { from: "tool", by: deps.runner });
+        const trace = await deps.ledger.trace(run);
+        wrote.push(shown(trace.find((r) => r.id === id) as LedgerRecord));
       }
+      lines.push(`${facet.name}: out of tries`);
+      continue;
     }
+    for (const leaf of next) {
+      const terms = leaf.terms.replace(/\s+/g, " ").trim();
+      if (!terms) throw new Error(`facet "${facet.name}": a query needs terms`);
+      if (!leaf.why.trim()) throw new Error(`query "${terms}": why?`);
+      ids.push(
+        await ctx.write(
+          {
+            type: "query",
+            kind,
+            terms,
+            why: leaf.why,
+            facet: facet.name,
+            tier,
+            ...(leaf.site ? { site: leaf.site } : {}),
+          },
+          who,
+        ),
+      );
+    }
+    lines.push(`${facet.name}: try ${tier}${ran ? ` (${ran.kept} kept)` : ""}`);
   }
-  const did = last as Did;
+  if (!ids.length) {
+    const end = await stateOf(deps, run);
+    return {
+      run,
+      round,
+      step: "fetch",
+      ok: false,
+      wrote,
+      note: `nothing to search; ${lines.join("; ")}`,
+      tree: treeView(end, round, guide),
+    };
+  }
+  const trace = await deps.ledger.trace(run);
+  for (const id of ids) wrote.push(shown(trace.find((r) => r.id === id) as LedgerRecord));
+  const did = await stepRun(deps, run, "fetch", fetchStep);
+  wrote.push(...did.wrote);
   const end = await stateOf(deps, run);
-  for (const id of gapIds) wrote.push(shown(end.records.find((r) => r.id === id) as LedgerRecord));
   const view = treeView(end, round, guide);
-  const enough = view.facets.filter((f) => f.enough).length;
+  const uncovered = view.uncovered.length ? `; not covered: ${view.uncovered.join(", ")}` : "";
   return {
     ...did,
     wrote,
-    note: `${did.note ?? ""}; ${enough} of ${view.facets.length} facets reached ${guide.thin}${view.uncovered.length ? `; not covered: ${view.uncovered.join(", ")}` : ""}`,
+    note: `${did.note ?? ""}; ${lines.join("; ")}${uncovered}`,
     tree: view,
   };
 }
