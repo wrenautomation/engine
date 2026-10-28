@@ -7,7 +7,8 @@
  * `reddit`: a thread (`/comments/{id}`) through `reddit-public` (signed out, the RSS feed), then,
  * when the caller named an account (`WEAVER_ACCOUNTS=reddit=reddit@alt`), through `reddit`
  * signed in as it. Signed out goes first: read volume on a signed-in account is what Reddit
- * flags. `facebook`: one public group post through `fb-public`, always signed out (Wren's Meta
+ * flags. A follow from a user's page (`/user/{name}`) lists their top posts and comments in one
+ * read (`/user/{name}/overview`), signed out. `facebook`: one public group post through `fb-public`, always signed out (Wren's Meta
  * login runs the ads). Design: autobrowse `designs/2026-10-28-signed-in-reads.md`.
  *
  * A route that answered no (a 404, a spent cap, a refusal) is a miss with its reason; a worker
@@ -15,6 +16,7 @@
  */
 import type { Document } from "@wrenautomation/falcon/document";
 import { Transient } from "@wrenautomation/models";
+import type { HitViewIn } from "@wrenautomation/raven";
 import type { Source } from "../engine/ports.js";
 import type { LadderClient } from "../fetch/ladder.js";
 import { junkReason } from "./junk.js";
@@ -52,6 +54,36 @@ export function redditThread(url: string): { article: string; comment?: string }
   const m = /\/comments\/([a-z0-9]{1,12})(?:\/[^/]*(?:\/([a-z0-9]{1,12}))?)?\/?$/i.exec(u.pathname);
   if (!m?.[1]) return null;
   return { article: m[1].toLowerCase(), ...(m[2] ? { comment: m[2].toLowerCase() } : {}) };
+}
+
+/** A Reddit user's name from their page (`/user/{name}`, `/u/{name}`). */
+export function redditUser(url: string): string | null {
+  const u = hostOf(url);
+  if (!u) return null;
+  const host = u.hostname.toLowerCase();
+  if (host !== "reddit.com" && !host.endsWith(".reddit.com")) return null;
+  const m = /^\/(?:user|u)\/([A-Za-z0-9_-]{3,20})(?:\/|$)/.exec(u.pathname);
+  return m?.[1] ?? null;
+}
+
+/** A user's overview (posts and comments mixed) as hits: each its permalink, title and words. */
+export function userHits(body: unknown): HitViewIn[] {
+  return things(body).flatMap((t) => {
+    const link = str(t.permalink);
+    if (!link) return [];
+    const words = (str(t.selftext) || str(t.body)).trim();
+    const title = str(t.title) || str(t.link_title);
+    const created = typeof t.created_utc === "number" ? t.created_utc : null;
+    return [
+      {
+        url: `https://www.reddit.com${link}`,
+        ...(title ? { title } : {}),
+        ...(str(t.subreddit) ? { channel: `r/${str(t.subreddit)}` } : {}),
+        ...(created ? { date: new Date(created * 1000).toISOString().slice(0, 10) } : {}),
+        ...(words ? { snippet: words.slice(0, 300) } : {}),
+      },
+    ];
+  });
 }
 
 /** A Facebook group post's group and post ids. */
@@ -145,7 +177,7 @@ export function groupPostDocument(url: string, body: unknown): Document {
 }
 
 /** One route call; a refusal is a miss with the worker's words, no answer a Transient. */
-async function routeCall(
+export async function routeCall(
   sites: LadderClient,
   who: string,
   site: string,
@@ -197,6 +229,20 @@ export function redditSource(o: { sites: LadderClient; account?: string }): Sour
     cost: "browser",
     first: true,
     opens: (url) => redditThread(url) !== null,
+    follows: (as, url) => as === "posts" && redditUser(url) !== null,
+    async follow(_as, url, n) {
+      const username = redditUser(url);
+      if (!username) throw new Error(`reddit: not a user's page: ${url}`);
+      const input = { username, limit: Math.min(n, 100), sort: "top" };
+      const body = await routeCall(
+        o.sites,
+        "reddit signed out",
+        "reddit-public",
+        `/user/${username}/overview`,
+        input,
+      );
+      return userHits(body);
+    },
     async open(h) {
       if (!o.account) return read(h.url, false);
       try {

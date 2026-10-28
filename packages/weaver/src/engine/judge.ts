@@ -21,7 +21,7 @@ import {
   SOURCE_CLASSES,
   type SourceClass,
 } from "../ledger/records.js";
-import type { RunState } from "./state.js";
+import { kept, type RunState } from "./state.js";
 import type { StepContext } from "./steps.js";
 
 /** Judge calls in flight at once. */
@@ -58,7 +58,18 @@ export const HIT_QUESTIONS = {
   class: CLASS,
 } satisfies Questions;
 
-export const DOCUMENT_QUESTIONS = { class: CLASS } satisfies Questions;
+/**
+ * A trial (10-28): can Jev score a page's worth as a source before the extract reads it?
+ * A hint only; `judgeStats.worth` measures it against what the extract kept.
+ */
+export const DOCUMENT_QUESTIONS = {
+  class: CLASS,
+  worth: noul("Would a careful researcher answering the ask cite this page as a source?", {
+    true: "it gives specific facts on the ask (numbers, practices, causes, first-hand accounts) from a party in a position to know, or credits a named source for them",
+    false:
+      "off the ask, thin, generic advice, a sales pitch, a rehash with no source, a list of links, or a page shell",
+  }),
+} satisfies Questions;
 
 export const FINDING_QUESTIONS = {
   backs: noul(
@@ -133,14 +144,15 @@ export function judgeHits(ctx: StepContext, state: RunState): Promise<Pass> {
   return pass(ctx, items, HIT_QUESTIONS);
 }
 
-/** Documents with no answers yet: their class from the page's start. */
+/** Documents with no answers yet: their class and worth from the page's start. */
 export function judgeDocuments(ctx: StepContext, state: RunState): Promise<Pass> {
+  const ask = state.snapshot?.ask.text ?? "";
   const items = state.documents
     .filter((d: DocumentRecord) => !state.judged.has(d.id) && d.text.trim())
     .map((d) => ({
       on: d.id,
       about: d.url,
-      state: { url: d.url, title: d.title ?? "", text: d.text.slice(0, HEAD) },
+      state: { ask, url: d.url, title: d.title ?? "", text: d.text.slice(0, HEAD) },
     }));
   return pass(ctx, items, DOCUMENT_QUESTIONS);
 }
@@ -197,6 +209,19 @@ export function classGuess(state: RunState, hit: string): SourceClass | undefine
     : undefined;
 }
 
+/**
+ * How well a score ranks positives over negatives: the share of (positive, negative) pairs it
+ * orders right, ties a half. Null without both.
+ */
+export function aucOf(pairs: readonly [number, boolean][]): number | null {
+  const pos = pairs.filter(([, y]) => y).map(([p]) => p);
+  const neg = pairs.filter(([, y]) => !y).map(([p]) => p);
+  if (!pos.length || !neg.length) return null;
+  let sum = 0;
+  for (const a of pos) for (const b of neg) sum += a > b ? 1 : a === b ? 0.5 : 0;
+  return sum / (pos.length * neg.length);
+}
+
 /** Where the judge and a decider both spoke: how often they agree. */
 export interface Agreement {
   both: number;
@@ -219,6 +244,11 @@ export interface JudgeStats {
     doubted: number;
     doubtedFailed: number;
   };
+  /**
+   * The worth trial: on extracted documents, its worth score against "a finding on it was kept".
+   * `under` is what a gate at a half would skip, and how many of those held a kept finding.
+   */
+  worth: { both: number; good: number; auc: number | null; under: number; underGood: number };
 }
 
 /** What the judge did in a run and how often the deciders agreed with it. */
@@ -246,6 +276,13 @@ export function judgeStats(state: RunState, judge: string | null): JudgeStats {
     const yes = yesOf(state, on, "backs");
     return yes === undefined ? [] : [[yes > 0.5, ok]];
   });
+  const keptOn = new Set(state.findings.filter((f) => kept(state, f)).map((f) => f.document));
+  const extracted = new Set(state.verdicts.map((v) => v.document));
+  const worth = [...extracted].flatMap((d): [number, boolean][] => {
+    const yes = yesOf(state, d, "worth");
+    return yes === undefined ? [] : [[yes, keptOn.has(d)]];
+  });
+  const under = worth.filter(([p]) => p < 0.5);
   const doubted = [...lastCheck].filter(([on]) => (yesOf(state, on, "backs") ?? 1) < DOUBT);
   return {
     judge,
@@ -258,6 +295,13 @@ export function judgeStats(state: RunState, judge: string | null): JudgeStats {
       ...tally(checks),
       doubted: doubted.length,
       doubtedFailed: doubted.filter(([, ok]) => !ok).length,
+    },
+    worth: {
+      both: worth.length,
+      good: worth.filter(([, y]) => y).length,
+      auc: aucOf(worth),
+      under: under.length,
+      underGood: under.filter(([, y]) => y).length,
     },
   };
 }

@@ -15,7 +15,10 @@ names it. The ledger folder is `WEAVER_LEDGER` (default `./ledger`). Sources com
 environment; `weaver sources` lists what this machine can run. A Reddit thread and a Facebook
 group post open through their own readers (`reddit`, `facebook`) before the page openers. Reddit
 reads signed out, then as the account `WEAVER_ACCOUNTS` names (`reddit=reddit@alt`); the person
-picks that account, never you.
+picks that account, never you. `google` searches Google's own page through the desk's browser:
+each result is a hit, and the AI Overview is one hit (channel "Google AI Overview") whose
+snippet holds its text. The Overview is a claim, never a proof: do not open it; keep and read
+the pages it cites, which come as hits of their own.
 
 A judge (Jev) answers cheap typed questions on every hit, page and finding: probabilities, no
 text. It is a hint and a router, never a decision: you call, class and check; it ranks, guesses
@@ -47,6 +50,8 @@ echo '[{"title":"..","body":"..","cites":["<pattern or finding>"]}]' | weaver ad
 weaver plan --run <run>                              # after again: the next round
 weaver plan "<one niche>" --parent <run> --why "<why this child>"   # a child run: it reads what the tree found
 weaver add dead <run> <facet> --why "<why>"          # give up on a facet; later tries skip it
+weaver follow <run> [<url>] --as posts|similar [--from <document>] --why "<why>" [--with <source>...]   # a good page's author's posts, or pages like it
+weaver add person <run> "<name>" [--profile <url>...] [--aka <name>...] --why "<why>"   # one person across sites
 weaver learn <kind> [--sources ...] [--rounds N] [--age "..."]   # after a good run, on the person's yes
 ```
 
@@ -125,6 +130,19 @@ records show done.
    5 of 7 changed). A facet's `enough` counts the judge's class guess: kept hits that are all
    the wrong class keep the facet's next try open, and `search` says "none of them <needs>".
    After the read, a facet whose classed pages lack its `needs` (`lacks`) is never enough.
+   **Follow.** Signals cluster in people. After a page that gave kept findings, do what a person
+   does: `follow --from <document> --as posts` lists its author's own posts (a YouTube channel's
+   uploads from a video or a channel, a TikTok profile, a Reddit user's top posts and comments);
+   `--as similar` lists pages like it (Exa, off the page's own site). The hits come back to
+   triage like a search's, under the same caps. `brief.unfollowed` lists the kept pages no
+   follow started from and no person owns, most kept findings first. When one author is good,
+   find their other places (the channel's about links, a Substack, an X account, a blog): search
+   or read, then `add person "<name>" --profile <url>... --aka <channel name>... --why`, and
+   follow each profile. `brief.people` counts the documents, kept findings and sites per person.
+   A follow no source in the run can do fails and names one that can: add it with `--with`.
+   `documents.toExtract[].worth` is a trial: the judge's guess that a careful researcher would
+   cite the page. Never skip a page on it. `brief.judge.worth` measures it (AUC against "a
+   finding on it was kept", and what a gate at a half would skip).
 5. **Check.** Read a sample of the kept findings again against their documents (`show`), a
    different page each: `add check <finding> --ok|--fail --why`. A fail drops it. For a bulk
    run, `check` does the same with a model over the budget's `checks` or a tenth of the kept

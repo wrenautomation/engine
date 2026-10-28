@@ -43,6 +43,7 @@ import {
   type DraftInput,
   extract,
   fold,
+  follow,
   joined,
   open,
   planRound,
@@ -62,6 +63,7 @@ import { PoliteFetcher, userAgent } from "../fetch/fetcher.js";
 import type { LadderClient } from "../fetch/ladder.js";
 import {
   FilesLedger,
+  FollowAs,
   type Ledger,
   type Problem,
   SOURCE_CLASSES,
@@ -73,6 +75,7 @@ import {
   exa,
   facebookSource,
   fetcherSource,
+  googleSource,
   httpLadderClient,
   ingressLadderClient,
   ladderSource,
@@ -181,6 +184,7 @@ export function sourcesHere(
       ladderSource({ sites }),
       redditSource({ sites, ...(reddit ? { account: reddit } : {}) }),
       facebookSource({ sites }),
+      googleSource({ sites }),
     );
   }
   out.push(ledgerSource(ledger));
@@ -663,6 +667,38 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       },
     );
 
+  agent(machine(common(program.command("follow <run> [url]"))))
+    .description(
+      `what a person does after a good page: --as posts (its channel's or author's own posts: a YouTube channel or video, a TikTok profile, a Reddit user) or similar (pages like it); the hits go through the same calls and reads.`,
+    )
+    .requiredOption("--as <as>", "posts or similar")
+    .requiredOption("--why <why>", "why this page's neighbors may answer the ask")
+    .option("--from <document>", "the read page that led here (its URL when no url is given)")
+    .option("--with <source...>", "follow sources this machine has that the run's allow-list lacks")
+    .action(
+      async (
+        runId: string,
+        url: string | undefined,
+        o: Common & Machine & Agent & { as: string; why: string; from?: string; with?: string[] },
+      ) => {
+        const s = setup(o);
+        printDid(
+          await follow(
+            depsOf(s, agentOf(o)),
+            runId,
+            {
+              as: FollowAs.parse(o.as),
+              why: o.why,
+              ...(url ? { url } : {}),
+              ...(o.from ? { document: o.from } : {}),
+              ...(o.with ? { with: o.with } : {}),
+            },
+            whoOf(o),
+          ),
+        );
+      },
+    );
+
   agent(machine(common(program.command("extract <run> [document...]"))))
     .description(
       "the extractor (a model behind the quote gate) over the documents named, else every one without a verdict; findings as JSON",
@@ -804,6 +840,28 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     .requiredOption("--why <why>")
     .action((runId: string, facet: string, o: Common & Agent & { why: string }) =>
       added(o, runId, { type: "dead", facet, why: o.why }),
+    );
+
+  agent(common(adds.command("person <run> <name>")))
+    .description(
+      "one person across platforms: their profile URLs and the names they post under. The brief counts kept findings per person; follow each profile's posts",
+    )
+    .option("--profile <url...>", "a channel, a Substack, an X account, a blog")
+    .option("--aka <name...>", "a channel name or handle they post under")
+    .requiredOption("--why <why>")
+    .action(
+      (
+        runId: string,
+        name: string,
+        o: Common & Agent & { profile?: string[]; aka?: string[]; why: string },
+      ) =>
+        added(o, runId, {
+          type: "person",
+          name,
+          profiles: o.profile ?? [],
+          aka: o.aka ?? [],
+          why: o.why,
+        }),
     );
 
   agent(common(adds.command("class <run> <on> <class>")))

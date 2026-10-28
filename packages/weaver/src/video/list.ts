@@ -33,6 +33,19 @@ export async function flatPlaylist(
   target: string,
   range?: { start: number; end: number },
 ): Promise<YtDlpEntry[]> {
+  const page = (await pageInfo(ytDlp, target, range)) as { entries?: YtDlpEntry[] };
+  return (page.entries ?? []).filter((e) => e.id);
+}
+
+/**
+ * yt-dlp's JSON for one page, flat: a playlist's `entries`, or one video's fields
+ * (`channel_url`, `uploader_url`) when the target is a video.
+ */
+export async function pageInfo(
+  ytDlp: string,
+  target: string,
+  range?: { start: number; end: number },
+): Promise<Record<string, unknown>> {
   const [cmd, ...pre] = ytDlp.split(/\s+/) as [string, ...string[]];
   const { stdout } = await runFor(
     cmd,
@@ -47,5 +60,5 @@ export async function flatPlaylist(
     LIST_MS,
     { maxBuffer: 64 * 1024 * 1024 },
   );
-  return ((JSON.parse(stdout) as { entries?: YtDlpEntry[] }).entries ?? []).filter((e) => e.id);
+  return JSON.parse(stdout) as Record<string, unknown>;
 }

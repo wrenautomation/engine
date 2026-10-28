@@ -21,6 +21,7 @@ import {
   type JudgeRecord,
   type LedgerRecord,
   type PatternRecord,
+  type PersonRecord,
   type QueryRecord,
   type SnapshotRecord,
   type SourceClass,
@@ -68,6 +69,8 @@ export interface RunState {
   classes: ClassRecord[];
   /** Facets the agent gave up on, for the rest of the run. */
   dead: DeadRecord[];
+  /** People the agent named across platforms, in time order. */
+  people: PersonRecord[];
   /** The latest class on each document and finding. */
   classOf: Map<string, SourceClass>;
   /** The judge's latest answers on each hit, document and finding. */
@@ -132,6 +135,7 @@ export function fold(run: string, records: readonly LedgerRecord[]): RunState {
     drafts: ofType(records, "draft"),
     classes: ofType(records, "class"),
     dead: ofType(records, "dead"),
+    people: ofType(records, "person"),
     classOf: new Map(ofType(records, "class").map((c) => [c.on, c.class])),
     judged: new Map(ofType(records, "judge").map((j) => [j.on, j.answers])),
     judges: ofType(records, "judge"),

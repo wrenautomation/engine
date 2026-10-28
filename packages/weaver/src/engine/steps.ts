@@ -31,7 +31,7 @@ import type {
 } from "../ledger/records.js";
 import { canonical } from "./canonical.js";
 import { DOUBT, judgeDocuments, judgeFindings, judgeHits, passNote, yesOf } from "./judge.js";
-import { type Deps, pick, type RunOptions, type Source, searchersFor } from "./ports.js";
+import { type Deps, FOLLOW_N, pick, type RunOptions, type Source, searchersFor } from "./ports.js";
 import {
   fold,
   found,
@@ -244,13 +244,21 @@ export const planStep: StepFn = async (ctx, state) => {
 
 export const fetchStep: StepFn = async (ctx, state) => {
   const queries = state.queries.filter((q) => q.round === ctx.round);
-  const searchers = sourcesOf(ctx, state).filter((s) => s.search);
-  if (!searchers.length) return { ok: false, note: "no search source in the allow-list" };
+  const searchers = sourcesOf(ctx, state);
+  if (!searchers.some((s) => s.search) && !queries.some((q) => q.follow))
+    return { ok: false, note: "no search source in the allow-list" };
   const searched = new Set(
     state.spends
       .filter((s) => s.round === ctx.round && s.op === "search" && s.ok && s.on)
       .map((s) => `${s.on}\u0000${s.source}`),
   );
+  // Each query goes to the allow-list as it stood when it was written: a source a later
+  // `--with` let in does not run the earlier queries.
+  const listOf = new Map<string, Set<string>>();
+  let list: Set<string> | null = null;
+  for (const r of state.records)
+    if (r.type === "snapshot") list = new Set(r.sources);
+    else if (r.type === "query" && list) listOf.set(r.id, list);
   const idOf = new Map(state.hitByKey);
   let written = 0;
   let again = 0;
@@ -258,13 +266,17 @@ export const fetchStep: StepFn = async (ctx, state) => {
   let answered = 0;
   let transient: Transient | null = null;
   for (const q of queries) {
-    const todo = searchersFor(searchers, q).filter((s) => !searched.has(`${q.id}\u0000${s.name}`));
+    const todo = searchersFor(searchers, q).filter(
+      (s) => !searched.has(`${q.id}\u0000${s.name}`) && (listOf.get(q.id)?.has(s.name) ?? true),
+    );
     calls += todo.length;
     const got = gather(
       await Promise.allSettled(
         todo.map((s) =>
           ctx.invoke(s, "search", q.terms, q.id, () =>
-            (s.search as NonNullable<Source["search"]>)(q),
+            q.follow
+              ? (s.follow as NonNullable<Source["follow"]>)(q.follow.as, q.follow.url, FOLLOW_N)
+              : (s.search as NonNullable<Source["search"]>)(q),
           ),
         ),
       ),

@@ -11,6 +11,7 @@ import {
   brief,
   check,
   extract,
+  follow,
   open,
   planRound,
   search,
@@ -18,6 +19,7 @@ import {
   tunePlan,
   type Who,
 } from "./agent.js";
+import { aucOf } from "./judge.js";
 import { type Deps, registry, type Source } from "./ports.js";
 import { recall } from "./recall.js";
 import { run } from "./runner.js";
@@ -801,6 +803,142 @@ describe("agent commands", () => {
     // Every searcher it went to answered empty: still a gap.
     const gaps = (await d.ledger.trace(run)).filter((r) => r.type === "gap");
     expect(gaps).toHaveLength(3);
+  });
+
+  it("follows a good page like a person would: its author's posts, pages like it, one person across sites", async () => {
+    const asked: string[] = [];
+    // Lists b.example's posts; its one post names its channel.
+    const tube: Source = {
+      name: "tube",
+      kind: "search",
+      cost: "free",
+      search: async () => [],
+      follows: (as, url) => as === "posts" && url.startsWith("https://b.example/"),
+      follow: async (as, url, n) => {
+        asked.push(`tube ${as} ${url} ${n}`);
+        return [{ url: "https://b.example/four", title: "four", channel: "Bee" }];
+      },
+    };
+    // Outside the run's list: pages like a page, one already a hit.
+    const like: Source = {
+      name: "like",
+      kind: "search",
+      cost: "free",
+      search: async () => [],
+      follows: (as) => as === "similar",
+      follow: async (as, url) => {
+        asked.push(`like ${as} ${url}`);
+        return [{ url: "https://a.example/two" }];
+      },
+    };
+    const judge = fakeJudge((state) => {
+      const x = state as { page?: unknown; url?: string; sentence?: string };
+      if (x.page) return { serves: { yes: 0.5, no: 0.5 } };
+      if (x.sentence) return { backs: { yes: 0.9, no: 0.1 } };
+      return x.url?.endsWith("one")
+        ? { worth: { yes: 0.9, no: 0.1 } }
+        : { worth: { yes: 0.3, no: 0.7 } };
+    });
+    const d = { ...deps(), judge, sources: registry(fake, opener, tube, like) };
+    const { run: runId } = await planRound(d, {
+      ask: { text: "how do staffing firms win repeat clients", kind: "web" },
+      planFile: { ...planFile, sources: ["fake", "opener", "tube"] },
+      model: "m",
+    });
+    await search(d, runId, [{ terms: "a", why: "w" }], agent);
+    await open(d, runId, { urls: ["https://a.example/one"], why: "w" }, agent);
+    await extract(d, runId);
+    const one = (await brief(d, runId)).documents;
+    expect(one.total).toBe(1);
+    // A kept page no follow started from: its author's other posts are unseen.
+    const doc = (await fold(runId, await d.ledger.trace(runId))).documents[0]?.id as string;
+    expect((await brief(d, runId)).unfollowed.map((u) => u.document)).toEqual([doc]);
+
+    // Pages like it: no source in the run follows "similar"; the error names one that does.
+    await expect(
+      follow(d, runId, { as: "similar", document: doc, why: "more like it" }, agent),
+    ).rejects.toThrow("--with like");
+    await expect(
+      follow(
+        d,
+        runId,
+        { as: "posts", url: "https://a.example/one", why: "w", with: ["nope"] },
+        agent,
+      ),
+    ).rejects.toThrow("no source named nope");
+    const similar = await follow(
+      d,
+      runId,
+      { as: "similar", document: doc, why: "more like it", with: ["like"] },
+      agent,
+    );
+    // The joined source runs the follow alone, not the earlier search.
+    expect(
+      similar.wrote.flatMap((r) => (r.type === "spend" ? [`${r.source} ${r.about}`] : [])),
+    ).toEqual(["like similar of https://a.example/one"]);
+    expect(similar.wrote.map((r) => r.type)).toContain("found");
+    expect((await brief(d, runId)).unfollowed).toEqual([]);
+
+    // The author's posts: a new hit with its channel; a person ties it to its profile.
+    const posts = await follow(
+      d,
+      runId,
+      { as: "posts", url: "https://b.example/", why: "the speaker's other talks" },
+      agent,
+    );
+    expect(
+      posts.wrote.filter((r) => r.type === "hit").map((r) => r.type === "hit" && r.url),
+    ).toEqual(["https://b.example/four"]);
+    expect(asked).toEqual([
+      `like similar https://a.example/one`,
+      "tube posts https://b.example/ 30",
+    ]);
+    await expect(
+      add(
+        d,
+        runId,
+        { type: "person", name: "Bee", profiles: ["not a url"], aka: [], why: "w" },
+        agent,
+      ),
+    ).rejects.toThrow("not a URL");
+    await add(
+      d,
+      runId,
+      {
+        type: "person",
+        name: "Bee Speaker",
+        profiles: ["https://b.example"],
+        aka: ["Bee"],
+        why: "one speaker",
+      },
+      agent,
+    );
+    await open(d, runId, { urls: ["https://b.example/four"], why: "w" }, agent);
+    await extract(d, runId);
+    const b = await brief(d, runId);
+    expect(b.people).toMatchObject([{ name: "Bee Speaker", documents: 1, kept: 1, sites: 1 }]);
+    expect(b.unfollowed).toEqual([]);
+
+    // The worth trial: both pages kept a finding; the low score on page four is a miss a gate would make.
+    expect(b.documents.toExtract).toEqual([]);
+    expect(b.judge.worth).toEqual({ both: 2, good: 2, auc: null, under: 1, underGood: 1 });
+  });
+
+  it("an AUC: the share of good-over-bad pairs a score orders right, ties a half", () => {
+    expect(
+      aucOf([
+        [0.9, true],
+        [0.1, false],
+      ]),
+    ).toBe(1);
+    expect(
+      aucOf([
+        [0.5, true],
+        [0.5, false],
+        [0.1, false],
+      ]),
+    ).toBe(0.75);
+    expect(aucOf([[0.9, true]])).toBeNull();
   });
 
   it("tests what the ask takes as given: a known line with no source is a premise", async () => {

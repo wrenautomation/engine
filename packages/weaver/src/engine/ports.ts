@@ -10,7 +10,7 @@ import type { Judge } from "@wrenautomation/models/judge";
 import type { HitViewIn, PlanFile, Proposal } from "@wrenautomation/raven";
 import type { Ids } from "../ledger/ids.js";
 import type { Ledger } from "../ledger/ledger.js";
-import type { CostKind, From, HitRecord, QueryRecord } from "../ledger/records.js";
+import type { CostKind, FollowAs, From, HitRecord, QueryRecord } from "../ledger/records.js";
 
 export interface Source {
   name: string;
@@ -27,6 +27,10 @@ export interface Source {
   keeps?(site: string): boolean;
   /** Hits as the source shows them for free. Throw on failure: the runner writes the spend. */
   search?(query: QueryRecord): Promise<HitViewIn[]>;
+  /** Whether it lists that page's own posts (`posts`) or pages like it (`similar`). */
+  follows?(as: FollowAs, url: string): boolean;
+  /** The follow's hits, newest or closest first, `n` at most. Throw on failure, like search. */
+  follow?(as: FollowAs, url: string, n: number): Promise<HitViewIn[]>;
   /**
    * Whether this source opens that URL at all (a YouTube page, an http(s) page). The read step
    * asks before a call, so a source that was never going to open it writes no spend. Absent: it
@@ -114,9 +118,19 @@ export interface StepEvent {
   ms: number;
 }
 
-/** The searchers a query goes to: all of them, or for a site-scoped query those that keep to it. */
+/**
+ * The searchers a query goes to: all of them, or for a site-scoped query those that keep to it.
+ * A follow goes to the sources that follow its URL that way.
+ */
 export const searchersFor = (
-  searchers: readonly Source[],
-  q: { site?: string | undefined },
-): Source[] =>
-  q.site ? searchers.filter((s) => s.keeps?.(q.site as string) ?? true) : [...searchers];
+  sources: readonly Source[],
+  q: Pick<QueryRecord, "site" | "follow">,
+): Source[] => {
+  const f = q.follow;
+  if (f) return sources.filter((s) => s.follow && s.follows?.(f.as, f.url));
+  const searchers = sources.filter((s) => s.search);
+  return q.site ? searchers.filter((s) => s.keeps?.(q.site as string) ?? true) : searchers;
+};
+
+/** How many hits a follow lists. */
+export const FOLLOW_N = 30;

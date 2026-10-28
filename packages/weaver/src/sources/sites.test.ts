@@ -11,6 +11,7 @@ import {
   LadderCallError,
   redditSource,
   redditThread,
+  redditUser,
 } from "./index.js";
 
 const hit = (url: string): HitRecord => ({
@@ -255,6 +256,67 @@ describe("site readers", () => {
         hit("https://www.facebook.com/groups/g1/posts/1234567890"),
       ),
     ).rejects.toThrow(/^facebook: /);
+  });
+
+  it("follows a Reddit user to their top posts and comments, one read of the cap", async () => {
+    expect(redditUser("https://www.reddit.com/user/Bee_1/comments")).toBe("Bee_1");
+    expect(redditUser("https://old.reddit.com/u/bee")).toBe("bee");
+    expect(redditUser("https://www.reddit.com/r/x")).toBeNull();
+    expect(redditUser("https://example.com/user/bee")).toBeNull();
+    const { sites, calls } = worker({
+      "reddit-public": {
+        kind: "Listing",
+        data: {
+          children: [
+            {
+              kind: "t3",
+              data: {
+                permalink: "/r/sales/comments/1/a/",
+                title: "How I keep clients",
+                subreddit: "sales",
+                selftext: "Weekly calls.",
+                created_utc: 1_761_609_600,
+              },
+            },
+            {
+              kind: "t1",
+              data: {
+                permalink: "/r/sales/comments/1/a/c2/",
+                link_title: "Q",
+                subreddit: "sales",
+                body: "Same here.",
+              },
+            },
+            { kind: "t1", data: { body: "no link" } },
+          ],
+        },
+      },
+    });
+    const src = redditSource({ sites });
+    expect(src.follows?.("posts", "https://www.reddit.com/user/bee")).toBe(true);
+    expect(src.follows?.("posts", "https://www.reddit.com/r/sales")).toBe(false);
+    expect(await src.follow?.("posts", "https://www.reddit.com/user/bee", 300)).toEqual([
+      {
+        url: "https://www.reddit.com/r/sales/comments/1/a/",
+        title: "How I keep clients",
+        channel: "r/sales",
+        date: "2025-10-28",
+        snippet: "Weekly calls.",
+      },
+      {
+        url: "https://www.reddit.com/r/sales/comments/1/a/c2/",
+        title: "Q",
+        channel: "r/sales",
+        snippet: "Same here.",
+      },
+    ]);
+    expect(calls).toEqual([
+      {
+        site: "reddit-public",
+        path: "/user/bee/overview",
+        input: { username: "bee", limit: 100, sort: "top" },
+      },
+    ]);
   });
 
   it("puts the account on both wires", async () => {

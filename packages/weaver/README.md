@@ -21,8 +21,8 @@ Three more doors run the research engine (wren's `designs/2026-10-26-research-en
 | Import | Does |
 |---|---|
 | `@wrenautomation/weaver/engine` | `Source` (a name, `search` and/or `open`, a cost), `registry` and the plan's allow-list; the agent's calls (`planRound`, `search`, `open`, `extract`, `check`, `add`, `accept`, `brief`), one step each; the judge's passes (`judgeHits`, `judgeDocuments`, `judgeFindings`, `judgeStats`); `run(deps, options)`: plan, fetch, triage, read, extract, check (a sample of findings against their documents), review, round after round until raven's edge says stop; `fold` rebuilds a run's state from its records, so a run resumes from the step it stopped on; `Transient`, the failure worth another try; raven's `Model`, `Ask`, `PlanFile` and record shapes re-exported, so a host pins weaver alone |
-| `@wrenautomation/weaver/sources` | `searxng`, `exa` (search), `youtube` (search and read, yt-dlp), `fetcher` (open, the polite fetcher), `ladder` (open, autobrowse's fetch ladder up to a browser), `reddit` and `facebook` (open a thread or a group post through autobrowse's site routes), `paste` (a person's URLs), `ledger` (hits earlier runs saw). A query with a `site` skips a searcher that cannot keep to it (`Source.keeps`: `youtube` keeps to YouTube only) |
-| `@wrenautomation/weaver/ledger` | the records (`query`, `hit`, `document`, `finding`, `verdict`, `call`, `spend`, `snapshot`, `edge`, `done`, `steer`, `gap`, `check`, `pattern`, `found`, `judge`), `FilesLedger` (a folder: `runs/<run>/<writer>.jsonl`, `plans/<kind>.json`), `MemoryLedger`, yield rows per source, person, channel and kind |
+| `@wrenautomation/weaver/sources` | `searxng`, `exa` (search), `youtube` (search and read, yt-dlp), `fetcher` (open, the polite fetcher), `ladder` (open, autobrowse's fetch ladder up to a browser), `reddit` and `facebook` (open a thread or a group post through autobrowse's site routes), `google` (Google's own page through the desk's browser: each result a hit, the AI Overview one hit with its text as the snippet, each page it cites a hit), `paste` (a person's URLs), `ledger` (hits earlier runs saw). A query with a `site` skips a searcher that cannot keep to it (`Source.keeps`: `youtube` keeps to YouTube only). A follow (`Source.follows`, `follow`) lists a page's author's posts (`youtube`: a channel's uploads, from a video or the channel, and a TikTok profile; `reddit`: a user's top posts and comments) or pages like it (`exa`: findSimilar) |
+| `@wrenautomation/weaver/ledger` | the records (`query`, `hit`, `document`, `finding`, `verdict`, `call`, `spend`, `snapshot`, `edge`, `done`, `steer`, `gap`, `check`, `pattern`, `found`, `judge`, `person`), `FilesLedger` (a folder: `runs/<run>/<writer>.jsonl`, `plans/<kind>.json`), `MemoryLedger`, yield rows per source, person, channel and kind |
 
 Every record carries `from` (ai, human or tool) and `by` (a model id, a source, a person). A
 person's pasted URL, a person's keep or drop, are the same records as the model's. The plan
@@ -78,6 +78,8 @@ weaver add edge 01M5YS... again --why "thin on the UK"                          
 weaver plan --run 01M5YS...                         # round 2: known, steer and what round 1 left open, in its snapshot
 weaver plan "coaches: who pays for setters" --parent 01M5YS... --why "the best niche of round 1"   # a child run
 weaver add dead 01M5YT... spend --why "found consumers, not buyers"   # later tries skip the facet
+weaver follow 01M5YS... --from 01M5YV... --as posts --why "the speaker's other talks"   # the author's own posts; --as similar: pages like it
+weaver add person 01M5YS... "Bee Speaker" --profile https://www.youtube.com/@bee --aka Bee --why "one speaker"   # one person across sites
 weaver learn web --sources searxng exa --rounds 4   # the plan file's next version, after a good run
 weaver learn web --thin 2                           # the tree's guide: a try under 2 new hits falls through
 weaver learn web --show                             # the current one
@@ -242,7 +244,20 @@ enough while its kept hits have a class (the agent's, else the judge's) and none
 them. `check` reads the sample plus each finding the judge backs under 0.8: a judge's yes never
 takes one out. `accept` turns the hints into records at the agent's own bar, each with the
 judge's number in its why. `brief.judge` counts its calls, cost, and how often the agent and the
-check agreed with it.
+check agreed with it. A trial (0.22.0): `open` also asks each page its `worth` (would a careful
+researcher cite it for the ask). `documents.toExtract[].worth` shows it; `brief.judge.worth`
+gives its AUC against "a finding on it was kept", and what a gate at a half would skip. Nothing
+gates on it yet.
+
+A follow is a query record with `follow: {url, as, document?}` and terms `<as> of <url>`. The
+fetch step sends it to the sources whose `follows` takes it, `follow` lists up to 30, and the
+hits go through triage, the read and the caps like a search's. Each query goes to the allow-list
+as it stood when it was written: a source `follow --with` lets in runs the follow only. A
+`person` names one author across sites (profile URLs, names they post under); a document is
+theirs when a posts follow from their profile found it, when its URL sits under a profile, or
+when its channel (or its hit's) is one of their names. `brief.people` counts each person's
+documents, kept findings and sites; `brief.unfollowed` lists kept pages no follow started from
+and no person owns.
 
 ## Library
 

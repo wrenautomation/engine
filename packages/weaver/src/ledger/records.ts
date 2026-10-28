@@ -52,6 +52,7 @@ export const RECORD_TYPES = [
   "class",
   "dead",
   "judge",
+  "person",
 ] as const;
 export const RecordType = z.enum(RECORD_TYPES);
 export type RecordType = z.infer<typeof RecordType>;
@@ -69,10 +70,20 @@ export const Envelope = z.object({
 });
 export type Envelope = z.infer<typeof Envelope>;
 
-/** One thing to look for, as raven planned it. */
-export const QueryRecord = Envelope.extend({ type: z.literal("query") }).extend(
-  RavenQuery.omit({ from: true, by: true }).shape,
-);
+/** What a follow lists from a page: its channel's or author's own posts, or pages like it. */
+export const FOLLOW_AS = ["posts", "similar"] as const;
+export const FollowAs = z.enum(FOLLOW_AS);
+export type FollowAs = z.infer<typeof FollowAs>;
+
+/** One thing to look for, as raven planned it; or a follow: a page's own posts, or pages like it. */
+export const QueryRecord = Envelope.extend({ type: z.literal("query") })
+  .extend(RavenQuery.omit({ from: true, by: true }).shape)
+  .extend({
+    /** A follow's start: the URL, what to list, and the document that led there. */
+    follow: z
+      .object({ url: z.string().min(1), as: FollowAs, document: z.string().optional() })
+      .optional(),
+  });
 export type QueryRecord = z.infer<typeof QueryRecord>;
 
 /** What a source returned for a query, before any read. One per canonical URL per fetch step. */
@@ -310,6 +321,20 @@ export const JudgeRecord = Envelope.extend({
 });
 export type JudgeRecord = z.infer<typeof JudgeRecord>;
 
+/**
+ * One person across platforms, by the agent, with why: the profile URLs (a channel, a Substack,
+ * an X account, a blog) and the names they post under. Signals cluster in people: the brief
+ * counts kept findings per person. The latest per name wins.
+ */
+export const PersonRecord = Envelope.extend({
+  type: z.literal("person"),
+  name: z.string().min(1),
+  profiles: z.array(z.string().min(1)).default([]),
+  aka: z.array(z.string().min(1)).default([]),
+  why: z.string().min(1),
+});
+export type PersonRecord = z.infer<typeof PersonRecord>;
+
 export const LedgerRecord = z.discriminatedUnion("type", [
   QueryRecord,
   HitRecord,
@@ -330,6 +355,7 @@ export const LedgerRecord = z.discriminatedUnion("type", [
   ClassRecord,
   DeadRecord,
   JudgeRecord,
+  PersonRecord,
 ]);
 export type LedgerRecord = z.infer<typeof LedgerRecord>;
 

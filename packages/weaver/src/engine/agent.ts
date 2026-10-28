@@ -24,6 +24,7 @@ import {
   type DocumentRecord,
   type DraftRecord,
   type Envelope,
+  type FollowAs,
   type From,
   type HitRecord,
   LedgerRecord,
@@ -34,6 +35,13 @@ import {
 import { canonical } from "./canonical.js";
 import { costOf } from "./cost.js";
 import { classGuess, type JudgeStats, judgeStats, pickOf, yesOf } from "./judge.js";
+import {
+  type PersonView,
+  peopleView,
+  profileKey,
+  type Unfollowed,
+  unfollowedOf,
+} from "./people.js";
 import type { Deps } from "./ports.js";
 import { context } from "./runner.js";
 import {
@@ -261,6 +269,63 @@ export async function search(
       who,
     );
   }
+  return stepRun(deps, run, "fetch", fetchStep);
+}
+
+export interface FollowInput {
+  as: FollowAs;
+  why: string;
+  /** Where to start: a page or a profile. Absent: the document's URL. */
+  url?: string;
+  /** The read page that led here. */
+  document?: string;
+  /** Follow sources this machine has that the run's allow-list lacks. */
+  with?: readonly string[];
+}
+
+/**
+ * What a person does after a good page: its channel's or author's own posts, or pages like it.
+ * Writes a query with `follow`, then runs the fetch step: its hits go through the same calls,
+ * reads and checks, and the tree's read cap bounds them.
+ */
+export async function follow(deps: Deps, run: string, input: FollowInput, who: Who): Promise<Did> {
+  const state = await stateOf(deps, run);
+  planned(state);
+  const snapshot = state.snapshot as NonNullable<RunState["snapshot"]>;
+  if (!input.why.trim()) throw new Error("follow: why?");
+  const doc = input.document ? state.documents.find((d) => d.id === input.document) : undefined;
+  if (input.document && !doc) throw new Error(`no document ${input.document}`);
+  const url = input.url ?? doc?.url;
+  if (!url) throw new Error("follow: a URL or a document");
+  const ctx = context(deps, {}, run, state.round, "plan");
+  const joining = (input.with ?? []).filter((n) => !snapshot.sources.includes(n));
+  for (const n of joining) {
+    const s = deps.sources.get(n);
+    if (!s) throw new Error(`no source named ${n}`);
+    if (!s.follow) throw new Error(`${n} follows nothing`);
+  }
+  const names = [...snapshot.sources, ...joining];
+  const followers = names.filter((n) => deps.sources.get(n)?.follows?.(input.as, url));
+  if (!followers.length) {
+    const here = [...deps.sources.values()].filter((s) => s.follows?.(input.as, url));
+    throw new Error(
+      `follow: no source in the run lists ${input.as} of ${url}${here.length ? `; --with ${here.map((s) => s.name).join(" ")}` : ""}`,
+    );
+  }
+  if (joining.length) {
+    const { id: _id, at: _at, from: _from, by: _by, ...rest } = snapshot;
+    await ctx.write({ ...rest, sources: names }, who);
+  }
+  await ctx.write(
+    {
+      type: "query",
+      kind: snapshot.ask.kind,
+      terms: `${input.as} of ${url}`,
+      why: input.why,
+      follow: { url, as: input.as, ...(doc ? { document: doc.id } : {}) },
+    },
+    who,
+  );
   return stepRun(deps, run, "fetch", fetchStep);
 }
 
@@ -679,7 +744,8 @@ export type Addition =
   | { type: "pattern"; text: string; findings: string[] }
   | { type: "draft"; for: string; items: DraftInput[] }
   | { type: "class"; on: string; class: SourceClass; why: string }
-  | { type: "dead"; facet: string; why: string };
+  | { type: "dead"; facet: string; why: string }
+  | { type: "person"; name: string; profiles: string[]; aka: string[]; why: string };
 
 /** One item of a draft as the agent writes it: cites are finding or pattern ids. */
 export interface DraftInput {
@@ -710,7 +776,8 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
     a.type === "check" ||
     a.type === "draft" ||
     a.type === "class" ||
-    a.type === "dead"
+    a.type === "dead" ||
+    a.type === "person"
       ? state.round
       : personRound(state);
   const warnings: string[] = [];
@@ -849,6 +916,24 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
       if (state.dead.some((d) => d.facet === facet))
         throw new Error(`facet "${facet}" is dead already`);
       return { record: await write({ type: "dead", facet, why: why(a.why, "dead") }), warnings };
+    }
+    case "person": {
+      const name = a.name.trim();
+      if (!name) throw new Error("person: a name");
+      const profiles = [...new Set(a.profiles.map((u) => u.trim()).filter(Boolean))];
+      for (const u of profiles) if (!profileKey(u)) throw new Error(`person: not a URL: ${u}`);
+      if (!profiles.length && !a.aka.length)
+        throw new Error("person: a profile URL or a name they post under");
+      return {
+        record: await write({
+          type: "person",
+          name,
+          profiles,
+          aka: [...new Set(a.aka.map((n) => n.trim()).filter(Boolean))],
+          why: why(a.why, "person"),
+        }),
+        warnings,
+      };
     }
     case "class": {
       const target =
@@ -1060,6 +1145,10 @@ export interface Brief {
   treeRoom: { root: string; cap: number; read: number; left: number } | null;
   /** Facets given up on, with why. */
   dead: { facet: string; why: string }[];
+  /** People across platforms, most kept findings first. */
+  people: PersonView[];
+  /** Kept pages no follow started from and no person owns: `follow` their author's posts or pages like them. */
+  unfollowed: Unfollowed[];
   /** The latest rough draft, or null: never the final. */
   draft: { id: string; round: number; for: string; items: DraftRecord["items"] } | null;
   verdicts: { document: string; url: string; quality: string; gap?: string }[];
@@ -1072,7 +1161,8 @@ export interface Brief {
     total: number;
   };
   documents: {
-    toExtract: { id: string; url: string }[];
+    /** `worth`: the judge's trial score, a hint only. */
+    toExtract: { id: string; url: string; worth?: number }[];
     /**
      * Documents with a kept finding and no class: class them before the patterns count. `guess`
      * is the judge's; `accept <run> class` takes every guess over a bar.
@@ -1159,6 +1249,8 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
     })),
     treeRoom: await treeRoom(deps, run),
     dead: state.dead.map(({ facet, why }) => ({ facet, why })),
+    people: peopleView(state),
+    unfollowed: unfollowedOf(state),
     draft: (() => {
       const d = state.drafts.at(-1);
       return d ? { id: d.id, round: d.round, for: d.for, items: d.items } : null;
@@ -1194,7 +1286,10 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
       total: state.hits.length,
     },
     documents: {
-      toExtract: unjudged(state).map(({ id, url }) => ({ id, url })),
+      toExtract: unjudged(state).map(({ id, url }) => {
+        const worth = yesOf(state, id, "worth");
+        return { id, url, ...(worth !== undefined ? { worth } : {}) };
+      }),
       unclassed: state.documents
         .filter(
           (d) =>

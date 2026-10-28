@@ -6,12 +6,15 @@ import {
   entryHit,
   exa,
   fetcherSource,
+  googleSource,
   httpLadderClient,
   ingressLadderClient,
   LadderCallError,
   ladderSource,
   ledgerSource,
+  overviewUrl,
   paste,
+  postsOf,
   searxng,
   ytdlpSource,
 } from "./index.js";
@@ -124,6 +127,78 @@ describe("exa", () => {
       },
     ]);
     expect(() => exa({ keys: [] })).toThrow("no key");
+  });
+
+  it("follows a page to pages like it, off the page's own site", async () => {
+    const calls: { url: string; body: unknown }[] = [];
+    const src = exa({
+      keys: ["k"],
+      fetchFn: async (u, init) => {
+        calls.push({ url: String(u), body: JSON.parse(String(init?.body)) });
+        return json({ results: [{ url: "https://d.example", title: "D" }] });
+      },
+    });
+    expect(src.follows?.("similar", "https://c.example")).toBe(true);
+    expect(src.follows?.("posts", "https://c.example")).toBe(false);
+    expect(await src.follow?.("similar", "https://c.example", 5)).toEqual([
+      { url: "https://d.example", title: "D" },
+    ]);
+    expect(calls).toEqual([
+      {
+        url: "https://api.exa.ai/findSimilar",
+        body: {
+          url: "https://c.example",
+          numResults: 5,
+          excludeSourceDomain: true,
+          contents: { highlights: { numSentences: 3, highlightsPerUrl: 1 } },
+        },
+      },
+    ]);
+  });
+});
+
+describe("google", () => {
+  it("each result a hit; the AI Overview one hit of its own, each page it cites a hit", async () => {
+    const asked: unknown[] = [];
+    const src = googleSource({
+      sites: {
+        async call<T>(site: string, _m: string, path: string, input?: unknown) {
+          asked.push({ site, path, input });
+          return {
+            overview: {
+              text: " Most firms win repeat clients by account reviews. ",
+              sources: [
+                { title: "S", url: "https://s.example/a" },
+                { title: "none", url: null },
+              ],
+            },
+            results: [
+              { title: "R", url: "https://r.example", snippet: "s", date: "Aug 21, 2026" },
+              { title: "no url", url: null },
+              { title: "R2", url: "https://r2.example", date: "3 days ago" },
+            ],
+            questions: ["Why do clients stay?"],
+          } as T;
+        },
+      },
+    });
+    const got = await src.search?.(query("repeat clients", "reddit.com"));
+    expect(asked).toEqual([
+      { site: "web", path: "/google", input: { q: "repeat clients site:reddit.com", n: 10 } },
+    ]);
+    expect(got).toEqual([
+      { url: "https://r.example", title: "R", snippet: "s", date: "2026-08-21" },
+      { url: "https://r2.example", title: "R2" },
+      {
+        url: overviewUrl("repeat clients site:reddit.com"),
+        title: "Google AI Overview: repeat clients site:reddit.com",
+        channel: "Google AI Overview",
+        snippet:
+          "Most firms win repeat clients by account reviews.\n\nPeople also ask: Why do clients stay?",
+      },
+      { url: "https://s.example/a", title: "S", snippet: "Cited by Google's AI Overview" },
+    ]);
+    expect(overviewUrl("a b")).toBe("https://www.google.com/search?q=a%20b#ai-overview");
   });
 });
 
@@ -341,6 +416,51 @@ describe("youtube", () => {
     expect(src.opens?.("https://youtu.be/abc123def45")).toBe(true);
     await expect(src.open?.(hit("https://other.example/v"))).rejects.toThrow("not a YouTube page");
     expect(entryHit({})).toBeNull();
+  });
+
+  it("follows a video to its channel's uploads; a TikTok profile to its posts", async () => {
+    expect(postsOf("https://www.youtube.com/@bee")).toEqual({
+      target: "https://www.youtube.com/@bee/videos",
+      site: "youtube",
+    });
+    expect(postsOf("https://youtube.com/channel/UC1/featured")).toEqual({
+      target: "https://www.youtube.com/channel/UC1/videos",
+      site: "youtube",
+    });
+    expect(postsOf("https://youtu.be/abc123def45")).toBe("video");
+    expect(postsOf("https://www.tiktok.com/@bee/video/1")).toEqual({
+      target: "https://www.tiktok.com/@bee",
+      site: "other",
+    });
+    expect(postsOf("https://www.youtube.com/results?q=x")).toBeNull();
+    expect(postsOf("https://other.example/@bee")).toBeNull();
+
+    const listed: unknown[] = [];
+    const src = ytdlpSource({
+      ytDlp: "yt-dlp",
+      info: async () => ({ channel_url: "https://www.youtube.com/channel/UC1" }),
+      list: async (_cmd, target, range) => {
+        listed.push({ target, range });
+        return target.includes("tiktok")
+          ? [{ url: "https://www.tiktok.com/@bee/video/2", title: "tt" }]
+          : [{ id: "xyz123def45", title: "next", channel: "Bee" }];
+      },
+      read: async () => {
+        throw new Error("unused");
+      },
+    });
+    expect(src.follows?.("posts", "https://youtu.be/abc123def45")).toBe(true);
+    expect(src.follows?.("similar", "https://youtu.be/abc123def45")).toBe(false);
+    expect(await src.follow?.("posts", "https://youtu.be/abc123def45", 3)).toEqual([
+      { url: "https://www.youtube.com/watch?v=xyz123def45", title: "next", channel: "Bee" },
+    ]);
+    expect(await src.follow?.("posts", "https://www.tiktok.com/@bee", 3)).toEqual([
+      { url: "https://www.tiktok.com/@bee/video/2", title: "tt" },
+    ]);
+    expect(listed).toEqual([
+      { target: "https://www.youtube.com/channel/UC1/videos", range: { start: 1, end: 3 } },
+      { target: "https://www.tiktok.com/@bee", range: { start: 1, end: 3 } },
+    ]);
   });
 });
 

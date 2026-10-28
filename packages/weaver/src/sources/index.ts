@@ -6,6 +6,7 @@
  */
 export * from "./exa.js";
 export * from "./fetcher.js";
+export * from "./google.js";
 export * from "./ladder.js";
 export * from "./ledger.js";
 export * from "./paste.js";
