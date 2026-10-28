@@ -1,10 +1,11 @@
 {
   "name": "@wrenautomation/falcon",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Files, markup and media in; text and quoted facts out. HTML and PDF to text, a page to title, text and links, video watching with ffmpeg and a vision model, captions and audio to markdown, a study's synthesis reader whose every claim quotes a page, and the research engine's document side: Document, Finding, Proof and Verdict, readers by media, the claim extractor with its verdict on each document. Fetching is weaver's.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/wrenautomation/falcon.git"
+    "url": "git+https://github.com/wrenautomation/engine.git",
+    "directory": "packages/falcon"
   },
   "license": "PolyForm-Shield-1.0.0",
   "files": [
@@ -42,19 +43,12 @@
   "bin": {
     "falcon": "dist/app/cli.js"
   },
-  "packageManager": "pnpm@9.15.0",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
-    "prepare": "git config core.hooksPath .githooks || true",
-    "lint": "biome check --error-on-warnings .",
-    "lint:fix": "biome check --write .",
     "typecheck": "tsc --noEmit",
-    "build": "rm -rf dist && tsc && chmod +x dist/app/cli.js",
-    "test": "vitest run",
-    "gates": "lockf -t 900 /tmp/wren_automation-checks.lock sh -c 'pnpm lint && pnpm typecheck && pnpm test'",
-    "prepublishOnly": "pnpm build"
+    "build": "rm -rf dist && tsc && chmod +x dist/app/cli.js"
   },
   "dependencies": {
     "commander": "15.0.0",
@@ -62,11 +56,5 @@
     "htmlparser2": "12.0.0",
     "unpdf": "1.8.1",
     "zod": "4.6.5"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "2.5.14",
-    "@types/node": "22.20.3",
-    "typescript": "5.9.3",
-    "vitest": "5.0.1"
   }
 }

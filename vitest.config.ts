@@ -22,7 +22,16 @@ function pruneLeakedRuns(): void {
   }
 }
 pruneLeakedRuns();
+const PACKAGES = ["models", "raven", "falcon", "weaver"];
+
+// One run over every package. Only the sources: a build leaves compiled tests in dist/.
 export default defineConfig({
-  // Only the sources: a build leaves compiled tests in dist/.
-  test: { include: ["src/**/*.test.ts"], testTimeout: 120_000, hookTimeout: 180_000 },
+  test: {
+    testTimeout: 120_000,
+    hookTimeout: 180_000,
+    projects: PACKAGES.map((name) => ({
+      extends: true,
+      test: { name, root: `packages/${name}`, include: ["src/**/*.test.ts"] },
+    })),
+  },
 });

@@ -1,11 +1,12 @@
 {
   "name": "@wrenautomation/raven",
-  "version": "0.3.0",
+  "version": "0.7.0",
   "description": "Ask in, plan out. The planner of Wren's research engine: typed queries with who proposed them and why, proposals merged into one plan under a plan file per ask kind, read-or-skip on hits, and the edge to take after a round. Pure functions and prompts; the model is injected.",
   "license": "PolyForm-Shield-1.0.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/wrenautomation/raven.git"
+    "url": "git+https://github.com/wrenautomation/engine.git",
+    "directory": "packages/raven"
   },
   "type": "module",
   "files": [
@@ -28,25 +29,13 @@
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@9.15.0",
   "scripts": {
-    "prepare": "git config core.hooksPath .githooks || true",
-    "lint": "biome check --error-on-warnings .",
-    "lint:fix": "biome check --write .",
     "typecheck": "tsc --noEmit",
-    "build": "rm -rf dist && tsc && chmod +x dist/app/cli.js",
-    "test": "vitest run",
-    "gates": "lockf -t 900 /tmp/wren_automation-checks.lock sh -c 'pnpm lint && pnpm typecheck && pnpm test'",
-    "prepublishOnly": "pnpm build"
+    "build": "rm -rf dist && tsc && chmod +x dist/app/cli.js"
   },
   "dependencies": {
+    "@wrenautomation/models": "workspace:*",
     "commander": "15.0.0",
     "zod": "4.6.5"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "2.5.14",
-    "@types/node": "22.20.3",
-    "typescript": "5.9.3",
-    "vitest": "5.0.1"
   }
 }

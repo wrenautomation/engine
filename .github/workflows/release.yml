@@ -1,0 +1,26 @@
+# Publish every package at a `v*` tag with no stored credential: GitHub signs the request and
+# npm checks the signature (trusted publishing), which also attaches provenance. Each package's
+# trusted publisher on npm points at this repository and this workflow file.
+name: release
+on:
+  push: { tags: ["v*"] }
+  workflow_dispatch:
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test
+      # Trusted publishing needs a recent npm; the one bundled with node may predate it.
+      - run: npm install -g npm@latest
+      - run: sh scripts/publish.sh
