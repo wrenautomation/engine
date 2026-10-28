@@ -11,7 +11,14 @@ export const isLadderTier = (tier: string | null | undefined): tier is LadderTie
 
 /** Whoever answers `web GET /fetch`: autobrowse's site client, or a test double. */
 export interface LadderClient {
-  call<T>(site: string, method: string, path: string, input?: unknown): Promise<T>;
+  /** `account`: the credential the call runs as (`reddit@alt`); the worker's default when absent. */
+  call<T>(
+    site: string,
+    method: string,
+    path: string,
+    input?: unknown,
+    o?: { account?: string },
+  ): Promise<T>;
 }
 
 /** One rung the ladder tried, and what it met there. */

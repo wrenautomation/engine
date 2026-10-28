@@ -368,6 +368,40 @@ describe("agent commands", () => {
     expect(b.gaps).toHaveLength(2);
   });
 
+  it("a site's own reader opens its URLs before the general openers, whatever the list's order", async () => {
+    const asked: string[] = [];
+    const general: Source = {
+      ...opener,
+      open: (h) => {
+        asked.push(`opener ${h.url}`);
+        return (opener.open as NonNullable<Source["open"]>)(h);
+      },
+    };
+    const site: Source = {
+      ...opener,
+      name: "site",
+      first: true,
+      opens: (url) => url.startsWith("https://b.example/"),
+      open: (h) => {
+        asked.push(`site ${h.url}`);
+        return (opener.open as NonNullable<Source["open"]>)(h);
+      },
+    };
+    const d = { ...deps(), sources: registry(fake, general, site) };
+    const { run } = await planRound(d, {
+      ask: { text: "how do staffing firms win repeat clients", kind: "web" },
+      planFile: { ...planFile, sources: ["fake", "opener", "site"] },
+      model: "m",
+    });
+    await open(
+      d,
+      run,
+      { urls: ["https://b.example/four", "https://a.example/one"], why: "order" },
+      agent,
+    );
+    expect(asked.sort()).toEqual(["opener https://a.example/one", "site https://b.example/four"]);
+  });
+
   it("learns: the next plan file version carries the changes, and nothing else moves", () => {
     const next = tunePlan(planFile, {
       sources: ["fake"],

@@ -12,7 +12,10 @@ their words reach the ledger through you as `--human` records.
 
 Set `WEAVER_AGENT` to your id (`claude-code`, `codex`, a name) once: every record you write
 names it. The ledger folder is `WEAVER_LEDGER` (default `./ledger`). Sources come from the
-environment; `weaver sources` lists what this machine can run.
+environment; `weaver sources` lists what this machine can run. A Reddit thread and a Facebook
+group post open through their own readers (`reddit`, `facebook`) before the page openers. Reddit
+reads signed out, then as the account `WEAVER_ACCOUNTS` names (`reddit=reddit@alt`); the person
+picks that account, never you.
 
 ## One run
 

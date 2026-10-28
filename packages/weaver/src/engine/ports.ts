@@ -28,6 +28,11 @@ export interface Source {
    */
   opens?(url: string): boolean;
   /**
+   * Opens only its own site's URLs, better than any general opener (a thread as data, not a
+   * fetched wall): it gets its turn before the rest, whatever the allow-list's order.
+   */
+  first?: true;
+  /**
    * The hit read whole. Throw with the reason when it was fetched and nothing usable came back
    * (a 403, a block, no reader for the media): the runner writes the spend `ok: false` with the
    * reason and the next opener gets its turn.

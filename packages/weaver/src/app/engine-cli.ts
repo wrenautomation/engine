@@ -53,15 +53,19 @@ import {
   type Who,
 } from "../engine/index.js";
 import { PoliteFetcher, userAgent } from "../fetch/fetcher.js";
+import type { LadderClient } from "../fetch/ladder.js";
 import { FilesLedger, type Ledger, type Problem, ulids } from "../ledger/index.js";
 import {
+  accountsFrom,
   exa,
+  facebookSource,
   fetcherSource,
   httpLadderClient,
   ingressLadderClient,
   ladderSource,
   ledgerSource,
   paste,
+  redditSource,
   searxng,
   ytdlpSource,
 } from "../sources/index.js";
@@ -144,26 +148,26 @@ export function sourcesHere(
   if (printed.WEAVER_CONTACT)
     out.push(fetcherSource({ fetcher: new PoliteFetcher(userAgent(printed.WEAVER_CONTACT)) }));
   else warn("no WEAVER_CONTACT (an email address or URL for site operators): pages stay unopened");
-  if (printed.AUTOBROWSE_URL)
-    out.push(
-      ladderSource({
-        sites: httpLadderClient({
-          url: printed.AUTOBROWSE_URL,
-          token: printed.AUTOBROWSE_TOKEN ?? null,
-        }),
-      }),
-    );
-  else if (printed.RESTATE_INGRESS_URL)
-    out.push(
-      ladderSource({
-        sites: ingressLadderClient({
+  const sites: LadderClient | null = printed.AUTOBROWSE_URL
+    ? httpLadderClient({ url: printed.AUTOBROWSE_URL, token: printed.AUTOBROWSE_TOKEN ?? null })
+    : printed.RESTATE_INGRESS_URL
+      ? ingressLadderClient({
           url: printed.RESTATE_INGRESS_URL,
           token: printed.RESTATE_AUTH_TOKEN ?? null,
           ...(printed.AUTOBROWSE_SERVICE ? { service: printed.AUTOBROWSE_SERVICE } : {}),
           caller: `weaver:${printed.WEAVER_AGENT ?? "runner"}`,
-        }),
-      }),
+        })
+      : null;
+  if (sites) {
+    // The account each site reader signs in as: the caller's choice, never a default here.
+    const accounts = accountsFrom(printed.WEAVER_ACCOUNTS);
+    const reddit = accounts.get("reddit");
+    out.push(
+      ladderSource({ sites }),
+      redditSource({ sites, ...(reddit ? { account: reddit } : {}) }),
+      facebookSource({ sites }),
     );
+  }
   out.push(ledgerSource(ledger));
   return registry(...out);
 }

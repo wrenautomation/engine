@@ -327,7 +327,9 @@ export async function readHits(
   state: RunState,
   hits: readonly HitRecord[],
 ): Promise<StepResult> {
-  const openers = sourcesOf(ctx, state).filter((s) => s.open);
+  const listed = sourcesOf(ctx, state).filter((s) => s.open);
+  // A site's own reader before the general openers; the allow-list's order inside each.
+  const openers = [...listed.filter((s) => s.first), ...listed.filter((s) => !s.first)];
   if (hits.length && !openers.length)
     return { ok: false, note: "no open source in the allow-list" };
   let transient: Transient | null = null;

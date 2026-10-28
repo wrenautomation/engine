@@ -21,7 +21,7 @@ Three more doors run the research engine (wren's `designs/2026-10-26-research-en
 | Import | Does |
 |---|---|
 | `@wrenautomation/weaver/engine` | `Source` (a name, `search` and/or `open`, a cost), `registry` and the plan's allow-list; the agent's calls (`planRound`, `search`, `open`, `extract`, `check`, `add`, `brief`), one step each; `run(deps, options)`: plan, fetch, triage, read, extract, check (a sample of findings against their documents), review, round after round until raven's edge says stop; `fold` rebuilds a run's state from its records, so a run resumes from the step it stopped on; `Transient`, the failure worth another try; raven's `Model`, `Ask`, `PlanFile` and record shapes re-exported, so a host pins weaver alone |
-| `@wrenautomation/weaver/sources` | `searxng`, `exa` (search), `youtube` (search and read, yt-dlp), `fetcher` (open, the polite fetcher), `ladder` (open, autobrowse's fetch ladder up to a browser), `paste` (a person's URLs), `ledger` (hits earlier runs saw) |
+| `@wrenautomation/weaver/sources` | `searxng`, `exa` (search), `youtube` (search and read, yt-dlp), `fetcher` (open, the polite fetcher), `ladder` (open, autobrowse's fetch ladder up to a browser), `reddit` and `facebook` (open a thread or a group post through autobrowse's site routes), `paste` (a person's URLs), `ledger` (hits earlier runs saw) |
 | `@wrenautomation/weaver/ledger` | the records (`query`, `hit`, `document`, `finding`, `verdict`, `call`, `spend`, `snapshot`, `edge`, `done`, `steer`, `gap`, `check`, `pattern`, `found`), `FilesLedger` (a folder: `runs/<run>/<writer>.jsonl`, `plans/<kind>.json`), `MemoryLedger`, yield rows per source, person, channel and kind |
 
 Every record carries `from` (ai, human or tool) and `by` (a model id, a source, a person). A
@@ -137,11 +137,19 @@ proxy), `EXA_API_KEY` (or `_1..n`), `GEMINI_API_KEY` for videos without captions
 `WEAVER_CONTACT` for the fetcher (no contact, no page opens), and for the ladder either
 `AUTOBROWSE_URL` and `AUTOBROWSE_TOKEN` (a worker's HTTP face) or `RESTATE_INGRESS_URL` and
 `RESTATE_AUTH_TOKEN` (the Restate ingress a desk worker sits behind: `POST /desk/call`;
-`AUTOBROWSE_SERVICE` for another service name). The ledger folder is `--ledger` or
+`AUTOBROWSE_SERVICE` for another service name). The same worker gives the `reddit` and
+`facebook` readers. `WEAVER_ACCOUNTS` names the account each site reader may sign in as
+(`reddit=reddit@alt`); a site with no entry reads signed out only. The ledger folder is `--ledger` or
 `WEAVER_LEDGER` (default `./ledger`); `--writer` or `WEAVER_WRITER` names your file in it.
 
 Each open source claims the URLs it opens (`opens`): `youtube` a YouTube page, `fetcher` and
-`ladder` any other http(s) page. The read step asks before a call, so a source that was never
+`ladder` any other http(s) page, `reddit` a Reddit thread or comment permalink, `facebook` a
+public group post. A site's own reader (`first`) gets its turn before the general openers,
+whatever the allow-list's order: it answers the thread as data, where a fetched page is a wall.
+`reddit` reads signed out first (`reddit-public`, the thread's feed); only when that misses and
+`WEAVER_ACCOUNTS` names an account does it ask again signed in as it. `facebook` is always
+signed out. A spent cap or a refused read is a miss; a busy profile (503) or no answer retries.
+The read step asks before a call, so a source that was never
 going to open a hit writes no spend. A page that was fetched with nothing usable (a 403, a block
 the ladder's last rung still hit, a media no reader takes, a ladder answer that is not HTML such
 as a PDF) is a miss: the source throws, its `spend` says `ok: false` with the reason, the next

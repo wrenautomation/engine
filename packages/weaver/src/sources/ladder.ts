@@ -75,15 +75,22 @@ export function httpLadderClient(o: {
   const fetchFn = o.fetchFn ?? fetch;
   const base = o.url.replace(/\/$/, "");
   return {
-    async call<T>(site: string, method: string, path: string, input?: unknown): Promise<T> {
+    async call<T>(
+      site: string,
+      method: string,
+      path: string,
+      input?: unknown,
+      as?: { account?: string },
+    ): Promise<T> {
       const read = method === "GET" || method === "DELETE";
       let url = `${base}/api/sites/${site}${path}`;
-      if (read && input && typeof input === "object") {
-        const q = new URLSearchParams();
+      const q = new URLSearchParams();
+      if (read && input && typeof input === "object")
         for (const [k, v] of Object.entries(input as Record<string, unknown>))
           if (v !== undefined) q.set(k, String(v));
-        if (q.size) url += `?${q}`;
-      }
+      // autobrowse takes `account` beside the query, for writes too.
+      if (as?.account) q.set("account", as.account);
+      if (q.size) url += `?${q}`;
       const res = await fetchFn(url, {
         method,
         headers: {
@@ -123,7 +130,13 @@ export function ingressLadderClient(o: {
   const service = o.service ?? "desk";
   const caller = o.caller ?? "weaver";
   return {
-    async call<T>(site: string, method: string, path: string, input?: unknown): Promise<T> {
+    async call<T>(
+      site: string,
+      method: string,
+      path: string,
+      input?: unknown,
+      as?: { account?: string },
+    ): Promise<T> {
       const res = await fetchFn(`${base}/${service}/call`, {
         method: "POST",
         headers: {
@@ -131,7 +144,14 @@ export function ingressLadderClient(o: {
           "idempotency-key": crypto.randomUUID(),
           ...(o.token ? { authorization: `Bearer ${o.token}` } : {}),
         },
-        body: JSON.stringify({ site, method, path, input: input ?? {}, caller }),
+        body: JSON.stringify({
+          site,
+          method,
+          path,
+          input: input ?? {},
+          caller,
+          ...(as?.account ? { account: as.account } : {}),
+        }),
         signal: AbortSignal.timeout(180_000),
       });
       const text = await res.text();
