@@ -1,6 +1,6 @@
 # engine
 
-Wren's research and reading engine: four npm packages in one repo, one version, one `v*` tag.
+Wren's research and reading engine, and the map engine: five npm packages in one repo, one version, one `v*` tag.
 
 | Package | Does | Depends on |
 |---|---|---|
@@ -8,6 +8,7 @@ Wren's research and reading engine: four npm packages in one repo, one version, 
 | [`@wrenautomation/raven`](packages/raven) | Plans: an ask in, typed queries out (each with `why`, `from`, `by`), plan files per ask kind, read-or-skip on hits, the edge after a round. | models |
 | [`@wrenautomation/falcon`](packages/falcon) | Reads bytes: HTML and PDF to text, `watch` over a video file, captions and audio to markdown, the study core, claims that quote a page. | models |
 | [`@wrenautomation/weaver`](packages/weaver) | Brings the web in and runs the loop: the polite fetcher, robots, the fetch ladder, video and podcast readers over a URL, the engine's runner, its sources and the ledger. | models, raven, falcon |
+| [`@wrenautomation/orrery`](packages/orrery) | The logic of a map you fold: the fold tree, nested layout over a layout engine you pass, the glide between frames. No renderer. | nothing of ours |
 
 A model call goes through models, never a vendor API or SDK in the caller. Weaver depends on
 falcon, never the reverse.

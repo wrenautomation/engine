@@ -8,7 +8,7 @@ if [ -n "$GITHUB_REF_NAME" ] && [ "$GITHUB_REF_NAME" != "v$v" ]; then
   echo "tag $GITHUB_REF_NAME is not v$v"; exit 1
 fi
 mkdir -p .pack
-for name in models raven falcon weaver; do
+for name in models raven falcon weaver orrery; do
   dir="packages/$name"
   pkg="$(node -p "require('./$dir/package.json').name")"
   if npm view "$pkg@$v" version >/dev/null 2>&1; then echo "$pkg@$v is on npm"; continue; fi

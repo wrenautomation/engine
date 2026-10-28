@@ -22,7 +22,7 @@ function pruneLeakedRuns(): void {
   }
 }
 pruneLeakedRuns();
-const PACKAGES = ["models", "raven", "falcon", "weaver"];
+const PACKAGES = ["models", "raven", "falcon", "weaver", "orrery"];
 
 // One run over every package. Only the sources: a build leaves compiled tests in dist/.
 export default defineConfig({

@@ -1,0 +1,31 @@
+{
+  "name": "@wrenautomation/orrery",
+  "version": "0.23.0",
+  "description": "The logic of a map you fold: the fold tree, nested layout over any engine, and the glide between frames. No renderer, no framework.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wrenautomation/engine.git",
+    "directory": "packages/orrery"
+  },
+  "license": "PolyForm-Strict-1.0.0",
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "README.md",
+    "LICENSE.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "rm -rf dist && tsc"
+  }
+}

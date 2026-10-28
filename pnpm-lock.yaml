@@ -66,6 +66,8 @@ importers:
         specifier: 4.6.5
         version: 4.6.5
 
+  packages/orrery: {}
+
   packages/raven:
     dependencies:
       '@wrenautomation/models':
