@@ -52,6 +52,7 @@ run the runner made. Every command prints JSON.
 ```sh
 export WEAVER_AGENT=claude-code                     # the agent's id on every record it writes
 weaver plan "how do staffing firms win repeat clients" --known "referrals convert"   # a run; prints its id
+weaver plan "who buys growth help" --premise "coaches are the buyer"   # a premise gets a tree facet that tests it
 weaver brief 01M5YS...                              # the ask, budget, sources, what is open, hits, findings, cost
 weaver recall staffing repeat clients --not 01M5YS... # earlier runs' findings: quote, URL, source date, run; --also <ledger> per extra folder
 weaver search 01M5YS... "staffing repeat client rate" --why "the ask's words"       # one query, then every searcher
@@ -195,7 +196,9 @@ round's plan reads them, and the review's why on `again`, under "The last round 
 `add edge back --to <step>` writes a person's edge: the fold takes it like raven's. A `pattern`
 (`add pattern`) is what several kept findings say together, in the agent's words; its count of
 distinct sites is computed from the findings' proofs, never claimed, and `brief.patterns` lists
-them for the report.
+them for the report. A `draft` (`add draft`, JSON items on stdin) is a rough draft over the kept
+findings and patterns: falcon's draft gate drops an item that cites nothing kept or has a number
+no cited quote has. `brief.draft` shows the latest. It is never the final write.
 
 The check step reads a sample of the round's kept findings (`budget.checks`, 3 by default;
 spread across documents) against the text around each quote. The extract gate proves a quote is

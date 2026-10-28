@@ -8,6 +8,7 @@
  * brief shows it, nothing cuts a query or stops a round by it.
  */
 import { type ClaimAnswer, gateFindings, patternOf } from "@wrenautomation/falcon/document";
+import { gateDrafts, type NumberedClaim } from "@wrenautomation/falcon/study";
 import { isTransient } from "@wrenautomation/models";
 import {
   type AskKind,
@@ -17,10 +18,12 @@ import {
   QueryTree,
   type TreeGuide,
   treeOf,
+  withPremises,
   type YieldRow,
 } from "@wrenautomation/raven";
 import {
   type DocumentRecord,
+  type DraftRecord,
   type Envelope,
   type FindingRecord,
   type From,
@@ -116,6 +119,8 @@ export interface AskInput {
   text: string;
   kind: AskKind;
   known?: readonly string[];
+  /** What the ask takes as given: the tree tests each in a `premise` facet. */
+  premises?: readonly string[];
   site?: string;
 }
 
@@ -151,10 +156,15 @@ export async function planRound(deps: Deps, input: PlanInput): Promise<Did> {
   if (!base) throw new Error("a new run needs an ask");
   for (const name of input.planFile.sources)
     if (!deps.sources.has(name)) throw new Error(`no source named ${name}`);
+  const { known, premises } = withPremises({
+    known: [...new Set([...(base.known ?? []), ...found(state)])],
+    premises: base.premises ?? [],
+  });
   const ask = {
     text: base.text,
     kind: base.kind,
-    known: [...new Set([...(base.known ?? []), ...found(state)])],
+    known,
+    premises,
     steer: [...new Set([...(last?.steer ?? []), ...state.steers.map((s) => s.text)])],
     open: round > 1 ? openAfter(state, round - 1) : [],
     ...(base.site ? { site: base.site } : {}),
@@ -302,10 +312,22 @@ export function treeView(state: RunState, round: number, guide: TreeGuide): Tree
   };
 }
 
-/** The guide a run's tree runs under: the kind's stored plan file, else its default. */
-async function guideOf(deps: Deps, kind: AskKind): Promise<TreeGuide> {
-  return treeOf((await deps.ledger.readPlan?.(kind)) ?? defaultPlanFile(kind));
+/**
+ * The guide a run's tree runs under: the kind's stored plan file, else its default. An ask with
+ * premises adds a facet that tests them, so the tree says when no query did.
+ */
+async function guideOf(
+  deps: Deps,
+  ask: { kind: AskKind; premises?: readonly string[] },
+): Promise<TreeGuide> {
+  const guide = treeOf((await deps.ledger.readPlan?.(ask.kind)) ?? defaultPlanFile(ask.kind));
+  return ask.premises?.length ? { ...guide, facets: [...guide.facets, PREMISE_FACET] } : guide;
 }
+
+const PREMISE_FACET = {
+  name: "premise",
+  why: "test what the ask or the known list takes as given: does it hold?",
+};
 
 export interface TreeDid extends Did {
   tree: TreeView;
@@ -336,9 +358,9 @@ export async function searchTree(
   QueryTree.parse(tree);
   const first = await stateOf(deps, run);
   planned(first);
-  const kind = (first.snapshot as NonNullable<RunState["snapshot"]>).ask.kind;
+  const ask = (first.snapshot as NonNullable<RunState["snapshot"]>).ask;
   const round = first.round;
-  const guide = await guideOf(deps, kind);
+  const guide = await guideOf(deps, ask);
   const names = new Set<string>();
   for (const f of tree.facets) {
     if (names.has(f.name)) throw new Error(`facet "${f.name}" twice`);
@@ -382,7 +404,7 @@ export async function searchTree(
         await ctx.write(
           {
             type: "query",
-            kind,
+            kind: ask.kind,
             terms,
             why: leaf.why,
             facet: facet.name,
@@ -554,7 +576,15 @@ export type Addition =
   | { type: "edge"; next: Edge["next"]; to?: Edge["to"]; why: string }
   | { type: "steer"; text: string }
   | { type: "gap"; note: string; on?: string }
-  | { type: "pattern"; text: string; findings: string[] };
+  | { type: "pattern"; text: string; findings: string[] }
+  | { type: "draft"; for: string; items: DraftInput[] };
+
+/** One item of a draft as the agent writes it: cites are finding or pattern ids. */
+export interface DraftInput {
+  title?: string | null;
+  body?: string | null;
+  cites?: string[] | null;
+}
 
 export interface Added {
   record: Shown;
@@ -572,7 +602,11 @@ export interface Added {
 export async function add(deps: Deps, run: string, a: Addition, who: Who): Promise<Added> {
   const state = await stateOf(deps, run);
   const round =
-    a.type === "query" || a.type === "finding" || a.type === "pattern" || a.type === "check"
+    a.type === "query" ||
+    a.type === "finding" ||
+    a.type === "pattern" ||
+    a.type === "check" ||
+    a.type === "draft"
       ? state.round
       : personRound(state);
   const warnings: string[] = [];
@@ -696,6 +730,42 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
       if (pattern.sources < 2) warnings.push("one source: a claim, not a pattern yet");
       return { record: await write({ type: "pattern", ...pattern }), warnings };
     }
+    case "draft": {
+      if (!a.for.trim()) throw new Error("draft: say what it is for");
+      // Falcon's gate numbers its claims: each kept finding is one, a pattern stands for its findings.
+      const keptOnes = state.findings.filter((f) => kept(state, f));
+      const claims: NumberedClaim[] = keptOnes.map((f, i) => ({
+        n: i + 1,
+        angle: 0,
+        claim: f.text,
+        quote: f.proof.quote ?? "",
+        source_url: f.proof.url,
+      }));
+      const nOf = new Map(keptOnes.map((f, i) => [f.id, i + 1]));
+      const onPattern = new Map(state.patterns.map((p) => [p.id, p.findings]));
+      const ns = (id: string) => (onPattern.get(id) ?? [id]).map((f) => nOf.get(f) ?? 0);
+      const spec = { key: "draft", ask: a.for };
+      const items: DraftRecord["items"] = [];
+      const dropped: DraftRecord["dropped"] = [];
+      // One item at a time: the gate's cap is a model's, not the agent's.
+      for (const item of a.items) {
+        const cites = [...new Set(item.cites ?? [])];
+        const out = gateDrafts(
+          { items: [{ title: item.title ?? "", body: item.body ?? "", cites: cites.flatMap(ns) }] },
+          spec,
+          claims,
+        );
+        const ok = out.kept[0];
+        if (ok) items.push({ title: ok.title, body: ok.body, cites });
+        else for (const d of out.dropped) dropped.push(d);
+      }
+      for (const d of dropped) warnings.push(`item "${d.title}" dropped at the gate: ${d.why}`);
+      if (!items.length)
+        throw new Error(
+          `draft: every item failed the gate (${dropped.map((d) => d.why).join(", ") || "no items"}): cite kept findings or patterns, and take each number from a cited quote`,
+        );
+      return { record: await write({ type: "draft", for: a.for, items, dropped }), warnings };
+    }
   }
 }
 
@@ -762,6 +832,8 @@ export interface Brief {
   checks: { on: string; ok: boolean; why: string }[];
   /** What the agent says several findings say together, with the count of distinct sites. */
   patterns: { id: string; round: number; text: string; findings: string[]; sources: number }[];
+  /** The latest rough draft, or null: never the final. */
+  draft: { id: string; round: number; for: string; items: DraftRecord["items"] } | null;
   verdicts: { document: string; url: string; quality: string; gap?: string }[];
   /** This round's query tree with what each try wrote; null when the round's queries are flat. */
   tree: TreeView | null;
@@ -795,7 +867,7 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
     [...new Set([...(qOf.get(hit) ?? [])].flatMap((q) => facetOf.get(q) ?? []))].sort();
   const tree =
     s && state.queries.some((q) => q.round === round && q.facet)
-      ? treeView(state, round, await guideOf(deps, s.ask.kind))
+      ? treeView(state, round, await guideOf(deps, s.ask))
       : null;
   return {
     run,
@@ -830,6 +902,10 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
       findings,
       sources,
     })),
+    draft: (() => {
+      const d = state.drafts.at(-1);
+      return d ? { id: d.id, round: d.round, for: d.for, items: d.items } : null;
+    })(),
     verdicts: state.verdicts.map((v) => ({
       document: v.document,
       url: urlOf.get(v.document) ?? v.document,

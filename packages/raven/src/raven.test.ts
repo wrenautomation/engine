@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { fill } from "./model.js";
 import { mergeProposals, plan, proposePrompt } from "./plan.js";
 import { defaultPlanFile, PLAN_KINDS } from "./plans/index.js";
+import { renderKnown, withPremises } from "./render.js";
 import { review, reviewPrompt } from "./review.js";
 import { dedupeHits, SKIPPED, triage, triagePrompt } from "./triage.js";
 import { Ask, type Plan, PlanFile, type Proposal, Round } from "./types.js";
@@ -11,11 +12,33 @@ const ask: Ask = {
   text: "how do staffing firms win repeat clients",
   kind: "web",
   known: ["referrals convert"],
+  premises: [],
   steer: [],
   open: [],
 };
 
 describe("fill", () => {
+  it("moves a known line with no source to the premises, and renders them apart", () => {
+    const split = withPremises({
+      known: [
+        "referrals convert",
+        "a rate (https://a.example/x)",
+        "a finding 01M61SBB47Q88Y4D5TV8PZ1WH4",
+      ],
+      premises: ["the buyer is a coach"],
+    });
+    expect(split.known).toEqual([
+      "a rate (https://a.example/x)",
+      "a finding 01M61SBB47Q88Y4D5TV8PZ1WH4",
+    ]);
+    expect(split.premises).toEqual(["the buyer is a coach", "referrals convert"]);
+    expect(withPremises(split)).toEqual(split);
+    expect(renderKnown(split)).toBe(
+      "- a rate (https://a.example/x)\n- a finding 01M61SBB47Q88Y4D5TV8PZ1WH4\nTaken as given, with no source (test each one: it may be wrong):\n- the buyer is a coach\n- referrals convert",
+    );
+    expect(renderKnown({ known: [], premises: [] })).toBe("(nothing)");
+  });
+
   it("fills marks and leaves unknown ones", () => {
     expect(fill("{a} and {b}", { a: "x" })).toBe("x and {b}");
   });

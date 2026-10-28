@@ -10,7 +10,14 @@
 
 import { checkFinding, type Document } from "@wrenautomation/falcon/document";
 import { isTransient, type Model, type Transient } from "@wrenautomation/models";
-import { dedupeHits, defaultPlanFile, plan, review, triage } from "@wrenautomation/raven";
+import {
+  dedupeHits,
+  defaultPlanFile,
+  plan,
+  review,
+  triage,
+  withPremises,
+} from "@wrenautomation/raven";
 import type {
   DocumentRecord,
   Envelope,
@@ -150,11 +157,14 @@ export const planStep: StepFn = async (ctx, state) => {
   if (!ask) return { ok: false, note: "no ask: a new run needs one" };
   const planFile = ctx.options.planFile ?? defaultPlanFile(ask.kind);
   const yieldRows = await ctx.deps.ledger.yield();
-  const known = [...new Set([...(ask.known ?? []), ...found(state)])];
+  const { known, premises } = withPremises({
+    known: [...new Set([...(ask.known ?? []), ...found(state)])],
+    premises: ask.premises ?? [],
+  });
   const steer = [...new Set([...(ask.steer ?? []), ...state.steers.map((s) => s.text)])];
   const open = ctx.round > 1 ? openAfter(state, ctx.round - 1) : [];
   const p = await plan({
-    ask: { ...ask, known, steer, open },
+    ask: { ...ask, known, premises, steer, open },
     planFile,
     model: ctx.model,
     proposals: ctx.round === 1 ? (ctx.options.proposals ?? []) : [],

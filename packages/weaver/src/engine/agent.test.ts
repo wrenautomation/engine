@@ -224,6 +224,43 @@ describe("agent commands", () => {
       add(d, runId, { type: "pattern", text: "x", findings: ["nope"] }, agent),
     ).rejects.toThrow("no finding nope");
 
+    // A rough draft: each item cites kept findings or patterns, and its numbers come from them.
+    const draft = await add(
+      d,
+      runId,
+      {
+        type: "draft",
+        for: "a decision memo",
+        items: [
+          {
+            title: "Repeat work",
+            body: "38% of placements came from repeat clients.",
+            cites: [pattern.record.id],
+          },
+          { title: "Ads", body: "Ads bring 60% of placements.", cites: [keptIds[1] ?? ""] },
+          { title: "Ghost", body: "Something.", cites: ["nope"] },
+        ],
+      },
+      agent,
+    );
+    if (draft.record.type !== "draft") throw new Error("no draft");
+    expect(draft.record.items).toEqual([
+      {
+        title: "Repeat work",
+        body: "38% of placements came from repeat clients.",
+        cites: [pattern.record.id],
+      },
+    ]);
+    expect(draft.record.dropped).toEqual([
+      { title: "Ads", why: "number_not_cited" },
+      { title: "Ghost", why: "unknown_cite" },
+    ]);
+    expect(draft.warnings).toHaveLength(2);
+    expect((await brief(d, runId)).draft?.id).toBe(draft.record.id);
+    await expect(
+      add(d, runId, { type: "draft", for: "x", items: [{ body: "x", cites: [] }] }, agent),
+    ).rejects.toThrow("every item failed the gate (no_cites)");
+
     await add(d, runId, { type: "steer", text: "numbers only" }, will);
     await expect(add(d, runId, { type: "steer", text: "x" }, agent)).rejects.toThrow("--human");
     const edge = await add(d, runId, { type: "edge", next: "again", why: "thin" }, agent);
@@ -448,6 +485,30 @@ describe("agent commands", () => {
     // Every searcher it went to answered empty: still a gap.
     const gaps = (await d.ledger.trace(run)).filter((r) => r.type === "gap");
     expect(gaps).toHaveLength(3);
+  });
+
+  it("tests what the ask takes as given: a known line with no source is a premise", async () => {
+    const d = deps();
+    const { run } = await planRound(d, {
+      ask: {
+        text: "who buys growth help",
+        kind: "web",
+        known: ["Coaches buy growth help", "Setters cost $2k (https://a.example/one)"],
+        premises: ["The offer is a revenue share"],
+      },
+      planFile,
+      model: "m",
+    });
+    const b = await brief(d, run);
+    expect(b.ask?.known).toEqual(["Setters cost $2k (https://a.example/one)"]);
+    expect(b.ask?.premises).toEqual(["The offer is a revenue share", "Coaches buy growth help"]);
+    const tree = (facets: string[]) => ({
+      facets: facets.map((name) => ({ name, why: "w", tries: [[{ terms: name, why: "w" }]] })),
+    });
+    const untested = await searchTree(d, run, tree(["number"]), agent);
+    expect(untested.tree.uncovered).toContain("premise");
+    const tested = await searchTree(d, run, tree(["how", "premise"]), agent);
+    expect(tested.tree.uncovered).not.toContain("premise");
   });
 
   it("recalls what earlier runs found: quote, date and run, dropped ones left out", async () => {

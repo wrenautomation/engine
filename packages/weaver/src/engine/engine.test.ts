@@ -230,7 +230,9 @@ describe("runner", () => {
       [s.documents[2]?.id, "thin"],
     ]);
     expect(s.verdicts[0]).toMatchObject({ from: "ai", by: "m", step: "extract", round: 1 });
-    expect(s.snapshot?.known).toEqual(["38% of placements came from repeat clients."]);
+    expect(s.snapshot?.known).toEqual([
+      "38% of placements came from repeat clients. (https://a.example/one)",
+    ]);
     expect(s.edges.map((e) => e.next)).toEqual(["again", "stop"]);
     const rows = await d.ledger.yield({ source: "fake" });
     expect(rows[0]).toEqual({ source: "fake", hits: 4, reads: 3, proposed: 2, kept: 2 });

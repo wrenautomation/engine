@@ -4,6 +4,35 @@ import type { HitView, YieldRow } from "./types.js";
 export const lines = (xs: readonly string[], none = "(nothing)"): string =>
   xs.length ? xs.map((x) => `- ${x}`).join("\n") : none;
 
+/** A line with a URL or a ledger id on it: a fact someone can go and check. */
+export const sourced = (line: string): boolean =>
+  /https?:\/\/\S|\b[0-9A-HJKMNP-TV-Z]{26}\b/.test(line);
+
+/**
+ * The ask with each known line that names no source moved to its premises. A run seeded with
+ * "the buyer is X" plans inside X unless something tests X; a sourced line is looked past.
+ */
+export function withPremises<A extends { known?: readonly string[]; premises?: readonly string[] }>(
+  ask: A,
+): A & { known: string[]; premises: string[] } {
+  const known = ask.known ?? [];
+  return {
+    ...ask,
+    known: known.filter(sourced),
+    premises: [...new Set([...(ask.premises ?? []), ...known.filter((l) => !sourced(l))])],
+  };
+}
+
+/** The known lines, then the premises under their own heading, or nothing more. */
+export const renderKnown = (ask: {
+  known: readonly string[];
+  premises?: readonly string[];
+}): string =>
+  lines(ask.known) +
+  (ask.premises?.length
+    ? `\nTaken as given, with no source (test each one: it may be wrong):\n${lines(ask.premises)}`
+    : "");
+
 /** "The person says:" and their lines, or nothing: a prompt pays for the heading only when there is one. */
 export const renderSteer = (steer: readonly string[] | undefined): string =>
   steer?.length ? `The person says:\n${lines(steer)}\n` : "";

@@ -14,6 +14,7 @@ import { modelFromSpec, SPEC_NAMES } from "@wrenautomation/models/spec";
 import { Command } from "commander";
 import { plan } from "../plan.js";
 import { defaultPlanFile, PLAN_KINDS } from "../plans/index.js";
+import { withPremises } from "../render.js";
 import { review } from "../review.js";
 import { triage } from "../triage.js";
 import { AskKind, HitView, Plan, PlanFile, type Proposal, Round, YieldRow, z } from "../types.js";
@@ -92,9 +93,9 @@ withModel(
   ) => {
     const kind = AskKind.parse(o.kind);
     const ask = {
+      ...withPremises({ known: o.known, premises: [] }),
       text,
       kind,
-      known: o.known,
       steer: o.steer,
       open: [],
       ...(o.site ? { site: o.site } : {}),

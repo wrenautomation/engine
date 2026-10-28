@@ -19,6 +19,8 @@ export const Ask = z.object({
   kind: AskKind,
   /** Facts already in hand, one line each: the planner looks past them. */
   known: z.array(z.string()).default([]),
+  /** Lines taken as given with no source behind them: the plan tests each, never looks past it. */
+  premises: z.array(z.string()).default([]),
   /** What the person said along the way, one line each: every prompt renders it first. */
   steer: z.array(z.string()).default([]),
   /** What the last round left open, one line each: its review's why, its gaps. The planner looks there first. */

@@ -76,6 +76,8 @@ export interface RunOptions {
     text: string;
     kind: PlanFile["kind"];
     known?: string[];
+    /** What the ask takes as given; a known line with no source joins them. */
+    premises?: string[];
     /** What the person says at the start; `steer` records add to it between rounds. */
     steer?: string[];
     site?: string;

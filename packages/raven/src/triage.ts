@@ -7,7 +7,14 @@
 import type { Model } from "@wrenautomation/models";
 import { fill } from "./model.js";
 import { ageOf, defaultPlanFile } from "./plans/index.js";
-import { lines, renderAge, renderHits, renderOpen, renderSteer, renderYield } from "./render.js";
+import {
+  renderAge,
+  renderHits,
+  renderKnown,
+  renderOpen,
+  renderSteer,
+  renderYield,
+} from "./render.js";
 import {
   HitView,
   type HitViewIn,
@@ -58,7 +65,7 @@ export function triagePrompt(
     steer: renderSteer(plan.ask.steer),
     open: renderOpen(plan.ask.open),
     age: renderAge(ageOf(planFile)),
-    known: lines(plan.ask.known),
+    known: renderKnown(plan.ask),
     yield: renderYield(yieldRows),
     hits: renderHits(hits),
   });

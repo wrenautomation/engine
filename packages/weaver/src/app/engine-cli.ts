@@ -37,6 +37,7 @@ import {
   check,
   costOf,
   type Did,
+  type DraftInput,
   extract,
   fold,
   joined,
@@ -316,7 +317,14 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       "run an ask through plan, fetch, triage, read, extract, check and review; prints the run as JSON",
     )
     .option("--kind <kind>", `one of ${PLAN_KINDS.join(", ")}`, "web")
-    .option("--known <line...>", "what is known already, one line each")
+    .option(
+      "--known <line...>",
+      "what is known already, one line each, with its URL or ledger id; a line without one is a premise",
+    )
+    .option(
+      "--premise <line...>",
+      "what the ask takes as given (a buyer, an offer, a price): the tree tests each",
+    )
     .option("--steer <line...>", "what you say to the model, first in every prompt")
     .option("--site <host>", "the site the ask is about")
     .option(
@@ -339,6 +347,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
         o: Common & {
           kind: string;
           known?: string[];
+          premise?: string[];
           steer?: string[];
           site?: string;
           sources?: string[];
@@ -388,6 +397,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
                   text: ask,
                   kind,
                   known: o.known ?? [],
+                  premises: o.premise ?? [],
                   steer: o.steer ?? [],
                   ...(o.site ? { site: o.site } : {}),
                 },
@@ -472,7 +482,14 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     )
     .option("--run <id>", "the run whose next round to open")
     .option("--kind <kind>", `one of ${PLAN_KINDS.join(", ")}`, "web")
-    .option("--known <line...>", "what is known already, one line each")
+    .option(
+      "--known <line...>",
+      "what is known already, one line each, with its URL or ledger id; a line without one is a premise",
+    )
+    .option(
+      "--premise <line...>",
+      "what the ask takes as given (a buyer, an offer, a price): the tree tests each",
+    )
     .option("--site <host>", "the site the ask is about")
     .option(
       "--sources <name...>",
@@ -487,6 +504,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
             run?: string;
             kind: string;
             known?: string[];
+            premise?: string[];
             site?: string;
             sources?: string[];
           },
@@ -506,6 +524,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
                     text: ask,
                     kind,
                     known: o.known ?? [],
+                    premises: o.premise ?? [],
                     ...(o.site ? { site: o.site } : {}),
                   },
                 }
@@ -730,6 +749,19 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     .action((runId: string, text: string, o: Common & Agent & { on: string[] }) =>
       added(o, runId, { type: "pattern", text, findings: o.on }),
     );
+
+  agent(common(adds.command("draft <run>")))
+    .description(
+      "a rough draft over the run's kept findings and patterns, on stdin as JSON [{title, body, cites: [finding or pattern id...]}]: an item that cites nothing kept, or has a number no cited finding has, is dropped. A draft, never the final",
+    )
+    .requiredOption("--for <what>", "what it is for: a decision memo, an SOP outline")
+    .action(async (runId: string, o: Common & Agent & { for: string }) => {
+      const parsed: unknown = JSON.parse(await stdinText());
+      const items = Array.isArray(parsed) ? parsed : (parsed as { items?: unknown } | null)?.items;
+      if (!Array.isArray(items))
+        throw new Error("draft: stdin is a JSON array of items, or {items}");
+      return added(o, runId, { type: "draft", for: o.for, items: items as DraftInput[] });
+    });
 
   common(program.command("learn <kind>"))
     .description(

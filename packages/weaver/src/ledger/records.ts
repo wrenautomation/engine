@@ -48,6 +48,7 @@ export const RECORD_TYPES = [
   "check",
   "pattern",
   "found",
+  "draft",
 ] as const;
 export const RecordType = z.enum(RECORD_TYPES);
 export type RecordType = z.infer<typeof RecordType>;
@@ -214,6 +215,30 @@ export const FoundRecord = Envelope.extend({
 });
 export type FoundRecord = z.infer<typeof FoundRecord>;
 
+/**
+ * A rough synthesis over the run's kept findings and patterns: options, a pick, the gap that
+ * would change it. Each item cites finding or pattern ids, and each number in it is in a cited
+ * finding (falcon's draft gate). A draft, never the final: a person or an agent polishes it
+ * outside the ledger.
+ */
+export const DraftRecord = Envelope.extend({
+  type: z.literal("draft"),
+  /** What it is for: "a decision memo", "an SOP outline". */
+  for: z.string().min(1),
+  items: z
+    .array(
+      z.object({
+        title: z.string(),
+        body: z.string().min(1),
+        cites: z.array(z.string().min(1)).min(1),
+      }),
+    )
+    .min(1),
+  /** Items the gate dropped, with why. */
+  dropped: z.array(z.object({ title: z.string(), why: z.string() })).default([]),
+});
+export type DraftRecord = z.infer<typeof DraftRecord>;
+
 export const LedgerRecord = z.discriminatedUnion("type", [
   QueryRecord,
   HitRecord,
@@ -230,6 +255,7 @@ export const LedgerRecord = z.discriminatedUnion("type", [
   CheckRecord,
   PatternRecord,
   FoundRecord,
+  DraftRecord,
 ]);
 export type LedgerRecord = z.infer<typeof LedgerRecord>;
 

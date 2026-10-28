@@ -21,7 +21,7 @@ picks that account, never you.
 
 ```sh
 weaver recall <terms> [--not <run>] [--also <ledger>...]   # what earlier runs found: quote, URL, source date, run, who wrote it
-weaver plan "<the ask>" [--kind web|video|site|channel|person] [--known "<fact>"...] [--site <host>]
+weaver plan "<the ask>" [--kind web|video|site|channel|person] [--known "<fact> (<url>)"...] [--premise "<given>"...] [--site <host>]
 weaver brief <run>                                   # read it after every step
 weaver search <run> < tree.json                      # the round's query tree (below); or "<terms>" --why, or a JSON array
 weaver add call <run> <hit> keep|drop --why "<why>"  # triage, one per hit
@@ -35,6 +35,7 @@ weaver check <run> [-n 3]                            # bulk only: a model's samp
 weaver add gap <run> "<what is still missing>"
 weaver add pattern <run> "<what several findings say together>" --on <finding> <finding>...
 weaver add edge <run> again|stop --why "<why>"       # your review of the round
+echo '[{"title":"..","body":"..","cites":["<pattern or finding>"]}]' | weaver add draft <run> --for "<a decision memo>"   # a rough draft, gated
 weaver plan --run <run>                              # after again: the next round
 weaver learn <kind> [--sources ...] [--rounds N] [--age "..."]   # after a good run, on the person's yes
 ```
@@ -47,9 +48,14 @@ records show done.
 ## How to drive
 
 0. **Recall.** Before the plan, `recall` the ask's words. A recalled finding still fresh for the
-   ask (its `date`, else `found`) goes in `--known` with its source; an old one names a query to
+   ask (its `date`, else `found`) goes in `--known` with its URL; an old one names a query to
    read again. A quote short of 5 words fails the gate: take the line with its label.
-1. **Plan the tree.** Read the ask and `brief`. Write the round's query tree: one facet per
+1. **Name the premises.** Before the plan, say what the ask takes as given: a buyer, an offer, a
+   price, a channel, a niche. Pass each as `--premise`. A `--known` line without a URL or ledger
+   id becomes a premise too. The guide then names a `premise` facet: one try per premise that
+   would show it wrong. `tree.uncovered` lists it until a query serves it. A premise that fails
+   changes the ask: tell the person.
+2. **Plan the tree.** Read the ask and `brief`. Write the round's query tree: one facet per
    side of the ask the guide names (`brief.planFile` kind's guide: a number, a how, a who, a
    counter-view, a primary source; add a facet the ask needs), each with 2 or 3 tries in the
    order you expect to work: the plain words first, then a narrower angle (a site, a year, a
@@ -75,31 +81,34 @@ records show done.
      {"name": "counter", "why": "who says it fails", "tries": [[{"terms": "...", "why": "..."}]]}
    ]}
    ```
-2. **Triage.** `brief` lists `hits.uncalled` with title, snippet and `facets`: the facets whose
+3. **Triage.** `brief` lists `hits.uncalled` with title, snippet and `facets`: the facets whose
    queries found it, most first. A page two facets found is worth a look first. Call every one
    (the tree's next tier waits on it):
    keep what can hold a fact that answers the ask, drop the rest (vendor pages, listicles, a
    page the ask does not need). One why per call, short. A page you know of yourself: `open --url`.
-3. **Read.** `open`, then `show` each document and read it. Write each fact that answers the
+4. **Read.** `open`, then `show` each document and read it. Write each fact that answers the
    ask as `add finding` with its exact quote; a quote that is not on the page fails. Say what
    the page lacks as `add gap --on <document>`. For a run too big to read (tens of pages), or
    in the runner, `extract` puts a model behind the same gate; then judge its findings in
    `wrote` and drop what does not answer the ask (`add call <finding> drop --why`).
-4. **Check.** Read a sample of the kept findings again against their documents (`show`), a
+5. **Check.** Read a sample of the kept findings again against their documents (`show`), a
    different page each: `add check <finding> --ok|--fail --why`. A fail drops it. For a bulk
    run, `check` does the same with a model; put a finding back with `add call <finding> keep
    --why` only if you read the page and the check is wrong.
-5. **Patterns.** When kept findings from different sites say one thing, write it once:
+6. **Patterns.** When kept findings from different sites say one thing, write it once:
    `add pattern` with the finding ids. The engine counts the distinct sites; one site is a
    claim, not a pattern, and it warns. A pattern is your sentence; the findings are its proof.
-6. **Review.** Ask: does what is kept answer the ask? What is missing? Write each hole as a gap.
+7. **Review.** Ask: does what is kept answer the ask? What is missing? Write each hole as a gap.
    Then the edge: `again` with a why that names the hole (the next round's plan reads it), or
    `stop` with a why that says what the run has and what it still lacks. The budget's rounds
    are a guard rail: past them, say in the why why one more round is worth it.
-7. **Report.** From `brief`: the patterns first, each with its site count and its findings;
+8. **Report.** From `brief`: the patterns first, each with its site count and its findings;
    then the kept findings no pattern rests on, each with its quote, URL and date; the gaps; the
-   cost line. Nothing in the report that is not a finding.
-8. **Learn.** If the run was good and the person agrees, `weaver learn <kind>` with what it
+   cost line. Nothing in the report that is not a finding. When the person wants prose (a memo,
+   an SOP outline), write a rough draft with `add draft`: each item cites kept patterns or
+   findings, and each number comes from a cited quote, or the gate drops the item. A draft is
+   never final: the person writes the SOP or the decision.
+9. **Learn.** If the run was good and the person agrees, `weaver learn <kind>` with what it
    taught: a source order that yielded, a budget that fit, an age sentence, a `--thin` that
    fits the kind, a facet the guide should name (`--tree <file>`). The next run of that kind
    starts there. Never change a prompt without showing the person the diff.

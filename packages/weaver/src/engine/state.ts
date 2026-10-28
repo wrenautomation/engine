@@ -9,6 +9,7 @@ import {
   type CallRecord,
   type CheckRecord,
   type DocumentRecord,
+  type DraftRecord,
   type EdgeRecord,
   type FindingRecord,
   type FoundRecord,
@@ -58,6 +59,7 @@ export interface RunState {
   checks: CheckRecord[];
   /** What the agent says several findings say together. */
   patterns: PatternRecord[];
+  drafts: DraftRecord[];
   /** A known hit found again by another query. */
   founds: FoundRecord[];
   /** The hit record for each canonical URL: a hit seen again, in any round, is a `found`, not a new record. */
@@ -114,6 +116,7 @@ export function fold(run: string, records: readonly LedgerRecord[]): RunState {
     gaps: ofType(records, "gap"),
     checks: ofType(records, "check"),
     patterns: ofType(records, "pattern"),
+    drafts: ofType(records, "draft"),
     founds: ofType(records, "found"),
     hitByKey: new Map(hits.map((h) => [h.key, h.id])),
     called: latestCalls(records),
@@ -151,11 +154,11 @@ export function planOf(state: RunState, round: number): Plan {
 export const kept = (state: RunState, f: FindingRecord): boolean =>
   state.called.get(f.id) !== "drop";
 
-/** What the run has found so far: the kept findings' sentences, oldest first. */
+/** What the run has found so far: the kept findings' sentences with their URLs, oldest first. */
 export const found = (state: RunState, round?: number): string[] =>
   state.findings
     .filter((f) => (round === undefined || f.round === round) && kept(state, f))
-    .map((f) => f.text);
+    .map((f) => `${f.text} (${f.proof.url})`);
 
 /**
  * The round a person's gap or back edge is about. Between rounds (a pause, a stop) the pointer
