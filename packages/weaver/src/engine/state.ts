@@ -14,6 +14,7 @@ import {
   type GapRecord,
   type HitRecord,
   type LedgerRecord,
+  type PatternRecord,
   type QueryRecord,
   type SnapshotRecord,
   type SpendRecord,
@@ -54,6 +55,8 @@ export interface RunState {
   gaps: GapRecord[];
   /** The sample check's word on each finding it checked. */
   checks: CheckRecord[];
+  /** What the agent says several findings say together. */
+  patterns: PatternRecord[];
   /** Keys of every hit in the run: a hit seen again in a later round is not a new record. */
   seen: Set<string>;
   /** The latest call on each hit and finding. */
@@ -107,6 +110,7 @@ export function fold(run: string, records: readonly LedgerRecord[]): RunState {
     steers: ofType(records, "steer"),
     gaps: ofType(records, "gap"),
     checks: ofType(records, "check"),
+    patterns: ofType(records, "pattern"),
     seen: new Set(hits.map((h) => h.key)),
     called: latestCalls(records),
   };

@@ -22,12 +22,13 @@ Three more doors run the research engine (wren's `designs/2026-10-26-research-en
 |---|---|
 | `@wrenautomation/weaver/engine` | `Source` (a name, `search` and/or `open`, a cost), `registry` and the plan's allow-list; the agent's calls (`planRound`, `search`, `open`, `extract`, `check`, `add`, `brief`), one step each; `run(deps, options)`: plan, fetch, triage, read, extract, check (a sample of findings against their documents), review, round after round until raven's edge says stop; `fold` rebuilds a run's state from its records, so a run resumes from the step it stopped on; `Transient`, the failure worth another try; raven's `Model`, `Ask`, `PlanFile` and record shapes re-exported, so a host pins weaver alone |
 | `@wrenautomation/weaver/sources` | `searxng`, `exa` (search), `youtube` (search and read, yt-dlp), `fetcher` (open, the polite fetcher), `ladder` (open, autobrowse's fetch ladder up to a browser), `paste` (a person's URLs), `ledger` (hits earlier runs saw) |
-| `@wrenautomation/weaver/ledger` | the records (`query`, `hit`, `document`, `finding`, `verdict`, `call`, `spend`, `snapshot`, `edge`, `done`, `steer`, `gap`, `check`), `FilesLedger` (a folder: `runs/<run>/<writer>.jsonl`, `plans/<kind>.json`), `MemoryLedger`, yield rows per source, person, channel and kind |
+| `@wrenautomation/weaver/ledger` | the records (`query`, `hit`, `document`, `finding`, `verdict`, `call`, `spend`, `snapshot`, `edge`, `done`, `steer`, `gap`, `check`, `pattern`), `FilesLedger` (a folder: `runs/<run>/<writer>.jsonl`, `plans/<kind>.json`), `MemoryLedger`, yield rows per source, person, channel and kind |
 
 Every record carries `from` (ai, human or tool) and `by` (a model id, a source, a person). A
 person's pasted URL, a person's keep or drop, are the same records as the model's. The plan
 file in `plans/<kind>.json` beside the ledger (prompts, sources, budget) is where a run learns:
-copy raven's default (`npx raven plans web`), tune it, keep it there.
+`weaver learn <kind>` writes its next version from what a run taught (sources, budget, age, a
+prompt), on the person's agreement; a kind with no tuned file runs raven's default.
 
 ## CLI
 
@@ -62,8 +63,11 @@ weaver add finding 01M5YS... 01M5YV... --text "412 firms were surveyed." --quote
 weaver check 01M5YS... -n 3                         # a sample of findings read against their documents
 weaver add gap 01M5YS... "no UK numbers yet"
 weaver add steer 01M5YS... "numbers only" --human will                                # the person's word, relayed
+weaver add pattern 01M5YS... "Repeat clients come from referrals." --on 01M5YV... 01M5YW...   # what findings say together; sites counted
 weaver add edge 01M5YS... again --why "thin on the UK"                                # the review: a new round
 weaver plan --run 01M5YS...                         # round 2: known, steer and what round 1 left open, in its snapshot
+weaver learn web --sources searxng exa --rounds 4   # the plan file's next version, after a good run
+weaver learn web --show                             # the current one
 weaver add edge 01M5YS... stop --why "enough"
 ```
 
@@ -88,12 +92,12 @@ npx weaver run "..." --kind video --propose "cold email teardown" --by will   # 
 npx weaver run "..." --url https://a.example/report https://b.example/post    # pages you want read, first
 npx weaver run --resume 01M5YS... --url https://a.example/report             # from the step it stopped on; same --url, same --model
 npx weaver run "..." --pause                                                   # stop after each round's review
-npx weaver steer 01M5YS... "numbers only; skip vendor pages"                   # what you say, first in every prompt after
+npx weaver add steer 01M5YS... "numbers only; skip vendor pages" --human       # what you say, first in every prompt after
 npx weaver run --resume 01M5YS... --pause                                      # the next round, steered
-npx weaver gap 01M5YS... "no UK numbers yet"                                   # what the run lacks: its review and next plan read it
-npx weaver back 01M5YS... fetch -r "searxng was down"                          # rerun one step of the round; then --resume
+npx weaver add gap 01M5YS... "no UK numbers yet" --human                       # what the run lacks: its review and next plan read it
+npx weaver add edge 01M5YS... back --to fetch --why "searxng was down" --human # rerun one step of the round; then --resume
 npx weaver trace 01M5YS... --type finding spend                                # the run's records, JSON lines
-npx weaver drop 01M5YT... -r "the quote is a forecast, not a result"           # a call in your name
+npx weaver add call 01M5YS... 01M5YT... drop --why "a forecast, not a result" --human   # a call in your name
 npx weaver yield --source exa                                                  # hits, reads, proposed, kept
 npx weaver sources                                                             # what this machine can run
 ```
@@ -127,21 +131,26 @@ findings before the cut go through the gate and the model is asked again for the
 document, with those findings known (falcon's `Cut`; the `spend` carries both calls' tokens).
 
 `--pause` stops the run after a review that says `again`, with no exit code: between rounds
-you (or a Claude Code session) read the trace, `keep` or `drop` findings, and `steer` the run
-with free text. Every `steer` record is rendered first in every prompt of the rounds after it,
-under "The person says:". `--resume` goes on.
+you (or a Claude Code session) read `brief`, keep or drop findings (`add call`), and steer the
+run with free text (`add steer`). Every `steer` record is rendered first in every prompt of the
+rounds after it, under "The person says:". `--resume` goes on. A review that says `again` into
+a round past `budget.rounds` parks the run the same way (`parked` says so, no exit code): the
+budget is a guard rail, not a stop rule. `--resume` goes one more round; `plan --run` opens it
+by hand.
 
 The steps talk in English records. A query every searcher answered with no new hit, and a kept
 hit no source could open (a 403, a block the ladder could not pass), each write a `gap`; so does
-`weaver gap`. The round's review reads the gaps and a person's `keep` or `drop` with its why;
-the next round's plan reads them, and the review's why on `again`, under "The last round left
-open". The last round of the budget is reviewed too: its edge is stop, and its why is what the
-ask still lacks. `weaver back` writes a person's edge: the fold takes it like raven's.
+`add gap`. The round's review reads the gaps and a person's keep or drop with its why; the next
+round's plan reads them, and the review's why on `again`, under "The last round left open".
+`add edge back --to <step>` writes a person's edge: the fold takes it like raven's. A `pattern`
+(`add pattern`) is what several kept findings say together, in the agent's words; its count of
+distinct sites is computed from the findings' proofs, never claimed, and `brief.patterns` lists
+them for the report.
 
 The check step reads a sample of the round's kept findings (`budget.checks`, 3 by default;
 spread across documents) against the text around each quote. The extract gate proves a quote is
 on the page; the check asks whether it backs the sentence. A finding that fails gets a `check`
-record and a drop call; `weaver keep` puts it back. The review sees every check, and a finding
+record and a drop call; `add call <finding> keep` puts it back. The review sees every check, and a finding
 carries its document's date, so the review weighs age as the plan file's `age` line says.
 
 ## Library

@@ -26,8 +26,10 @@ weaver extract <run>                                 # the model behind the quot
 weaver check <run> [-n 3]                            # a sample of findings read against their documents
 weaver add finding <run> <document> --text "<sentence>" --quote "<quote on the page>"
 weaver add gap <run> "<what is still missing>"
+weaver add pattern <run> "<what several findings say together>" --on <finding> <finding>...
 weaver add edge <run> again|stop --why "<why>"       # your review of the round
 weaver plan --run <run>                              # after again: the next round
+weaver learn <kind> [--sources ...] [--rounds N] [--age "..."]   # after a good run, on the person's yes
 ```
 
 Each step command prints `{run, round, step, ok, note, wrote}`; `wrote` is every record it
@@ -50,11 +52,19 @@ records show done.
 4. **Check.** `check` reads a sample against their documents. A finding that fails is dropped
    with its why; put it back with `add call <finding> keep --why` only if you read the page and
    the check is wrong.
-5. **Review.** Ask: does what is kept answer the ask? What is missing? Write each hole as a gap.
+5. **Patterns.** When kept findings from different sites say one thing, write it once:
+   `add pattern` with the finding ids. The engine counts the distinct sites; one site is a
+   claim, not a pattern, and it warns. A pattern is your sentence; the findings are its proof.
+6. **Review.** Ask: does what is kept answer the ask? What is missing? Write each hole as a gap.
    Then the edge: `again` with a why that names the hole (the next round's plan reads it), or
-   `stop` with a why that says what the run has and what it still lacks.
-6. **Report.** From `brief`: the kept findings, each with its quote, URL and date, grouped by
-   what they answer; the gaps; the cost line. Nothing in the report that is not a finding.
+   `stop` with a why that says what the run has and what it still lacks. The budget's rounds
+   are a guard rail: past them, say in the why why one more round is worth it.
+7. **Report.** From `brief`: the patterns first, each with its site count and its findings;
+   then the kept findings no pattern rests on, each with its quote, URL and date; the gaps; the
+   cost line. Nothing in the report that is not a finding.
+8. **Learn.** If the run was good and the person agrees, `weaver learn <kind>` with what it
+   taught: a source order that yielded, a budget that fit, an age sentence. The next run of
+   that kind starts there. Never change a prompt without showing the person the diff.
 
 Stop when the ask is answered or two rounds in a row added nothing that changed the answer.
 Say so in the edge's why.
@@ -63,7 +73,8 @@ Say so in the edge's why.
 
 Their words are theirs: `weaver add steer <run> "<their words>" --human <name>`. A steer is
 rendered first in every later prompt and snapshot. Their keep or drop on a hit or finding:
-`add call ... --human <name>`. Never put your words in a `--human` record.
+`add call ... --human <name>`; their gap, `add gap ... --human <name>`; a step they want rerun,
+`add edge <run> back --to <step> --why "<their why>" --human <name>`. Never put your words in a `--human` record.
 
 When they ask a question mid-run, answer from `brief` (kept findings, gaps, cost); run no step
 they did not ask for.

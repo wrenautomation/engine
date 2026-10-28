@@ -713,7 +713,7 @@ describe("gaps, checks and age", () => {
     expect(fold(b.run, await b.d.ledger.trace(b.run)).next).toEqual({ round: 1, step: "fetch" });
   });
 
-  it("asks the model on the last round too: the stop says what is still open", async () => {
+  it("parks past the round budget: the model's again stands, the runner does not go on", async () => {
     const prompts: string[] = [];
     const d: Deps = {
       ...deps(routed(prompts, { next: "again", why: "no UK numbers" })),
@@ -727,9 +727,19 @@ describe("gaps, checks and age", () => {
     const out = await run(d, { ask: { text: "repeat clients", kind: "web" }, planFile: file });
     expect(out.state.edges.map((e) => [e.next, e.why])).toEqual([
       ["again", "no UK numbers"],
-      ["stop", "round budget spent (2 of 2): no UK numbers"],
+      ["again", "no UK numbers"],
     ]);
+    expect(out.finished).toBe(false);
+    expect(out.paused).toBe(false);
+    expect(out.parked).toBe(
+      "round 3 is past the budget of 2: parked. The edge says: no UK numbers",
+    );
+    expect(out.state.next).toEqual({ round: 3, step: "plan" });
     const reviews = prompts.filter((p) => p.startsWith("You decide what happens"));
-    expect(reviews.map((p) => p.includes("This is the last round"))).toEqual([false, true]);
+    expect(reviews).toHaveLength(2);
+    // A resume goes one more round, then parks again.
+    const more = await run(d, { resume: out.run, planFile: file });
+    expect(more.state.edges).toHaveLength(3);
+    expect(more.parked).toContain("round 4 is past the budget of 2");
   });
 });

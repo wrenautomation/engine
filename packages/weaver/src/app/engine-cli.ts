@@ -11,6 +11,7 @@
  * Postgres. A run that stops on a transient failure (a 429, a 5xx, a dropped connection) is
  * resumed by `run` itself after a pause, up to RESUMES times.
  */
+import { readFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import type { Extractor } from "@wrenautomation/falcon/document";
 import { claimExtractor } from "@wrenautomation/falcon/document";
@@ -36,7 +37,6 @@ import {
   extract,
   fold,
   open,
-  personRound,
   planRound,
   type QueryInput,
   registry,
@@ -45,17 +45,11 @@ import {
   type Sources,
   type StepEvent,
   search,
+  tunePlan,
   type Who,
 } from "../engine/index.js";
 import { PoliteFetcher, userAgent } from "../fetch/fetcher.js";
-import {
-  FilesLedger,
-  type Ledger,
-  type LedgerRecord,
-  ofType,
-  type Problem,
-  ulids,
-} from "../ledger/index.js";
+import { FilesLedger, type Ledger, type Problem, ulids } from "../ledger/index.js";
 import {
   exa,
   fetcherSource,
@@ -105,6 +99,7 @@ export interface Common {
 /** A ledger a host hands the commands: the contract, and what the files backend adds when it has it. */
 export type HostLedger = Ledger & {
   readPlan?(kind: AskKind): Promise<PlanFile | null>;
+  writePlan?(planFile: PlanFile): Promise<string>;
   problems?: Problem[];
 };
 
@@ -403,10 +398,14 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
         const state = result?.state ?? fold(id, await ledger.trace(id));
         if (result?.paused)
           console.error(
-            `${id}: paused after round ${state.edges.length}; weaver steer ${id} "<what you say>", then weaver run --resume ${id} --pause`,
+            `${id}: paused after round ${state.edges.length}; weaver add steer ${id} "<their words>" --human, then weaver run --resume ${id} --pause`,
+          );
+        if (result?.parked)
+          console.error(
+            `${id}: ${result.parked}; weaver run --resume ${id} goes one more round, weaver plan --run ${id} opens it by hand`,
           );
         const cost = costOf(state.spends);
-        // The last review's word: on a stop by the budget, what the ask still lacks.
+        // The last review's word: what the ask still lacks, or that it is answered.
         const last = state.edges.at(-1);
         if (last) console.error(`${id}: ${last.next}: ${last.why}`);
         console.error(`${id}: ${cost.line}`);
@@ -418,6 +417,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
               cost: cost.total,
               finished: result?.finished ?? false,
               ...(result?.paused ? { paused: true } : {}),
+              ...(result?.parked ? { parked: result.parked } : {}),
               note: result ? result.note : "stopped on a transient failure: --resume to go on",
               ...(last ? { edge: { next: last.next, why: last.why } } : {}),
               hits: state.hits.length,
@@ -439,7 +439,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
             2,
           ),
         );
-        if (!result?.finished && !result?.paused) process.exitCode = 2;
+        if (!result?.finished && !result?.paused && !result?.parked) process.exitCode = 2;
       },
     );
 
@@ -627,6 +627,73 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     .action((runId: string, text: string, o: Common & Agent & { on?: string }) =>
       added(o, runId, { type: "gap", note: text, ...(o.on ? { on: o.on } : {}) }),
     );
+  agent(common(adds.command("pattern <run> <text>")))
+    .description(
+      "what several kept findings say together: one sentence; the count of distinct sites is computed",
+    )
+    .requiredOption("--on <finding...>", "the findings it rests on")
+    .action((runId: string, text: string, o: Common & Agent & { on: string[] }) =>
+      added(o, runId, { type: "pattern", text, findings: o.on }),
+    );
+
+  common(program.command("learn <kind>"))
+    .description(
+      "the next version of a kind's plan file, from what a run taught: sources, budget, age, a prompt; --show prints the current one",
+    )
+    .option("--show", "print the current plan file, write nothing")
+    .option("--sources <name...>", "the allow-list, in order of preference")
+    .option("--queries <n>", "queries per round", Number)
+    .option("--reads <n>", "reads per round", Number)
+    .option("--rounds <n>", "rounds before the runner parks", Number)
+    .option("--checks <n>", "findings checked per round", Number)
+    .option("--age <sentence>", "how much a source's age counts")
+    .option("--propose <file>", "the propose prompt, from a file")
+    .option("--triage <file>", "the triage prompt, from a file")
+    .option("--review <file>", "the review prompt, from a file")
+    .action(
+      async (
+        kind: string,
+        o: Common & {
+          show?: boolean;
+          sources?: string[];
+          queries?: number;
+          reads?: number;
+          rounds?: number;
+          checks?: number;
+          age?: string;
+          propose?: string;
+          triage?: string;
+          review?: string;
+        },
+      ) => {
+        const k = kindOf(kind);
+        const ledger = ledgerOf(o);
+        const current = (await ledger.readPlan?.(k)) ?? defaultPlanFile(k);
+        if (o.show) {
+          console.log(JSON.stringify(current, null, 2));
+          return;
+        }
+        if (!ledger.writePlan) throw new Error("this ledger keeps no plan files");
+        const text = (file: string) => readFile(file, "utf8");
+        const budget = {
+          ...(o.queries !== undefined ? { queries: o.queries } : {}),
+          ...(o.reads !== undefined ? { reads: o.reads } : {}),
+          ...(o.rounds !== undefined ? { rounds: o.rounds } : {}),
+          ...(o.checks !== undefined ? { checks: o.checks } : {}),
+        };
+        const next = tunePlan(current, {
+          ...(o.sources ? { sources: o.sources } : {}),
+          budget,
+          ...(o.age !== undefined ? { age: o.age } : {}),
+          ...(o.propose ? { propose: await text(o.propose) } : {}),
+          ...(o.triage ? { triage: await text(o.triage) } : {}),
+          ...(o.review ? { review: await text(o.review) } : {}),
+        });
+        const path = await ledger.writePlan(next);
+        console.error(`${k}: plan file version ${next.version} at ${path}`);
+        console.log(JSON.stringify(next, null, 2));
+      },
+    );
 
   common(program.command("brief <run>"))
     .description(
@@ -647,98 +714,6 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       for (const r of records)
         if (!o.type || o.type.includes(r.type)) console.log(JSON.stringify(r));
       for (const p of ledger.problems ?? []) console.error(`${p.file}:${p.line}: ${p.why}`);
-    });
-
-  for (const verdict of ["keep", "drop"] as const)
-    common(program.command(`${verdict} <finding>`))
-      .description(`${verdict} a finding by hand: a call record in your name`)
-      .requiredOption("-r, --reason <why>", "why")
-      .action(async (findingId: string, o: Common & { reason: string }) => {
-        const ledger = ledgerOf(o);
-        const finding = ofType(await ledger.scan({ type: "finding" }), "finding").find(
-          (f) => f.id === findingId,
-        );
-        if (!finding) throw new Error(`no finding ${findingId}`);
-        const record: LedgerRecord = {
-          type: "call",
-          id: ulids()(),
-          run: finding.run,
-          round: finding.round,
-          at: new Date().toISOString(),
-          from: "human",
-          by: o.writer,
-          on: finding.id,
-          verdict,
-          why: o.reason,
-        };
-        await ledger.append(record);
-        console.log(JSON.stringify(record));
-      });
-
-  common(program.command("steer <run> <text>"))
-    .description("say something to the run: first in every prompt of the rounds after it")
-    .action(async (runId: string, text: string, o: Common) => {
-      const ledger = ledgerOf(o);
-      const state = fold(runId, await ledger.trace(runId));
-      if (!state.records.length) throw new Error(`no run ${runId}`);
-      const record: LedgerRecord = {
-        type: "steer",
-        id: ulids()(),
-        run: runId,
-        round: state.round,
-        at: new Date().toISOString(),
-        from: "human",
-        by: o.writer,
-        text,
-      };
-      await ledger.append(record);
-      console.log(JSON.stringify(record));
-    });
-
-  common(program.command("gap <run> <text>"))
-    .description("say what the run still lacks: the round's review and the next plan read it")
-    .action(async (runId: string, text: string, o: Common) => {
-      const ledger = ledgerOf(o);
-      const state = fold(runId, await ledger.trace(runId));
-      if (!state.records.length) throw new Error(`no run ${runId}`);
-      const record: LedgerRecord = {
-        type: "gap",
-        id: ulids()(),
-        run: runId,
-        round: personRound(state),
-        at: new Date().toISOString(),
-        from: "human",
-        by: o.writer,
-        note: text,
-      };
-      await ledger.append(record);
-      console.log(JSON.stringify(record));
-    });
-
-  common(program.command("back <run> <step>"))
-    .description(
-      "send the run back to one step of its round (plan, fetch, triage, read, extract); `run --resume` goes on from there",
-    )
-    .requiredOption("-r, --reason <why>", "why")
-    .action(async (runId: string, step: string, o: Common & { reason: string }) => {
-      const to = RavenStep.parse(step);
-      const ledger = ledgerOf(o);
-      const state = fold(runId, await ledger.trace(runId));
-      if (!state.records.length) throw new Error(`no run ${runId}`);
-      const record: LedgerRecord = {
-        type: "edge",
-        id: ulids()(),
-        run: runId,
-        round: personRound(state),
-        at: new Date().toISOString(),
-        from: "human",
-        by: o.writer,
-        next: "back",
-        to,
-        why: o.reason,
-      };
-      await ledger.append(record);
-      console.log(JSON.stringify(record));
     });
 
   common(program.command("yield"))

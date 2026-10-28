@@ -66,3 +66,43 @@ export const Verdict = z.object({
   gap: z.string().min(1).optional(),
 });
 export type Verdict = z.infer<typeof Verdict>;
+
+/**
+ * What several findings say together, in the agent's words: one sentence, the findings it
+ * rests on, and how many distinct sites they come from (counted by code from the findings'
+ * proofs, never claimed). A pattern on one site is a claim; the count is what makes it a
+ * pattern. A reader judges the sentence; the count tells how far to trust it.
+ */
+export const Pattern = z.object({
+  /** One plain sentence. */
+  text: z.string().min(1),
+  /** Ids of the findings it rests on, in the ledger that holds them. */
+  findings: z.array(z.string().min(1)).min(1),
+  /** Distinct hosts across those findings' proofs. */
+  sources: z.number().int().positive(),
+});
+export type Pattern = z.infer<typeof Pattern>;
+
+/** The host of a proof's URL, lower case, without `www.`; the URL itself when it is not one. */
+export const hostOf = (url: string): string => {
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+};
+
+/** A pattern over findings: the source count is the distinct hosts of their proofs. */
+export function patternOf(
+  text: string,
+  findings: readonly { id: string; proof: { url: string } }[],
+): Pattern {
+  const sentence = text.replace(/\s+/g, " ").trim();
+  if (!sentence) throw new Error("a pattern needs a sentence");
+  if (!findings.length) throw new Error("a pattern needs at least one finding");
+  return {
+    text: sentence,
+    findings: findings.map((f) => f.id),
+    sources: new Set(findings.map((f) => hostOf(f.proof.url))).size,
+  };
+}

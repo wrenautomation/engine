@@ -7,9 +7,9 @@
  * can take a run over, and the fold reads both the same. The budget is a guard rail here: the
  * brief shows it, nothing cuts a query or stops a round by it.
  */
-import { type ClaimAnswer, gateFindings } from "@wrenautomation/falcon/document";
+import { type ClaimAnswer, gateFindings, patternOf } from "@wrenautomation/falcon/document";
 import { isTransient } from "@wrenautomation/models";
-import type { AskKind, Edge, PlanFile, YieldRow } from "@wrenautomation/raven";
+import { type AskKind, type Edge, PlanFile, type YieldRow } from "@wrenautomation/raven";
 import {
   type DocumentRecord,
   type Envelope,
@@ -321,7 +321,8 @@ export type Addition =
   | { type: "call"; on: string; verdict: "keep" | "drop"; why: string }
   | { type: "edge"; next: Edge["next"]; to?: Edge["to"]; why: string }
   | { type: "steer"; text: string }
-  | { type: "gap"; note: string; on?: string };
+  | { type: "gap"; note: string; on?: string }
+  | { type: "pattern"; text: string; findings: string[] };
 
 export interface Added {
   record: Shown;
@@ -330,14 +331,18 @@ export interface Added {
 }
 
 /**
- * One record in the agent's or the person's name. A query or finding lands in the current
- * round; a call, edge, steer or gap in the round it is about (the one just reviewed, between
- * rounds). A finding goes through falcon's gate: its quote must be on the document, word for
- * word, or the add fails with the gate's why. No `step`: a hand-written record has none.
+ * One record in the agent's or the person's name. A query, finding or pattern lands in the
+ * current round; a call, edge, steer or gap in the round it is about (the one just reviewed,
+ * between rounds). A finding goes through falcon's gate: its quote must be on the document,
+ * word for word, or the add fails with the gate's why. A pattern names kept findings; its
+ * source count is counted here, never claimed. No `step`: a hand-written record has none.
  */
 export async function add(deps: Deps, run: string, a: Addition, who: Who): Promise<Added> {
   const state = await stateOf(deps, run);
-  const round = a.type === "query" || a.type === "finding" ? state.round : personRound(state);
+  const round =
+    a.type === "query" || a.type === "finding" || a.type === "pattern"
+      ? state.round
+      : personRound(state);
   const warnings: string[] = [];
   const write = async <T extends Omit<LedgerRecord, keyof Envelope>>(record: T) => {
     const id = deps.ids();
@@ -431,7 +436,51 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
         record: await write({ type: "gap", note: a.note, ...(a.on ? { on: a.on } : {}) }),
         warnings,
       };
+    case "pattern": {
+      const byId = new Map(state.findings.map((f) => [f.id, f]));
+      const on = [...new Set(a.findings)].map((id) => {
+        const f = byId.get(id);
+        if (!f) throw new Error(`no finding ${id}`);
+        if (!kept(state, f))
+          throw new Error(`finding ${id} is dropped: a pattern rests on kept findings`);
+        return f;
+      });
+      const pattern = patternOf(a.text, on);
+      if (pattern.sources < 2) warnings.push("one source: a claim, not a pattern yet");
+      return { record: await write({ type: "pattern", ...pattern }), warnings };
+    }
   }
+}
+
+/** What `learn` changes on a plan file. Every field is optional; the version always moves. */
+export interface PlanChanges {
+  sources?: string[];
+  budget?: Partial<PlanFile["budget"]>;
+  age?: string;
+  propose?: string;
+  triage?: string;
+  review?: string;
+}
+
+/**
+ * The next version of a plan file: the current one with the changes, version plus one. Pure:
+ * the ledger writes it (`weaver learn`), at the end of a run the agent and the person agreed
+ * was good. The sources stay an allow-list raven narrows, never widens; `learn` is how it widens.
+ */
+export function tunePlan(current: PlanFile, changes: PlanChanges): PlanFile {
+  const next = PlanFile.parse({
+    ...current,
+    ...(changes.sources ? { sources: changes.sources } : {}),
+    budget: { ...current.budget, ...(changes.budget ?? {}) },
+    ...(changes.age !== undefined ? { age: changes.age } : {}),
+    ...(changes.propose ? { propose: changes.propose } : {}),
+    ...(changes.triage ? { triage: changes.triage } : {}),
+    ...(changes.review ? { review: changes.review } : {}),
+    version: current.version + 1,
+  });
+  if (JSON.stringify({ ...next, version: 0 }) === JSON.stringify({ ...current, version: 0 }))
+    throw new Error("learn: nothing changed");
+  return next;
 }
 
 /** A hit as the brief shows it: the view, its id, round and queries. */
@@ -459,6 +508,8 @@ export interface Brief {
     dropped: number;
   };
   checks: { on: string; ok: boolean; why: string }[];
+  /** What the agent says several findings say together, with the count of distinct sites. */
+  patterns: { id: string; round: number; text: string; findings: string[]; sources: number }[];
   verdicts: { document: string; url: string; quality: string; gap?: string }[];
   hits: {
     uncalled: HitBrief[];
@@ -510,6 +561,13 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
       dropped: state.findings.filter((f) => !kept(state, f)).length,
     },
     checks: state.checks.map(({ on, ok, why }) => ({ on, ok, why })),
+    patterns: state.patterns.map(({ id, round, text, findings, sources }) => ({
+      id,
+      round,
+      text,
+      findings,
+      sources,
+    })),
     verdicts: state.verdicts.map((v) => ({
       document: v.document,
       url: urlOf.get(v.document) ?? v.document,

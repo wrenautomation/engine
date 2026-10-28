@@ -30,6 +30,11 @@ export interface RunResult {
   finished: boolean;
   /** The run stopped after a review that said `again`, on `pause`: `resume` goes on. */
   paused: boolean;
+  /**
+   * The review said `again` into a round past the budget: the runner parked, and this says so.
+   * The budget is a guard rail: `resume` goes one more round; the agent's `plan --run` opens it.
+   */
+  parked: string | null;
   state: RunState;
 }
 
@@ -59,6 +64,7 @@ export async function run(deps: Deps, options: RunOptions = {}): Promise<RunResu
   let state = fold(id, await deps.ledger.trace(id));
   if (options.resume && !state.records.length) throw new Error(`run ${id}: no records`);
   let paused = false;
+  let parked: string | null = null;
   for (let n = 0; n < steps && state.next; n++) {
     const { round, step } = state.next;
     const ctx = context(deps, options, id, round, step);
@@ -85,7 +91,13 @@ export async function run(deps: Deps, options: RunOptions = {}): Promise<RunResu
     });
     state = fold(id, await deps.ledger.trace(id));
     if (!result.ok) break;
-    if (options.pause && step === "review" && state.next?.step === "plan") {
+    if (step !== "review" || state.next?.step !== "plan") continue;
+    const budget = state.snapshot?.budget;
+    if (budget && state.next.round > budget.rounds) {
+      parked = `round ${state.next.round} is past the budget of ${budget.rounds}: parked. The edge says: ${state.note}`;
+      break;
+    }
+    if (options.pause) {
       paused = true;
       break;
     }
@@ -96,6 +108,7 @@ export async function run(deps: Deps, options: RunOptions = {}): Promise<RunResu
     note: state.note,
     finished: !state.next && state.edges.at(-1)?.next === "stop",
     paused,
+    parked,
     state,
   };
 }

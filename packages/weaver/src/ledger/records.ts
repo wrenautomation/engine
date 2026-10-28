@@ -10,6 +10,7 @@
 import {
   Document as FalconDocument,
   Finding as FalconFinding,
+  Pattern as FalconPattern,
   Verdict as FalconVerdict,
 } from "@wrenautomation/falcon/document";
 import {
@@ -45,6 +46,7 @@ export const RECORD_TYPES = [
   "steer",
   "gap",
   "check",
+  "pattern",
 ] as const;
 export const RecordType = z.enum(RECORD_TYPES);
 export type RecordType = z.infer<typeof RecordType>;
@@ -190,6 +192,16 @@ export const CheckRecord = Envelope.extend({
 });
 export type CheckRecord = z.infer<typeof CheckRecord>;
 
+/**
+ * What several findings say together, by the agent (or the person): falcon's `Pattern`, its
+ * source count computed by code when it is written. The report leads with patterns; a finding
+ * no pattern rests on is a fact on its own. `step` absent: written between steps.
+ */
+export const PatternRecord = Envelope.extend({ type: z.literal("pattern") }).extend(
+  FalconPattern.shape,
+);
+export type PatternRecord = z.infer<typeof PatternRecord>;
+
 export const LedgerRecord = z.discriminatedUnion("type", [
   QueryRecord,
   HitRecord,
@@ -204,6 +216,7 @@ export const LedgerRecord = z.discriminatedUnion("type", [
   SteerRecord,
   GapRecord,
   CheckRecord,
+  PatternRecord,
 ]);
 export type LedgerRecord = z.infer<typeof LedgerRecord>;
 

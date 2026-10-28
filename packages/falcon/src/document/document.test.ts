@@ -10,7 +10,7 @@ import {
 } from "./extract.js";
 import { Cut, type Model } from "./model.js";
 import { defaultReaders, mediaOf } from "./readers.js";
-import { Document, Finding, Proof } from "./types.js";
+import { Document, Finding, hostOf, Proof, patternOf } from "./types.js";
 
 const doc: Document = {
   url: "https://staffing.example/survey",
@@ -34,6 +34,21 @@ describe("shapes", () => {
       Finding.safeParse({ kind: "claim", text: "x", proof: { url: "u", quote: "q" } }).success,
     ).toBe(true);
     expect(Document.safeParse({ url: "u", media: "wiki", text: "" }).success).toBe(false);
+  });
+});
+
+describe("patterns", () => {
+  const f = (id: string, url: string) => ({ id, proof: { url } });
+  it("counts distinct hosts, without www and case", () => {
+    const p = patternOf("  Firms  agree. ", [
+      f("a", "https://www.A.example/x"),
+      f("b", "https://a.example/y"),
+      f("c", "https://b.example/z"),
+    ]);
+    expect(p).toEqual({ text: "Firms agree.", findings: ["a", "b", "c"], sources: 2 });
+    expect(hostOf("not a url")).toBe("not a url");
+    expect(() => patternOf(" ", [f("a", "https://a.example")])).toThrow("sentence");
+    expect(() => patternOf("x", [])).toThrow("finding");
   });
 });
 

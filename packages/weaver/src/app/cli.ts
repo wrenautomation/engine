@@ -5,8 +5,8 @@
  * disk is falcon's (`npx falcon text|page|watch`). Keys come from the environment:
  * COHERE_API_KEY (or COHERE_API_KEY_1..n), GEMINI_API_KEY. The engine's commands are in
  * `engine-cli.ts`: the agent's (`plan`, `search`, `open`, `extract`, `check`, `add`, `brief`),
- * the runner's (`run`), and the ledger's (`trace`, `keep`, `drop`, `steer`, `gap`, `back`,
- * `yield`, `sources`).
+ * the runner's (`run`), the plan file's (`learn`) and the ledger's (`trace`, `yield`,
+ * `sources`). A person's word goes through `add ... --human`.
  */
 import { readPage } from "@wrenautomation/falcon/text";
 import { cohereEye, cohereSpeech, geminiVideo, type VideoRead } from "@wrenautomation/falcon/video";

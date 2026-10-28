@@ -290,17 +290,15 @@ describe("review", () => {
     expect(Round.parse({ ...round, verdicts: undefined }).verdicts).toEqual([]);
   });
 
-  it("stops on a spent round budget, with the model's word on what is still open", async () => {
+  it("takes the model's edge on the last budgeted round too: the budget is the runner's guard rail", async () => {
     const e = await review(
       { ...round, round: 2 },
       scriptedModel([{ next: "again", why: "no cost per hire" }], "m1"),
     );
-    expect(e).toEqual({
-      next: "stop",
-      why: "round budget spent (2 of 2): no cost per hire",
-      from: "ai",
-      by: "m1",
-    });
+    expect(e).toEqual({ next: "again", why: "no cost per hire", from: "ai", by: "m1" });
+    expect(reviewPrompt({ ...round, round: 2 }, defaultPlanFile("web"))).not.toContain(
+      "last round",
+    );
   });
 
   it("takes the model's edge and defaults a back to fetch", async () => {

@@ -4,7 +4,17 @@ import { defaultPlanFile } from "@wrenautomation/raven";
 import { describe, expect, it } from "vitest";
 import { countingIds } from "../ledger/ids.js";
 import { MemoryLedger } from "../ledger/memory.js";
-import { add, brief, check, extract, open, planRound, search, type Who } from "./agent.js";
+import {
+  add,
+  brief,
+  check,
+  extract,
+  open,
+  planRound,
+  search,
+  tunePlan,
+  type Who,
+} from "./agent.js";
 import { type Deps, registry, type Source } from "./ports.js";
 import { run } from "./runner.js";
 import { fold } from "./state.js";
@@ -166,6 +176,30 @@ describe("agent commands", () => {
     const checked = await check(d, runId);
     expect(checked.wrote.filter((r) => r.type === "check")).toHaveLength(2);
 
+    // A pattern rests on kept findings; its source count is counted, not claimed.
+    const keptIds = (await brief(d, runId)).findings.kept.map((f) => f.id);
+    const single = await add(
+      d,
+      runId,
+      { type: "pattern", text: "Surveys agree.", findings: [keptIds[0] ?? ""] },
+      agent,
+    );
+    expect(single.warnings).toEqual(["one source: a claim, not a pattern yet"]);
+    const pattern = await add(
+      d,
+      runId,
+      { type: "pattern", text: "  Repeat clients  drive placements. ", findings: keptIds },
+      agent,
+    );
+    if (pattern.record.type !== "pattern") throw new Error("no pattern");
+    expect(pattern.record.text).toBe("Repeat clients drive placements.");
+    expect(pattern.record.findings).toEqual(keptIds);
+    expect(pattern.record.sources).toBe(2);
+    expect(pattern.warnings).toEqual([]);
+    await expect(
+      add(d, runId, { type: "pattern", text: "x", findings: ["nope"] }, agent),
+    ).rejects.toThrow("no finding nope");
+
     await add(d, runId, { type: "steer", text: "numbers only" }, will);
     await expect(add(d, runId, { type: "steer", text: "x" }, agent)).rejects.toThrow("--human");
     const edge = await add(d, runId, { type: "edge", next: "again", why: "thin" }, agent);
@@ -181,6 +215,10 @@ describe("agent commands", () => {
     expect(b.hits.toRead).toEqual([]);
     expect(b.documents.toExtract).toEqual([]);
     expect(b.steer).toEqual(["numbers only"]);
+    expect(b.patterns.map((p) => [p.text, p.sources])).toEqual([
+      ["Surveys agree.", 1],
+      ["Repeat clients drive placements.", 2],
+    ]);
     // Two searches, two reads, two extracts, two checks: every call a spend.
     expect(b.cost.total.calls).toBe(8);
 
@@ -199,6 +237,21 @@ describe("agent commands", () => {
     expect(result.finished).toBe(true);
     expect((await d.ledger.trace(runId)).length).toBe(before);
     expect(fold(runId, await d.ledger.trace(runId)).next).toBeNull();
+  });
+
+  it("learns: the next plan file version carries the changes, and nothing else moves", () => {
+    const next = tunePlan(planFile, {
+      sources: ["fake"],
+      budget: { rounds: 4 },
+      age: "Age counts.",
+    });
+    expect(next.version).toBe(planFile.version + 1);
+    expect(next.sources).toEqual(["fake"]);
+    expect(next.budget).toEqual({ ...planFile.budget, rounds: 4 });
+    expect(next.age).toBe("Age counts.");
+    expect(next.propose).toBe(planFile.propose);
+    expect(() => tunePlan(planFile, { budget: {} })).toThrow("nothing changed");
+    expect(() => tunePlan(planFile, { budget: { rounds: 0 } })).toThrow();
   });
 
   it("every step needs the round's plan", async () => {
