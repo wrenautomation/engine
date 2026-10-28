@@ -73,6 +73,8 @@ weaver add steer 01M5YS... "numbers only" --human will                          
 weaver add pattern 01M5YS... "Repeat clients come from referrals." --on 01M5YV... 01M5YW...   # what findings say together; sites counted
 weaver add edge 01M5YS... again --why "thin on the UK"                                # the review: a new round
 weaver plan --run 01M5YS...                         # round 2: known, steer and what round 1 left open, in its snapshot
+weaver plan "coaches: who pays for setters" --parent 01M5YS... --why "the best niche of round 1"   # a child run
+weaver add dead 01M5YT... spend --why "found consumers, not buyers"   # later tries skip the facet
 weaver learn web --sources searxng exa --rounds 4   # the plan file's next version, after a good run
 weaver learn web --thin 2                           # the tree's guide: a try under 2 new hits falls through
 weaver learn web --show                             # the current one
@@ -196,7 +198,11 @@ round's plan reads them, and the review's why on `again`, under "The last round 
 `add edge back --to <step>` writes a person's edge: the fold takes it like raven's. A `pattern`
 (`add pattern`) is what several kept findings say together, in the agent's words; its count of
 distinct sites is computed from the findings' proofs, never claimed, and `brief.patterns` lists
-them for the report. A `class` (`add class`) says what kind of source a document is (primary data, survey,
+them for the report. A run can be a child (`--parent <run> --why`): its snapshot names the parent, its plan reads
+what the parent and siblings found (recall over those runs), and its budget is the parent's at
+most. The plan file's `runs` caps the depth (2) and the children per parent round (6). A
+stopped child's stop, patterns and dead ends (`add dead`) reach the parent's next plan as
+known lines; a running child is open. A `class` (`add class`) says what kind of source a document is (primary data, survey,
 practitioner, vendor, forum, news, other), with why; its findings take it, and a class on one
 finding overrides it. `brief.patterns[].classes` counts distinct sites per class. Only the
 agent or a person writes a class. A `draft` (`add draft`, JSON items on stdin) is a rough draft over the kept

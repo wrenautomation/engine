@@ -88,6 +88,8 @@ export interface RunOptions {
   proposals?: readonly Proposal[];
   /** Narrows the plan file's sources for this run. */
   sources?: readonly string[];
+  /** A new run's parent, and why this child: `--parent`. */
+  parent?: { run: string; why: string };
   /** An earlier run to continue. */
   resume?: string;
   /** A run id for a new run; `deps.ids()` when absent. */

@@ -122,6 +122,10 @@ export const PlanFile = z.object({
   age: z.string().optional(),
   /** The facets a query tree of this kind covers. Absent on a file from before version 6: the kind's default. */
   tree: TreeGuide.optional(),
+  /** The run tree's caps: levels from the root run (2: the root and its children), and children per parent round. Absent: 2 and 6. */
+  runs: z
+    .object({ depth: z.number().int().positive(), children: z.number().int().positive() })
+    .optional(),
 });
 export type PlanFile = z.infer<typeof PlanFile>;
 

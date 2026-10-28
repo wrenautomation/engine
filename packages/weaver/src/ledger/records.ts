@@ -50,6 +50,7 @@ export const RECORD_TYPES = [
   "found",
   "draft",
   "class",
+  "dead",
 ] as const;
 export const RecordType = z.enum(RECORD_TYPES);
 export type RecordType = z.infer<typeof RecordType>;
@@ -145,7 +146,19 @@ export type SpendRecord = z.infer<typeof SpendRecord>;
 /** What the plan step was given for one round: the ask, the allow-list, the budget, raven's snapshot. */
 export const SnapshotRecord = Envelope.extend({ type: z.literal("snapshot") })
   .extend(RavenSnapshot.omit({ at: true }).shape)
-  .extend({ ask: Ask, sources: z.array(z.string()), budget: Budget });
+  .extend({
+    ask: Ask,
+    sources: z.array(z.string()),
+    budget: Budget,
+    /** The run this one is a child of: its round when the child began, and why. Every round of the child carries it. */
+    parent: z
+      .object({
+        run: z.string().min(1),
+        round: z.number().int().positive(),
+        why: z.string().min(1),
+      })
+      .optional(),
+  });
 export type SnapshotRecord = z.infer<typeof SnapshotRecord>;
 
 /** The edge taken after a round. */
@@ -266,6 +279,17 @@ export const ClassRecord = Envelope.extend({
 });
 export type ClassRecord = z.infer<typeof ClassRecord>;
 
+/**
+ * A facet the agent gives up on, with why: thin after its tries. Later tiers and rounds of the
+ * run skip it, and a parent's next plan reads it as a dead end.
+ */
+export const DeadRecord = Envelope.extend({
+  type: z.literal("dead"),
+  facet: z.string().min(1),
+  why: z.string().min(1),
+});
+export type DeadRecord = z.infer<typeof DeadRecord>;
+
 export const LedgerRecord = z.discriminatedUnion("type", [
   QueryRecord,
   HitRecord,
@@ -284,6 +308,7 @@ export const LedgerRecord = z.discriminatedUnion("type", [
   FoundRecord,
   DraftRecord,
   ClassRecord,
+  DeadRecord,
 ]);
 export type LedgerRecord = z.infer<typeof LedgerRecord>;
 

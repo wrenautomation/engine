@@ -40,6 +40,7 @@ import {
   toRead,
   uncalledHits,
 } from "./state.js";
+import { budgetUnder, fromChildren, fromSiblings, linkTo, type Parent } from "./tree.js";
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -152,17 +153,43 @@ async function batched<I, O>(
   return { transient };
 }
 
+/**
+ * What a round's plan reads, for the agent's plan and the runner's alike: the known lines (what
+ * the ask brought, what the run kept, then what its children found), the premises, and what is
+ * open (the last round's holes, children still going). A new child also reads what its parent
+ * and siblings found.
+ */
+export async function planAsk(
+  deps: Pick<Deps, "ledger">,
+  state: RunState,
+  base: { text: string; known?: readonly string[]; premises?: readonly string[] },
+  round: number,
+  parent?: Parent,
+): Promise<{ known: string[]; premises: string[]; open: string[] }> {
+  const { known, premises } = withPremises({
+    known: [...new Set([...(base.known ?? []), ...found(state)])],
+    premises: [...(base.premises ?? [])],
+  });
+  const children = await fromChildren(deps, state.run);
+  const siblings = parent && round === 1 ? await fromSiblings(deps, parent.run, base.text) : [];
+  return {
+    known: [...new Set([...known, ...siblings, ...children.known])],
+    premises,
+    open: [...(round > 1 ? openAfter(state, round - 1) : []), ...children.open],
+  };
+}
+
 export const planStep: StepFn = async (ctx, state) => {
   const ask = state.snapshot?.ask ?? ctx.options.ask;
   if (!ask) return { ok: false, note: "no ask: a new run needs one" };
   const planFile = ctx.options.planFile ?? defaultPlanFile(ask.kind);
   const yieldRows = await ctx.deps.ledger.yield();
-  const { known, premises } = withPremises({
-    known: [...new Set([...(ask.known ?? []), ...found(state)])],
-    premises: ask.premises ?? [],
-  });
+  // A resume passes the same options: only a new run links; later rounds take the snapshot's.
+  const asked = state.snapshot ? undefined : ctx.options.parent;
+  const link = asked ? await linkTo(ctx.deps, asked, planFile) : null;
+  const parent = link?.parent ?? state.snapshot?.parent;
+  const { known, premises, open } = await planAsk(ctx.deps, state, ask, ctx.round, parent);
   const steer = [...new Set([...(ask.steer ?? []), ...state.steers.map((s) => s.text)])];
-  const open = ctx.round > 1 ? openAfter(state, ctx.round - 1) : [];
   const p = await plan({
     ask: { ...ask, known, premises, steer, open },
     planFile,
@@ -176,7 +203,14 @@ export const planStep: StepFn = async (ctx, state) => {
   pick(ctx.deps.sources, p.sources);
   const { at: _at, ...snapshot } = p.snapshot;
   await ctx.write(
-    { type: "snapshot", ask: p.ask, sources: p.sources, budget: p.budget, ...snapshot },
+    {
+      type: "snapshot",
+      ask: p.ask,
+      sources: p.sources,
+      budget: await budgetUnder(ctx.deps, parent, p.budget),
+      ...snapshot,
+      ...(parent ? { parent } : {}),
+    },
     tool(ctx.deps.runner),
   );
   for (const { from, by, ...q } of p.queries)

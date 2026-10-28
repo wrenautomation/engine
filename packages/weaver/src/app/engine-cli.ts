@@ -348,6 +348,11 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     .option("--resume <run>", "continue an earlier run from the step it stopped on")
     .option("--run <id>", "the new run's id")
     .option("--pause", "stop after each round's review: `weaver steer`, then --resume")
+    .option(
+      "--parent <run>",
+      "a new run's parent: this run is a child of it (one niche of a wide run)",
+    )
+    .option("--why <why>", "with --parent: why this child")
     .action(
       async (
         ask: string | undefined,
@@ -364,6 +369,8 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
           resume?: string;
           run?: string;
           pause?: boolean;
+          parent?: string;
+          why?: string;
         } & Machine,
       ) => {
         if (!ask && !o.resume) throw new Error("run needs an ask, or --resume <run>");
@@ -414,6 +421,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
           proposals,
           onStep: progress,
           ...(o.pause ? { pause: true } : {}),
+          ...(o.parent ? { parent: { run: o.parent, why: o.why ?? "" } } : {}),
         };
         let result: Awaited<ReturnType<typeof run>> | null = null;
         for (let n = 0; result === null; n++) {
@@ -502,12 +510,19 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       "--sources <name...>",
       "the allow-list for this run (default: the plan file's, as far as this machine has them)",
     )
+    .option(
+      "--parent <run>",
+      "a new run's parent: this run is a child of it (one niche of a wide run)",
+    )
+    .option("--why <why>", "with --parent: why this child")
     .action(
       async (
         ask: string | undefined,
         o: Common &
           Machine &
           Agent & {
+            parent?: string;
+            why?: string;
             run?: string;
             kind: string;
             known?: string[];
@@ -538,6 +553,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
               : {}),
             planFile,
             model: s.model?.id ?? null,
+            ...(o.parent ? { parent: { run: o.parent, why: o.why ?? "" } } : {}),
           }),
         );
       },
@@ -755,6 +771,15 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     .requiredOption("--on <finding...>", "the findings it rests on")
     .action((runId: string, text: string, o: Common & Agent & { on: string[] }) =>
       added(o, runId, { type: "pattern", text, findings: o.on }),
+    );
+
+  agent(common(adds.command("dead <run> <facet>")))
+    .description(
+      "give up on a facet, with why: later tries and rounds skip it, and a parent's next plan reads it as a dead end",
+    )
+    .requiredOption("--why <why>")
+    .action((runId: string, facet: string, o: Common & Agent & { why: string }) =>
+      added(o, runId, { type: "dead", facet, why: o.why }),
     );
 
   agent(common(adds.command("class <run> <on> <class>")))

@@ -38,6 +38,8 @@ export interface RecallOptions {
   not?: string;
   /** Only runs of this ask kind. */
   kind?: AskKind;
+  /** Only these runs: a child's siblings and parent. */
+  runs?: readonly string[];
 }
 
 /** Several ledgers read as one (a folder per day): their records merged in time order. */
@@ -63,6 +65,7 @@ export async function recall(
   const findings = ofType(records, "finding")
     .filter((f) => f.run !== o.not && calls.get(f.id) !== "drop")
     .filter((f) => !o.kind || asks.get(f.run)?.kind === o.kind)
+    .filter((f) => !o.runs || o.runs.includes(f.run))
     .reverse();
   const byKey = new Map<string, Recalled>();
   for (const f of findings) {

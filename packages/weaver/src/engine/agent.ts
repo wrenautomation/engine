@@ -7,7 +7,7 @@
  * can take a run over, and the fold reads both the same. The budget is a guard rail here: the
  * brief shows it, nothing cuts a query or stops a round by it.
  */
-import { type ClaimAnswer, gateFindings, hostOf, patternOf } from "@wrenautomation/falcon/document";
+import { type ClaimAnswer, gateFindings, patternOf } from "@wrenautomation/falcon/document";
 import { gateDrafts, type NumberedClaim } from "@wrenautomation/falcon/study";
 import { isTransient } from "@wrenautomation/models";
 import {
@@ -18,7 +18,6 @@ import {
   QueryTree,
   type TreeGuide,
   treeOf,
-  withPremises,
   type YieldRow,
 } from "@wrenautomation/raven";
 import {
@@ -37,9 +36,8 @@ import { costOf } from "./cost.js";
 import type { Deps } from "./ports.js";
 import { context } from "./runner.js";
 import {
-  classOfFinding,
+  classesOf,
   fold,
-  found,
   kept,
   type Pointer,
   personRound,
@@ -51,10 +49,12 @@ import {
   extractDocuments,
   fetchStep,
   openAfter,
+  planAsk,
   readHits,
   type StepFn,
   type StepResult,
 } from "./steps.js";
+import { budgetUnder, type ChildView, linkTo, runTree } from "./tree.js";
 
 /** Who a record is from: the agent (`ai`, its id) or the person through it (`human`, their name). */
 export interface Who {
@@ -143,6 +143,8 @@ export interface PlanInput {
   planFile: PlanFile;
   /** The model id the extract will use, for the snapshot; null when none. */
   model: string | null;
+  /** A new run's parent, and why this child. */
+  parent?: { run: string; why: string };
 }
 
 /**
@@ -166,17 +168,17 @@ export async function planRound(deps: Deps, input: PlanInput): Promise<Did> {
   if (!base) throw new Error("a new run needs an ask");
   for (const name of input.planFile.sources)
     if (!deps.sources.has(name)) throw new Error(`no source named ${name}`);
-  const { known, premises } = withPremises({
-    known: [...new Set([...(base.known ?? []), ...found(state)])],
-    premises: base.premises ?? [],
-  });
+  if (input.parent && state.snapshot) throw new Error("--parent: only a new run");
+  const link = input.parent ? await linkTo(deps, input.parent, input.planFile) : null;
+  const parent = link?.parent ?? state.snapshot?.parent;
+  const { known, premises, open } = await planAsk(deps, state, base, round, parent);
   const ask = {
     text: base.text,
     kind: base.kind,
     known,
     premises,
     steer: [...new Set([...(last?.steer ?? []), ...state.steers.map((s) => s.text)])],
-    open: round > 1 ? openAfter(state, round - 1) : [],
+    open,
     ...(base.site ? { site: base.site } : {}),
   };
   const yieldRows = await deps.ledger.yield();
@@ -186,15 +188,19 @@ export async function planRound(deps: Deps, input: PlanInput): Promise<Did> {
       type: "snapshot",
       ask,
       sources: input.planFile.sources,
-      budget: input.planFile.budget,
+      budget: await budgetUnder(deps, parent, input.planFile.budget),
       known: ask.known,
       planFile: { id: input.planFile.id, version: input.planFile.version },
       model: input.model,
       yieldRows: yieldRows.length,
+      ...(parent ? { parent } : {}),
     },
     tool(deps),
   );
-  const note = `round ${round} over ${input.planFile.sources.join(", ")}; search next`;
+  const note = [
+    `round ${round} over ${input.planFile.sources.join(", ")}; search next`,
+    ...(link?.warnings ?? []),
+  ].join("; ");
   await ctx.write({ type: "done", step: "plan", ok: true, note }, tool(deps));
   const after = await deps.ledger.trace(run);
   return {
@@ -269,8 +275,10 @@ export interface FacetView {
 export interface TreeView {
   thin: number;
   facets: FacetView[];
-  /** Facets the guide names that no query of the round served. */
+  /** Facets the guide names that no query of the round served, dead ones left out. */
   uncovered: string[];
+  /** Facets the agent gave up on: no try runs for them again. */
+  dead: string[];
 }
 
 /** The round's queries by facet and try, with what each wrote and what triage kept: rebuilt from the records. */
@@ -315,10 +323,12 @@ export function treeView(state: RunState, round: number, guide: TreeGuide): Tree
     f.enough = f.kept >= guide.thin;
   }
   const served = new Set(facets.map((f) => f.name));
+  const dead = state.dead.map((d) => d.facet);
   return {
     thin: guide.thin,
     facets,
-    uncovered: guide.facets.map((f) => f.name).filter((n) => !served.has(n)),
+    uncovered: guide.facets.map((f) => f.name).filter((n) => !served.has(n) && !dead.includes(n)),
+    dead,
   };
 }
 
@@ -382,6 +392,10 @@ export async function searchTree(
   const ctx = context(deps, {}, run, round, "plan");
   const ids: string[] = [];
   for (const facet of tree.facets) {
+    if (before.dead.includes(facet.name)) {
+      lines.push(`${facet.name}: dead`);
+      continue;
+    }
     const ran = before.facets.find((f) => f.name === facet.name);
     const tier = (ran?.tries.at(-1)?.tier ?? 0) + 1;
     const next = facet.tries[tier - 1];
@@ -588,7 +602,8 @@ export type Addition =
   | { type: "gap"; note: string; on?: string }
   | { type: "pattern"; text: string; findings: string[] }
   | { type: "draft"; for: string; items: DraftInput[] }
-  | { type: "class"; on: string; class: SourceClass; why: string };
+  | { type: "class"; on: string; class: SourceClass; why: string }
+  | { type: "dead"; facet: string; why: string };
 
 /** One item of a draft as the agent writes it: cites are finding or pattern ids. */
 export interface DraftInput {
@@ -618,7 +633,8 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
     a.type === "pattern" ||
     a.type === "check" ||
     a.type === "draft" ||
-    a.type === "class"
+    a.type === "class" ||
+    a.type === "dead"
       ? state.round
       : personRound(state);
   const warnings: string[] = [];
@@ -742,6 +758,13 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
       if (pattern.sources < 2) warnings.push("one source: a claim, not a pattern yet");
       return { record: await write({ type: "pattern", ...pattern }), warnings };
     }
+    case "dead": {
+      const facet = a.facet.trim();
+      if (!facet) throw new Error("dead: which facet?");
+      if (state.dead.some((d) => d.facet === facet))
+        throw new Error(`facet "${facet}" is dead already`);
+      return { record: await write({ type: "dead", facet, why: why(a.why, "dead") }), warnings };
+    }
     case "class": {
       const target =
         state.documents.some((d) => d.id === a.on) || state.findings.some((f) => f.id === a.on);
@@ -799,6 +822,7 @@ export interface PlanChanges {
   triage?: string;
   review?: string;
   tree?: TreeGuide;
+  runs?: PlanFile["runs"];
 }
 
 /**
@@ -816,6 +840,7 @@ export function tunePlan(current: PlanFile, changes: PlanChanges): PlanFile {
     ...(changes.triage ? { triage: changes.triage } : {}),
     ...(changes.review ? { review: changes.review } : {}),
     ...(changes.tree ? { tree: changes.tree } : {}),
+    ...(changes.runs ? { runs: changes.runs } : {}),
     version: current.version + 1,
   });
   if (JSON.stringify({ ...next, version: 0 }) === JSON.stringify({ ...current, version: 0 }))
@@ -861,6 +886,13 @@ export interface Brief {
     /** Distinct sites per class over its kept findings; `unclassed` counts the sites with none. */
     classes: Partial<Record<SourceClass | "unclassed", number>>;
   }[];
+  /** The run this one is a child of. */
+  parent: { run: string; round: number; why: string } | null;
+  /** The runs that name this one as parent, and what the tree under it read and cost. */
+  children: ChildView[];
+  treeCost: ReturnType<typeof costOf> | null;
+  /** Facets given up on, with why. */
+  dead: { facet: string; why: string }[];
   /** The latest rough draft, or null: never the final. */
   draft: { id: string; round: number; for: string; items: DraftRecord["items"] } | null;
   verdicts: { document: string; url: string; quality: string; gap?: string }[];
@@ -884,20 +916,6 @@ export interface Brief {
   cost: ReturnType<typeof costOf>;
 }
 
-/** Distinct sites per class over a pattern's findings still kept. */
-function classesOf(
-  state: RunState,
-  ids: readonly string[],
-): Partial<Record<SourceClass | "unclassed", number>> {
-  const sites = new Map<SourceClass | "unclassed", Set<string>>();
-  for (const f of state.findings) {
-    if (!ids.includes(f.id) || !kept(state, f)) continue;
-    const c = classOfFinding(state, f) ?? "unclassed";
-    sites.set(c, (sites.get(c) ?? new Set()).add(hostOf(f.proof.url)));
-  }
-  return Object.fromEntries([...sites].map(([c, s]) => [c, s.size]));
-}
-
 /** What raven's prompts see, as JSON: everything the agent needs to plan, triage, review and stop. */
 export async function brief(deps: Deps, run: string): Promise<Brief> {
   const state = await stateOf(deps, run);
@@ -913,6 +931,7 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
   const qOf = queriesOf(state);
   const facetsOf = (hit: string) =>
     [...new Set([...(qOf.get(hit) ?? [])].flatMap((q) => facetOf.get(q) ?? []))].sort();
+  const family = await runTree(deps, run);
   const tree =
     s && state.queries.some((q) => q.round === round && q.facet)
       ? treeView(state, round, await guideOf(deps, s.ask))
@@ -951,6 +970,10 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
       sources,
       classes: classesOf(state, findings),
     })),
+    parent: s?.parent ?? null,
+    children: family.children,
+    treeCost: family.children.length ? family.cost : null,
+    dead: state.dead.map(({ facet, why }) => ({ facet, why })),
     draft: (() => {
       const d = state.drafts.at(-1);
       return d ? { id: d.id, round: d.round, for: d.for, items: d.items } : null;

@@ -3,12 +3,14 @@
  * trace again. The fold gives the ask, the round, the plan as raven made it, what each step
  * has handled, and the pointer: the next step to run, from the `done` and `edge` records.
  */
+import { hostOf } from "@wrenautomation/falcon/document";
 import { Plan } from "@wrenautomation/raven";
 import { latestCalls, ofType } from "../ledger/ledger.js";
 import {
   type CallRecord,
   type CheckRecord,
   type ClassRecord,
+  type DeadRecord,
   type DocumentRecord,
   type DraftRecord,
   type EdgeRecord,
@@ -63,6 +65,8 @@ export interface RunState {
   patterns: PatternRecord[];
   drafts: DraftRecord[];
   classes: ClassRecord[];
+  /** Facets the agent gave up on, for the rest of the run. */
+  dead: DeadRecord[];
   /** The latest class on each document and finding. */
   classOf: Map<string, SourceClass>;
   /** A known hit found again by another query. */
@@ -123,6 +127,7 @@ export function fold(run: string, records: readonly LedgerRecord[]): RunState {
     patterns: ofType(records, "pattern"),
     drafts: ofType(records, "draft"),
     classes: ofType(records, "class"),
+    dead: ofType(records, "dead"),
     classOf: new Map(ofType(records, "class").map((c) => [c.on, c.class])),
     founds: ofType(records, "found"),
     hitByKey: new Map(hits.map((h) => [h.key, h.id])),
@@ -229,3 +234,17 @@ export const toExtract = (state: RunState, round: number): DocumentRecord[] => {
 /** A finding's class: its own, else its document's; undefined when neither has one. */
 export const classOfFinding = (state: RunState, f: FindingRecord): SourceClass | undefined =>
   state.classOf.get(f.id) ?? state.classOf.get(f.document);
+
+/** Distinct sites per class over a pattern's findings still kept. */
+export function classesOf(
+  state: RunState,
+  ids: readonly string[],
+): Partial<Record<SourceClass | "unclassed", number>> {
+  const sites = new Map<SourceClass | "unclassed", Set<string>>();
+  for (const f of state.findings) {
+    if (!ids.includes(f.id) || !kept(state, f)) continue;
+    const c = classOfFinding(state, f) ?? "unclassed";
+    sites.set(c, (sites.get(c) ?? new Set()).add(hostOf(f.proof.url)));
+  }
+  return Object.fromEntries([...sites].map(([c, s]) => [c, s.size]));
+}

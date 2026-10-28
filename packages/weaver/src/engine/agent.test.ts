@@ -532,6 +532,107 @@ describe("agent commands", () => {
     expect(tested.tree.uncovered).not.toContain("premise");
   });
 
+  it("a tree of runs: a child links to its parent, and a stopped child's patterns and dead ends reach the parent's next plan", async () => {
+    const d = deps();
+    const runs = { depth: 2, children: 2 };
+    const pf = { ...planFile, budget: { ...planFile.budget, rounds: 2 }, runs };
+    const { run: root } = await planRound(d, {
+      ask: { text: "which niche buys repeat work", kind: "web" },
+      planFile: pf,
+      model: "m",
+    });
+    await open(d, root, { urls: ["https://a.example/one"], why: "wide" }, agent);
+    await extract(d, root);
+    const child = async (text: string, why = "a niche", parent = root) =>
+      (
+        await planRound(d, {
+          ask: { text, kind: "web" },
+          planFile: { ...planFile, budget: { ...planFile.budget, reads: 9 }, runs },
+          model: "m",
+          parent: { run: parent, why },
+        })
+      ).run;
+
+    // A child reads what its parent found, and never gets more budget than its parent.
+    const a = await child("repeat clients placements");
+    const ba = await brief(d, a);
+    expect(ba.parent).toEqual({ run: root, round: 1, why: "a niche" });
+    expect(ba.budget?.reads).toBe(1);
+    expect(ba.ask?.known).toContain(
+      "38% of placements came from repeat clients. (https://a.example/one)",
+    );
+
+    // The child goes deep, gives up on a facet, and stops.
+    await open(d, a, { urls: ["https://b.example/four"], why: "deep" }, agent);
+    await extract(d, a);
+    const [f] = (await brief(d, a)).findings.kept;
+    if (!f) throw new Error("the child kept nothing");
+    const p = await add(
+      d,
+      a,
+      { type: "pattern", text: "Weekly calls keep clients.", findings: [f.id] },
+      agent,
+    );
+    await add(d, a, { type: "dead", facet: "spend", why: "consumers, not buyers" }, agent);
+    await expect(add(d, a, { type: "dead", facet: "spend", why: "again" }, agent)).rejects.toThrow(
+      "dead already",
+    );
+    const skipped = await searchTree(
+      d,
+      a,
+      { facets: [{ name: "spend", why: "w", tries: [[{ terms: "a", why: "w" }]] }] },
+      agent,
+    );
+    expect(skipped.note).toContain("spend: dead");
+    expect(skipped.tree.dead).toEqual(["spend"]);
+    await add(d, a, { type: "edge", next: "stop", why: "one niche checked" }, agent);
+
+    // The caps: children per parent round, and depth.
+    const b = await child("coaches", "a second niche");
+    await expect(child("third")).rejects.toThrow("the cap");
+    await expect(child("deeper", "go deeper", a)).rejects.toThrow("the tree stops at 2");
+    await expect(child("no why", " ")).rejects.toThrow("why this child");
+
+    const rb = await brief(d, root);
+    expect(rb.children.map((c) => [c.run, c.stopped, c.patterns])).toEqual([
+      [a, true, 1],
+      [b, false, 0],
+    ]);
+    expect(rb.treeCost).not.toBeNull();
+
+    // The parent's next plan: the stopped child as known lines, the running one as open.
+    await add(d, root, { type: "edge", next: "again", why: "go deep per niche" }, agent);
+    const next = await planRound(d, { run: root, planFile: pf, model: "m" });
+    const snap = next.wrote[0];
+    if (snap?.type !== "snapshot") throw new Error("no snapshot");
+    expect(snap.ask.known).toEqual(
+      expect.arrayContaining([
+        `child run ${a} ("repeat clients placements") stopped: one niche checked`,
+        `Weekly calls keep clients. (run ${a}, pattern ${p.record.id}; sites: unclassed 1)`,
+        `dead end, skip it: spend: consumers, not buyers (run ${a})`,
+      ]),
+    );
+    expect(snap.ask.open).toContain(`child run ${b} ("coaches") has not stopped`);
+    expect(snap.ask.premises).toEqual([]);
+
+    // The runner links a child the same way.
+    await run(
+      { ...d, model: null },
+      {
+        run: "by-runner",
+        ask: { text: "staffing repeat clients", kind: "web" },
+        planFile: { ...planFile, runs },
+        parent: { run: root, why: "the runner's niche" },
+        steps: 1,
+      },
+    );
+    const byRunner = fold("by-runner", await d.ledger.trace("by-runner")).snapshot;
+    expect(byRunner?.parent).toEqual({ run: root, round: 2, why: "the runner's niche" });
+    expect(byRunner?.ask.known).toContain(
+      "38% of placements came from repeat clients. (https://a.example/one)",
+    );
+  });
+
   it("recalls what earlier runs found: quote, date and run, dropped ones left out", async () => {
     const d = deps();
     const runOf = async (text: string) => {

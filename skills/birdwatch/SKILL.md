@@ -38,6 +38,8 @@ weaver add pattern <run> "<what several findings say together>" --on <finding> <
 weaver add edge <run> again|stop --why "<why>"       # your review of the round
 echo '[{"title":"..","body":"..","cites":["<pattern or finding>"]}]' | weaver add draft <run> --for "<a decision memo>"   # a rough draft, gated
 weaver plan --run <run>                              # after again: the next round
+weaver plan "<one niche>" --parent <run> --why "<why this child>"   # a child run: it reads what the tree found
+weaver add dead <run> <facet> --why "<why>"          # give up on a facet; later tries skip it
 weaver learn <kind> [--sources ...] [--rounds N] [--age "..."]   # after a good run, on the person's yes
 ```
 
@@ -107,14 +109,23 @@ records show done.
 7. **Review.** Ask: does what is kept answer the ask? What is missing? Write each hole as a gap.
    Then the edge: `again` with a why that names the hole (the next round's plan reads it), or
    `stop` with a why that says what the run has and what it still lacks. The budget's rounds
-   are a guard rail: past them, say in the why why one more round is worth it.
-8. **Report.** From `brief`: the patterns first, each with its site count per class and its findings;
+   are a guard rail: past them, say in the why why one more round is worth it. A facet still
+   thin after its tries, or one that searches the wrong buyer: `add dead <facet> --why`.
+8. **Children.** A wide ask (which niche, which offer) goes deep in child runs, one per option
+   worth it: `plan "<the option's ask>" --parent <run> --why "<why this one>"`. The child's plan
+   reads what the parent and its siblings found; its budget is never more than the parent's.
+   The plan file caps the depth (2: the root and its children) and the children per round. Drive
+   each child to its stop. Then `add edge again` on the parent: its next plan reads each stopped
+   child's stop, patterns (with sites per class) and dead ends, and lists a child still going
+   as open. The parent decides: drop an option, add one, or stop. `brief.children` shows the
+   tree; `brief.treeCost` what all of it cost.
+9. **Report.** From `brief`: the patterns first, each with its site count per class and its findings;
    then the kept findings no pattern rests on, each with its quote, URL and date; the gaps; the
    cost line. Nothing in the report that is not a finding. When the person wants prose (a memo,
    an SOP outline), write a rough draft with `add draft`: each item cites kept patterns or
    findings, and each number comes from a cited quote, or the gate drops the item. A draft is
    never final: the person writes the SOP or the decision.
-9. **Learn.** If the run was good and the person agrees, `weaver learn <kind>` with what it
+10. **Learn.** If the run was good and the person agrees, `weaver learn <kind>` with what it
    taught: a source order that yielded, a budget that fit, an age sentence, a `--thin` that
    fits the kind, a facet the guide should name (`--tree <file>`). The next run of that kind
    starts there. Never change a prompt without showing the person the diff.
