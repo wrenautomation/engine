@@ -506,6 +506,8 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
         terms: string | undefined,
         o: Common & Machine & Agent & { why?: string; site?: string },
       ) => {
+        if (!terms && process.stdin.isTTY)
+          throw new Error("search: terms, or a JSON array of {terms, why} on stdin");
         const queries: QueryInput[] = terms
           ? [{ terms, why: o.why ?? "", ...(o.site ? { site: o.site } : {}) }]
           : (JSON.parse(await stdinText()) as QueryInput[]);
