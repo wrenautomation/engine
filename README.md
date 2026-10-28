@@ -18,6 +18,13 @@ Cohere reads images, not video. `watch` sends frames to an eye (`cohereEye`) and
 ear (`cohereSpeech`). A model that takes video (`geminiVideo`) reads the whole file too. A YouTube
 video goes to Gemini by URL, in 10-minute clips (`clip` on a video part).
 
+## Drive it
+
+`skills/birdwatch/SKILL.md` is how an agent (Claude Code, Codex, any agent with a shell) runs a
+research ask over weaver's commands: it plans, triages, reviews and stops; the engine searches,
+reads, extracts behind the quote gate, checks, and keeps the ledger. `.claude/skills/birdwatch`
+links to it, so a Claude Code session in this repo has `/birdwatch`.
+
 ## Work here
 
 ```sh
