@@ -2,8 +2,9 @@
  * SearXNG: a self-hosted metasearch, `GET $url/search?q=&format=json`. Free. `token` goes as a
  * bearer for an instance behind an authenticating proxy (Wren's, on the VPS).
  */
+
+import { httpError, transport } from "@wrenautomation/models";
 import type { Source } from "../engine/ports.js";
-import { httpError, transport } from "../engine/transient.js";
 
 interface SearxResult {
   url?: string;

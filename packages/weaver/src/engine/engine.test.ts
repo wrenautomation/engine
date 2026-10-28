@@ -1,5 +1,6 @@
 import { Cut, claimExtractor } from "@wrenautomation/falcon/document";
-import { defaultPlanFile, type Model, scriptedModel } from "@wrenautomation/raven";
+import { fakeModel, type Model, scriptedModel, Transient } from "@wrenautomation/models";
+import { defaultPlanFile } from "@wrenautomation/raven";
 import { describe, expect, it } from "vitest";
 import { countingIds } from "../ledger/ids.js";
 import { MemoryLedger } from "../ledger/memory.js";
@@ -7,7 +8,6 @@ import { canonical } from "./canonical.js";
 import { type Deps, pick, registry, type Source } from "./ports.js";
 import { run } from "./runner.js";
 import { fold } from "./state.js";
-import { Transient } from "./transient.js";
 
 const pages: Record<string, string> = {
   "https://a.example/one":
@@ -81,6 +81,22 @@ const answers = {
     ],
   },
   stop: { next: "stop", why: "enough" },
+};
+
+/** Scripted answers in order, each prompt kept; `cut` may throw first for a prompt. */
+const recorded = (
+  answers: readonly unknown[],
+  prompts: string[] = [],
+  cut?: (p: string) => void,
+) => {
+  let i = 0;
+  return fakeModel((prompt) => {
+    prompts.push(prompt);
+    cut?.(prompt);
+    const a = answers[i++];
+    if (a === undefined) throw new Error(`no answer ${i}`);
+    return typeof a === "string" ? a : JSON.stringify(a);
+  }, "m");
 };
 
 const deps = (model: Model | null, open = opener()): Deps => {
@@ -384,14 +400,7 @@ describe("runner", () => {
   it("gives the review each document's verdict", async () => {
     const a = answers;
     const prompts: string[] = [];
-    const inner = scriptedModel([a.plan1, a.triage1, a.extractOne, a.extractThree, a.stop], "m");
-    const model: Model = {
-      id: "m",
-      ask: (prompt, shape) => {
-        prompts.push(prompt);
-        return inner.ask(prompt, shape);
-      },
-    };
+    const model = recorded([a.plan1, a.triage1, a.extractOne, a.extractThree, a.stop], prompts);
     const out = await run(deps(model), { ask: { text: "repeat clients", kind: "web" }, planFile });
     expect(out.finished).toBe(true);
     const review = prompts.at(-1) ?? "";
@@ -404,7 +413,7 @@ describe("runner", () => {
   it("pauses after a review that says again; a steer is first in every prompt after", async () => {
     const a = answers;
     const prompts: string[] = [];
-    const inner = scriptedModel(
+    const model = recorded(
       [
         a.plan1,
         a.triage1,
@@ -416,15 +425,8 @@ describe("runner", () => {
         a.extractFour,
         a.stop,
       ],
-      "m",
+      prompts,
     );
-    const model: Model = {
-      id: "m",
-      ask: (prompt, shape) => {
-        prompts.push(prompt);
-        return inner.ask(prompt, shape);
-      },
-    };
     const d = deps(model);
     const first = await run(d, {
       ask: { text: "repeat clients", kind: "web", steer: ["numbers only"] },
@@ -462,20 +464,19 @@ describe("runner", () => {
 
   it("continues an extract the output cap cut: both asks a spend that worked, with tokens", async () => {
     const a = answers;
-    const inner = scriptedModel([a.plan1, a.triage1, a.extractThree, a.extractThree, a.stop], "m");
     let askedOne = 0;
-    const model: Model = {
-      id: "m",
-      ask: async (prompt, shape) => {
+    const model = recorded(
+      [a.plan1, a.triage1, a.extractThree, a.extractThree, a.stop],
+      [],
+      (prompt) => {
         if (prompt.includes("DOCUMENT: https://a.example/one") && !askedOne++)
           throw new Cut(
             "cut",
             '{"findings": [{"text": "38% of placements came from repeat clients.", "quote": "38% of placements came from repeat clients"}, {"text": "half',
             { input: 100, output: 50 },
           );
-        return inner.ask(prompt, shape);
       },
-    };
+    );
     const out = await run(deps(model), { ask: { text: "repeat clients", kind: "web" }, planFile });
     expect(out.finished).toBe(true);
     expect(askedOne).toBe(2);

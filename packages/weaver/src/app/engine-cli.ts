@@ -3,9 +3,9 @@
  * `yield` per source, `sources` on this machine. Every command prints JSON, so Claude Code
  * can drive it. The ledger is a folder (`--ledger`, WEAVER_LEDGER, default `./ledger`); a
  * writer names this terminal's file in it (`--writer`, WEAVER_WRITER, default the user name).
- * The model is `anthropic` by default (Claude Haiku direct, ANTHROPIC_API_KEY; `anthropic:sonnet`,
- * `anthropic:opus` or an id), `gateway[:alias]` for Wren's LLM gateway
- * (WREN_LLM_GATEWAY_URL and WREN_LLM_GATEWAY_TOKEN). A host with its own ledger, sources or
+ * The model is a `@wrenautomation/models` spec: `anthropic` by default (Claude Haiku direct,
+ * ANTHROPIC_API_KEY), `gateway[:alias]`, `gemini`, `claude-code`, `command:<cmd>` and the rest
+ * of its grammar. A host with its own ledger, sources or
  * model passes them in `EngineCliDeps`; wren's `research` command is these commands over
  * Postgres. A run that stops on a transient failure (a 429, a 5xx, a dropped connection) is
  * resumed by `run` itself after a pause, up to RESUMES times.
@@ -13,25 +13,17 @@
 import { userInfo } from "node:os";
 import type { Extractor } from "@wrenautomation/falcon/document";
 import { claimExtractor } from "@wrenautomation/falcon/document";
+import { isTransient, type Model } from "@wrenautomation/models";
+import { modelFromSpec } from "@wrenautomation/models/spec";
 import {
   type AskKind,
-  commandModel,
   defaultPlanFile,
-  type Model,
   PLAN_KINDS,
   type PlanFile,
   type Proposal,
 } from "@wrenautomation/raven";
 import type { Command } from "commander";
-import {
-  fold,
-  registry,
-  run,
-  type Source,
-  type Sources,
-  type StepEvent,
-  Transient,
-} from "../engine/index.js";
+import { fold, registry, run, type Source, type Sources, type StepEvent } from "../engine/index.js";
 import { PoliteFetcher, userAgent } from "../fetch/fetcher.js";
 import {
   FilesLedger,
@@ -52,39 +44,12 @@ import {
   searxng,
   ytdlpSource,
 } from "../sources/index.js";
-import { anthropicModel } from "./anthropic-model.js";
-import { gatewayModel } from "./gateway-model.js";
 
 const DEFAULT_MODEL = "anthropic";
-/** Claude Code headless, raven's way: a command that reads the prompt on stdin. */
-const CLAUDE_CODE = "claude -p --output-format json";
 /** Resumes `run` makes on its own after a transient failure. */
 export const RESUMES = 5;
 /** The longest pause before a resume, whatever `retry-after` said. */
 const MAX_RESUME_WAIT_MS = 300_000;
-
-/**
- * `anthropic[:model]` is Claude direct, `gateway[:alias]` the LLM gateway; anything else is a
- * command, raven's way.
- */
-export function modelOf(spec: string, printed: NodeJS.ProcessEnv): Model {
-  const a = /^anthropic(?::(.+))?$/.exec(spec);
-  if (a) {
-    if (!printed.ANTHROPIC_API_KEY)
-      throw new Error(
-        "--model anthropic needs ANTHROPIC_API_KEY (the Mac's is in the model keys file)",
-      );
-    return anthropicModel({ apiKey: printed.ANTHROPIC_API_KEY, ...(a[1] ? { model: a[1] } : {}) });
-  }
-  const m = /^gateway(?::(.+))?$/.exec(spec);
-  if (!m) return commandModel(spec, spec === CLAUDE_CODE ? "claude-code" : spec);
-  if (!printed.WREN_LLM_GATEWAY_URL) throw new Error("--model gateway needs WREN_LLM_GATEWAY_URL");
-  return gatewayModel({
-    url: printed.WREN_LLM_GATEWAY_URL,
-    token: printed.WREN_LLM_GATEWAY_TOKEN ?? null,
-    ...(m[1] ? { model: m[1] } : {}),
-  });
-}
 
 /** The pause before a resume: to `retryAfter` (five minutes at most), else 15 s per resume so far. */
 /** What a run's spends add up to: USD where priced, tokens and calls per model or source. */
@@ -159,7 +124,7 @@ export type HostLedger = Ledger & {
 export interface EngineCliDeps {
   ledger?(o: Common): HostLedger;
   sources?(o: Common, ledger: HostLedger): Sources;
-  /** The model for a `--model` spec; the default knows `anthropic`, `gateway` and a command. */
+  /** The model for a `--model` spec; the default is models' `modelFromSpec`. */
   model?(spec: string, printed: NodeJS.ProcessEnv): Model;
   extractor?: Extractor;
   /** The pause before a resume; a test passes a stub. */
@@ -259,8 +224,8 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       process.env.WEAVER_WRITER ?? userInfo().username,
     )
     .option(
-      "--model <command>",
-      "anthropic[:model], gateway[:alias], or a command (stdin: prompt, stdout: answer; `claude -p --output-format json` is Claude Code)",
+      "--model <spec>",
+      "a models spec: anthropic[:haiku|sonnet|opus], gateway[:alias], gemini[:id], claude-code, command:<cmd>, ...",
       process.env.WEAVER_MODEL ?? DEFAULT_MODEL,
     )
     .option("--no-model", "no model: your queries only, every hit read, nothing extracted")
@@ -311,7 +276,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
         // raven narrows to the plan file's sources, so the run's allow-list goes in as the plan file's.
         const planFile = { ...tuned, sources: allowList(sources, wanted, !!o.sources) };
         const model: Model | null =
-          o.model === false ? null : (deps.model ?? modelOf)(o.model, process.env);
+          o.model === false ? null : (deps.model ?? modelFromSpec)(o.model, process.env);
         const byHand = [
           ...(o.propose ?? []).map((terms) => ({ kind, terms, why: "proposed by hand" })),
           // The paste answers the first query it sees: this one, when nothing else is proposed.
@@ -357,7 +322,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
               ...(n === 0 && !o.resume ? { run: id } : { resume: id }),
             });
           } catch (err) {
-            if (!(err instanceof Transient)) throw err;
+            if (!isTransient(err)) throw err;
             if (n >= RESUMES) {
               console.error(`${id}: ${err.message}; stopped after ${RESUMES} resumes`);
               break;

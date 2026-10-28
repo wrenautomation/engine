@@ -4,17 +4,22 @@
  * ask and source call writes a `spend` with what it cost and whether it worked. A call that
  * fails with a `Transient` is tried again with a pause, three tries in all, every attempt on
  * record; a step that still cannot go on throws it past the runner with no `done`, so a resume
- * runs the step again once the cause has passed. A model answer the output cap cut (falcon's
+ * runs the step again once the cause has passed. A model answer the output cap cut (models'
  * `Cut`) is a spend that worked, with its tokens: the extractor goes on from it. `pause` stops
  * the loop after a review that says `again`, so the person can steer before the next round.
  */
-import { isCut } from "@wrenautomation/falcon/document";
-import type { Model, Usage } from "@wrenautomation/raven";
+import {
+  isCut,
+  isTransient,
+  type Model,
+  modelOf,
+  promptText,
+  type Usage,
+} from "@wrenautomation/models";
 import { type Envelope, type From, LedgerRecord, type Step } from "../ledger/records.js";
 import type { Deps, RunOptions, Source } from "./ports.js";
 import { fold, type RunState } from "./state.js";
 import { STEP_TABLE, type StepContext } from "./steps.js";
-import { Transient } from "./transient.js";
 
 export interface RunResult {
   run: string;
@@ -62,7 +67,7 @@ export async function run(deps: Deps, options: RunOptions = {}): Promise<RunResu
     try {
       result = await STEP_TABLE[step](ctx, state);
     } catch (err) {
-      if (err instanceof Transient) throw err;
+      if (isTransient(err)) throw err;
       result = { ok: false, note: message(err) };
     }
     await ctx.write(
@@ -176,7 +181,7 @@ function context(
         await spend(source, op, about, on, t0, {
           ok: false,
           error: message(err),
-          ...(err instanceof Transient && err.retryAfter ? { retryAfter: err.retryAfter } : {}),
+          ...(isTransient(err) && err.retryAfter ? { retryAfter: err.retryAfter } : {}),
         });
       throw err;
     }
@@ -187,7 +192,7 @@ function context(
       try {
         return await call();
       } catch (err) {
-        if (!(err instanceof Transient) || attempt >= TRIES) throw err;
+        if (!isTransient(err) || attempt >= TRIES) throw err;
         await sleep(waitMs(attempt, err.retryAfter, deps.clock));
       }
     }
@@ -196,30 +201,34 @@ function context(
     try {
       return await tried(() => once(source, op, about, on, call));
     } catch (err) {
-      if (err instanceof Transient) throw err;
+      if (isTransient(err)) throw err;
       return null;
     }
   };
-  const modelOn = (on?: string): Model | null =>
-    deps.model
-      ? {
-          id: deps.model.id,
-          ask: (prompt, shape) => {
-            const m = deps.model as Model;
-            const about = prompt.split("\n").find((l) => l.trim()) ?? "";
-            return tried(() =>
-              once(
-                { name: m.id, cost: "metered" },
-                "ask",
-                about,
-                on,
-                () => m.ask(prompt, shape),
-                (a) => a.usage,
-              ),
-            );
-          },
-        }
-      : null;
+  // Every call writes a spend, a repair's too: the wrap is on `complete`, and `ask` is built over it.
+  const modelOn = (on?: string): Model | null => {
+    const m = deps.model;
+    if (!m) return null;
+    return modelOf({
+      id: m.id,
+      provider: m.provider,
+      takes: m.takes,
+      complete: (req) => {
+        const text = promptText(req.prompt) ?? "";
+        const about = text.split("\n").find((l) => l.trim()) ?? "";
+        return tried(() =>
+          once(
+            { name: m.id, cost: "metered" },
+            "ask",
+            about,
+            on,
+            () => m.complete(req),
+            (r) => r.usage,
+          ),
+        );
+      },
+    });
+  };
   return { deps, options, model: modelOn(), modelOn, run, round, step, write, invoke };
 }
 

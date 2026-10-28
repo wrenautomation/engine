@@ -1,6 +1,7 @@
 /** Exa: `POST https://api.exa.ai/search`, a key per call from the ring. Metered. */
+
+import { httpError, transport } from "@wrenautomation/models";
 import type { Source } from "../engine/ports.js";
-import { httpError, transport } from "../engine/transient.js";
 
 interface ExaResult {
   url: string;

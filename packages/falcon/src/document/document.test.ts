@@ -1,3 +1,4 @@
+import { promptText } from "@wrenautomation/models";
 import { describe, expect, it } from "vitest";
 import {
   claimExtractor,
@@ -96,7 +97,7 @@ describe("claim extractor", () => {
     const model: Model = {
       id: "m1",
       ask: async (p, shape) => {
-        prompts.push(p);
+        prompts.push(promptText(p) ?? "");
         if (n++ === 0)
           throw new Cut(
             "cut",

@@ -5,8 +5,8 @@
  * for a terminal run: `GET $url/api/sites/web/fetch?url=&from=` with a bearer token.
  */
 import { defaultReaders, type Media, type Reader } from "@wrenautomation/falcon/document";
+import { Transient } from "@wrenautomation/models";
 import type { Source } from "../engine/ports.js";
-import { Transient } from "../engine/transient.js";
 import { fetchLadder, type LadderClient, type LadderTier } from "../fetch/ladder.js";
 
 export function ladderSource(o: {

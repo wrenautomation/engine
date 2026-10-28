@@ -5,7 +5,8 @@
  * the ledger weaver's. Nothing here reaches the network: the adapters in `src/sources` do.
  */
 import type { Document, Extractor } from "@wrenautomation/falcon/document";
-import type { HitViewIn, Model, PlanFile, Proposal } from "@wrenautomation/raven";
+import type { Model } from "@wrenautomation/models";
+import type { HitViewIn, PlanFile, Proposal } from "@wrenautomation/raven";
 import type { Ids } from "../ledger/ids.js";
 import type { Ledger } from "../ledger/ledger.js";
 import type { CostKind, From, HitRecord, QueryRecord } from "../ledger/records.js";

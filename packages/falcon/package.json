@@ -51,6 +51,7 @@
     "build": "rm -rf dist && tsc && chmod +x dist/app/cli.js"
   },
   "dependencies": {
+    "@wrenautomation/models": "workspace:*",
     "commander": "15.0.0",
     "entities": "8.1.0",
     "htmlparser2": "12.0.0",

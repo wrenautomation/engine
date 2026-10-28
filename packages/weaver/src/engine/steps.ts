@@ -7,7 +7,7 @@
  * from where its records say it got to: a search with an ok spend, a hit with a document, a
  * document with a verdict, are not done twice.
  */
-import type { Model } from "@wrenautomation/raven";
+import { isTransient, type Model, type Transient } from "@wrenautomation/models";
 import { dedupeHits, defaultPlanFile, plan, review, triage } from "@wrenautomation/raven";
 import type {
   DocumentRecord,
@@ -20,7 +20,6 @@ import type {
 import { canonical } from "./canonical.js";
 import { type Deps, pick, type RunOptions, type Source } from "./ports.js";
 import { found, planOf, type RunState, toExtract, toRead, uncalledHits } from "./state.js";
-import { Transient } from "./transient.js";
 
 export interface StepContext {
   deps: Deps;
@@ -69,7 +68,7 @@ function gather<T>(settled: PromiseSettledResult<T>[]): {
   let transient: Transient | null = null;
   const values = settled.map((r) => {
     if (r.status === "fulfilled") return r.value;
-    if (r.reason instanceof Transient) {
+    if (isTransient(r.reason)) {
       transient ??= r.reason;
       return null;
     }
@@ -96,7 +95,7 @@ async function batched<I, O>(
     let anyFailed = false;
     for (const [j, r] of settled.entries()) {
       if (r.status === "fulfilled") await keep(batch[j] as I, r.value);
-      else if (r.reason instanceof Transient) transient ??= r.reason;
+      else if (isTransient(r.reason)) transient ??= r.reason;
       else if (!anyFailed) {
         anyFailed = true;
         failed = r.reason;
@@ -264,7 +263,7 @@ export const readStep: StepFn = async (ctx, state) => {
         );
         if (doc) return { doc, source: s };
       } catch (err) {
-        if (!(err instanceof Transient)) throw err;
+        if (!isTransient(err)) throw err;
         transient ??= err;
       }
     }

@@ -54,8 +54,8 @@
     "build": "rm -rf dist && tsc && chmod +x dist/app/cli.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "1.3.0",
     "@wrenautomation/falcon": "workspace:*",
+    "@wrenautomation/models": "workspace:*",
     "@wrenautomation/raven": "workspace:*",
     "commander": "15.0.0",
     "robots-parser": "3.0.1",
