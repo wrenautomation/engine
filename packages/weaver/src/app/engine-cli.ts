@@ -11,8 +11,9 @@
  * Postgres. A run that stops on a transient failure (a 429, a 5xx, a dropped connection) is
  * resumed by `run` itself after a pause, up to RESUMES times.
  */
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { userInfo } from "node:os";
+import { serve } from "@hono/node-server";
 import type { Extractor } from "@wrenautomation/falcon/document";
 import { claimExtractor } from "@wrenautomation/falcon/document";
 import { geminiVideo } from "@wrenautomation/falcon/video";
@@ -85,6 +86,7 @@ import {
   searxng,
   ytdlpSource,
 } from "../sources/index.js";
+import { SERVE_ORIGINS, SERVE_PORT, serveApp, watchRuns } from "./serve.js";
 
 const DEFAULT_MODEL = "anthropic";
 /** Resumes `run` makes on its own after a transient failure. */
@@ -1034,6 +1036,29 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       for (const r of records)
         if (!o.type || o.type.includes(r.type)) console.log(JSON.stringify(r));
       for (const p of ledger.problems ?? []) console.error(`${p.file}:${p.line}: ${p.why}`);
+    });
+
+  common(program.command("serve"))
+    .description(
+      "the ledger over HTTP for a viewer, read only: GET /runs, /runs/:run, /runs/:run/documents/:doc, and /events (one event per changed run)",
+    )
+    .option("--port <n>", "the port", (v) => Number(v), SERVE_PORT)
+    .option("--host <host>", "the address to bind", "127.0.0.1")
+    .option("--origin <url...>", "the pages that may read it, besides any localhost", SERVE_ORIGINS)
+    .action(async (o: Common & { port: number; host: string; origin: string[] }) => {
+      const ledger = new FilesLedger(o.ledger, o.writer);
+      await mkdir(`${o.ledger}/runs`, { recursive: true });
+      const s = { ledger, sources: registry(), model: null, judge: null };
+      const app = serveApp({
+        deps: depsOf(s, o.writer),
+        runs: () => ledger.runs(),
+        changes: watchRuns(o.ledger),
+        origins: o.origin,
+      });
+      serve({ fetch: app.fetch, port: o.port, hostname: o.host }, (a) =>
+        console.error(`weaver serve: http://${a.address}:${a.port} over ${o.ledger}`),
+      );
+      await new Promise(() => {});
     });
 
   common(program.command("yield"))

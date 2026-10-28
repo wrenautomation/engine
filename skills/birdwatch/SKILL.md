@@ -208,3 +208,7 @@ Every record carries `from` (ai, human, tool), `by` (your id, their name, a sour
 id), its round, and on a decision, a why. `weaver trace <run>` prints them all; `weaver trace
 <run> --type finding` one type. `weaver run --resume <run>` hands a run to the runner (raven's
 prompts decide instead of you); `brief` reads a run the runner made the same way.
+
+To let a person watch or check a run, start `weaver serve` (same `--ledger`) in the background
+and tell them to open the portal's Research page on this Mac. It updates live as you write.
+Stop it when they are done.

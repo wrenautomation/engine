@@ -135,6 +135,7 @@ npx weaver trace 01M5YS... --type finding spend                                #
 npx weaver add call 01M5YS... 01M5YT... drop --why "a forecast, not a result" --human   # a call in your name
 npx weaver yield --source exa                                                  # hits, reads, proposed, kept
 npx weaver sources                                                             # what this machine can run
+npx weaver serve --port 4747                                                   # the ledger over HTTP for a viewer, read only
 ```
 
 The model is `anthropic` by default (Claude Haiku direct, `ANTHROPIC_API_KEY`; `--model
@@ -258,6 +259,17 @@ theirs when a posts follow from their profile found it, when its URL sits under 
 when its channel (or its hit's) is one of their names. `brief.people` counts each person's
 documents, kept findings and sites; `brief.unfollowed` lists kept pages no follow started from
 and no person owns.
+
+`serve` puts the ledger on 127.0.0.1 for a viewer (the Wren portal's Research page). Read only:
+the CLI stays the one writer. `GET /runs` gives a row per run (ask, parent, round, next step,
+counts, spend). `GET /runs/:run` gives a `RunView` (`v: 1`): the brief, every query with the hits
+it wrote and found again, every hit with its sources, queries, call and judge, every page with its
+class, verdict and person, every finding with its checks, the timeline of decisions and step ends
+with their whys, and spend per source. `GET /runs/:run/documents/:doc` gives a page's stored text.
+`GET /events` sends `event: run` with `{run}` each time a run's files change, and a ping each 25 s;
+the viewer then gets that run again. CORS answers `--origin` (the portal by default) and any
+localhost, and says yes to Chrome's private-network preflight. The types live in
+`src/engine/view.ts`; a host copies them and checks `v`, never imports them.
 
 ## Library
 
