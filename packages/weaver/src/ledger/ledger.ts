@@ -4,7 +4,7 @@
  * channels and ask kinds yielded, as raven's rows. The yield is a fold over records, shared here
  * so the files backend and a database compute the same rows (a database may do it in SQL).
  */
-import type { YieldRow } from "@wrenautomation/raven";
+import type { AskKind, PlanFile, YieldRow } from "@wrenautomation/raven";
 import {
   byTime,
   type From,
@@ -39,6 +39,9 @@ export interface Ledger {
   /** Records across runs, by time then id. */
   scan(filter?: Filter): Promise<LedgerRecord[]>;
   yield(filter?: YieldFilter): Promise<YieldRow[]>;
+  /** The tuned plan file of a kind, when the ledger keeps plan files (the files backend does). */
+  readPlan?(kind: AskKind): Promise<PlanFile | null>;
+  writePlan?(planFile: PlanFile): Promise<string>;
 }
 
 export function matches(r: LedgerRecord, f: Filter): boolean {

@@ -178,13 +178,14 @@ export const fetchStep: StepFn = async (ctx, state) => {
   const queries = state.queries.filter((q) => q.round === ctx.round);
   const searchers = sourcesOf(ctx, state).filter((s) => s.search);
   if (!searchers.length) return { ok: false, note: "no search source in the allow-list" };
-  const seen = new Set(state.seen);
   const searched = new Set(
     state.spends
       .filter((s) => s.round === ctx.round && s.op === "search" && s.ok && s.on)
       .map((s) => `${s.on}\u0000${s.source}`),
   );
+  const idOf = new Map(state.hitByKey);
   let written = 0;
+  let again = 0;
   let calls = 0;
   let answered = 0;
   let transient: Transient | null = null;
@@ -222,11 +223,15 @@ export const fetchStep: StepFn = async (ctx, state) => {
       }
     }
     for (const [key, { hit, by, from }] of byKey) {
-      if (seen.has(key)) continue;
-      seen.add(key);
+      const known = idOf.get(key);
+      if (known) {
+        await ctx.write({ type: "found", hit: known, query: q.id }, { from, by });
+        again++;
+        continue;
+      }
       const [view] = dedupeHits([hit]);
       if (!view) continue;
-      await ctx.write({ type: "hit", ...view, key, queries: [q.id] }, { from, by });
+      idOf.set(key, await ctx.write({ type: "hit", ...view, key, queries: [q.id] }, { from, by }));
       written++;
     }
   }
@@ -239,11 +244,14 @@ export const fetchStep: StepFn = async (ctx, state) => {
       .filter((r) => r.type === "spend" && r.op === "search" && r.ok && r.round === ctx.round)
       .map((r) => `${(r as { on?: string }).on}\u0000${(r as { source: string }).source}`),
   );
-  const hitOn = new Set(after.flatMap((r) => (r.type === "hit" ? r.queries : [])));
+  const hitOn = new Set(
+    after.flatMap((r) => (r.type === "hit" ? r.queries : r.type === "found" ? [r.query] : [])),
+  );
   const gapOn = new Set(after.flatMap((r) => (r.type === "gap" && r.on ? [r.on] : [])));
   let empty = 0;
   for (const q of queries) {
-    if (hitOn.has(q.id) || gapOn.has(q.id)) continue;
+    // A tree's query is thin, not a gap: the tree says so when a facet's every try came up empty.
+    if (q.facet || hitOn.has(q.id) || gapOn.has(q.id)) continue;
     if (!searchers.every((s) => okOn.has(`${q.id}\u0000${s.name}`))) continue;
     await ctx.write(
       { type: "gap", on: q.id, note: `query "${q.terms}": no new hits` },
@@ -253,7 +261,7 @@ export const fetchStep: StepFn = async (ctx, state) => {
   }
   return {
     ok: true,
-    note: `${written} new hits from ${calls} searches${empty ? `, ${empty} queries with none` : ""}`,
+    note: `${written} new hits${again ? `, ${again} found again,` : ""} from ${calls} searches${empty ? `, ${empty} queries with none` : ""}`,
   };
 };
 

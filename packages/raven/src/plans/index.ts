@@ -2,7 +2,12 @@
  * The default plan file per ask kind. A copy of one, tuned and stored beside a ledger, is how
  * a run learns: the recipe changes, raven does not. `raven plans <kind>` prints one to start from.
  */
-import { type AskKind, type PlanFile, PlanFile as PlanFileShape } from "../types.js";
+import {
+  type AskKind,
+  type PlanFile,
+  PlanFile as PlanFileShape,
+  type TreeGuide,
+} from "../types.js";
 
 const SHAPE_QUERIES = `Return ONLY a JSON object, no prose, exactly this shape:
 {"queries": [{"terms": "...", "why": "..."}]}`;
@@ -49,10 +54,28 @@ Checked (a sample of the kept findings, each against its document):
 Notes:
 {notes}`;
 
+/**
+ * The five sides a researcher covers before the reads start. One tree per round; the agent
+ * fills each facet with tries, in order of what it expects to work.
+ */
+export const TREE: TreeGuide = {
+  facets: [
+    { name: "number", why: "a figure: a rate, a price, a count, a date" },
+    { name: "how", why: "how it is done: a method, a step list, a tool" },
+    { name: "who", why: "who does it or buys it, in their own words" },
+    { name: "counter", why: "the case against: what fails, who says no" },
+    {
+      name: "primary",
+      why: "the source itself: a study, a filing, a transcript, the maker's own page",
+    },
+  ],
+  thin: 3,
+};
+
 const web: PlanFile = {
   id: "raven/web",
   kind: "web",
-  version: 5,
+  version: 6,
   propose: `You plan web searches for one research ask.
 
 ${SHAPE_QUERIES}
@@ -79,13 +102,14 @@ Hits:
   review: REVIEW,
   sources: ["searxng", "exa", "google"],
   budget: { queries: 3, reads: 6, rounds: 3, checks: 3 },
+  tree: TREE,
   age: "Prices, tools and numbers that move: prefer the last two years. A principle or a method can be old.",
 };
 
 const video: PlanFile = {
   id: "raven/video",
   kind: "video",
-  version: 5,
+  version: 6,
   propose: `You plan video searches for one research ask: talks, walkthroughs, interviews and reviews on YouTube and podcast feeds.
 
 ${SHAPE_QUERIES}
@@ -112,13 +136,14 @@ Hits:
   review: REVIEW,
   sources: ["youtube", "podcasts"],
   budget: { queries: 3, reads: 4, rounds: 2, checks: 3 },
+  tree: TREE,
   age: "Tools and platforms: prefer the last two years. A talk on a principle can be old.",
 };
 
 const channel: PlanFile = {
   id: "raven/channel",
   kind: "channel",
-  version: 5,
+  version: 6,
   propose: `You plan searches that find the people and channels worth following for one research ask: creators, newsletters, podcasts, forums.
 
 ${SHAPE_QUERIES}
@@ -143,13 +168,14 @@ Hits:
   review: REVIEW,
   sources: ["searxng", "youtube", "exa"],
   budget: { queries: 3, reads: 6, rounds: 2, checks: 3 },
+  tree: TREE,
   age: "A channel that has not posted in the last year counts for little.",
 };
 
 const person: PlanFile = {
   id: "raven/person",
   kind: "person",
-  version: 5,
+  version: 6,
   propose: `You plan searches about one person or company for one research ask: what they do, what they said, what others say about them.
 
 ${SHAPE_QUERIES}
@@ -176,13 +202,14 @@ Hits:
   review: REVIEW,
   sources: ["searxng", "exa", "linkedin", "google"],
   budget: { queries: 4, reads: 6, rounds: 2, checks: 3 },
+  tree: TREE,
   age: "What they do now: prefer the latest pages. Their history can be old.",
 };
 
 const site: PlanFile = {
   id: "raven/site",
   kind: "site",
-  version: 5,
+  version: 6,
   propose: `You plan searches inside one website for one research ask. Every query runs on {site} only.
 
 ${SHAPE_QUERIES}
@@ -208,6 +235,7 @@ Hits:
   review: REVIEW,
   sources: ["sitemap", "searxng", "fetch"],
   budget: { queries: 4, reads: 8, rounds: 2, checks: 3 },
+  tree: TREE,
   age: "When two pages of the site disagree, the later one counts.",
 };
 
@@ -218,8 +246,12 @@ export function defaultPlanFile(kind: AskKind): PlanFile {
   return PlanFileShape.parse(structuredClone(DEFAULTS[kind]));
 }
 
-/** The plan file's word on age; a stored file from before version 4 takes its kind's default. Version 5: the review no longer says "at most". */
+/** The plan file's word on age; a stored file from before version 4 takes its kind's default. Version 5: the review no longer says "at most". Version 6: `tree`, the query tree's guide. */
 export const ageOf = (planFile: PlanFile): string | undefined =>
   planFile.age ?? DEFAULTS[planFile.kind].age;
+
+/** The plan file's guide for a query tree; a stored file from before version 6 takes its kind's default. */
+export const treeOf = (planFile: PlanFile): TreeGuide =>
+  planFile.tree ?? (DEFAULTS[planFile.kind].tree as TreeGuide);
 
 export const PLAN_KINDS = Object.keys(DEFAULTS) as AskKind[];

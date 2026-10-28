@@ -19,12 +19,14 @@ environment; `weaver sources` lists what this machine can run.
 ```sh
 weaver plan "<the ask>" [--kind web|video|site|channel|person] [--known "<fact>"...] [--site <host>]
 weaver brief <run>                                   # read it after every step
-weaver search <run> "<terms>" --why "<why>"          # or a JSON array of {terms, why, site?} on stdin
+weaver search <run> < tree.json                      # the round's query tree (below); or "<terms>" --why, or a JSON array
 weaver add call <run> <hit> keep|drop --why "<why>"  # triage, one per hit
 weaver open <run> [<hit>...] [--url <url>...] --why "<why>"   # then reads every kept hit without a document
-weaver extract <run>                                 # the model behind the quote gate, every document without a verdict
-weaver check <run> [-n 3]                            # a sample of findings read against their documents
+weaver show <run> <document> [--head N]              # the page's text: read it yourself
 weaver add finding <run> <document> --text "<sentence>" --quote "<quote on the page>"
+weaver add check <run> <finding> --ok|--fail --why "<why>"    # your own check; a fail drops it
+weaver extract <run>                                 # bulk only: a model behind the quote gate
+weaver check <run> [-n 3]                            # bulk only: a model's sample check
 weaver add gap <run> "<what is still missing>"
 weaver add pattern <run> "<what several findings say together>" --on <finding> <finding>...
 weaver add edge <run> again|stop --why "<why>"       # your review of the round
@@ -39,19 +41,37 @@ records show done.
 
 ## How to drive
 
-1. **Plan.** Read the ask and `brief`. Write 2 to 4 queries that cover it from different
-   sides (a number, a how, a who, a counter-view). Each query's why says what it would prove.
-   The budget in `brief` is a guard rail, not a cap: more queries are fine when each has a why.
-2. **Triage.** `brief` lists `hits.uncalled` with title and snippet. Call every one: keep what
-   can hold a fact that answers the ask, drop the rest (vendor pages, listicles, a page the
-   ask does not need). One why per call, short. A page you know of yourself: `open --url`.
-3. **Read and extract.** `open`, then `extract`. Read the findings in `wrote`. The gate already
-   proved each quote is on its page; you judge whether it answers the ask. Drop a finding that
-   does not (`add call <finding> drop --why`). A fact you saw in a document that the extractor
-   missed: `add finding` with its exact quote; a quote that is not on the page fails.
-4. **Check.** `check` reads a sample against their documents. A finding that fails is dropped
-   with its why; put it back with `add call <finding> keep --why` only if you read the page and
-   the check is wrong.
+1. **Plan the tree.** Read the ask and `brief`. Write the round's query tree: one facet per
+   side of the ask the guide names (`brief.planFile` kind's guide: a number, a how, a who, a
+   counter-view, a primary source; add a facet the ask needs), each with 2 or 3 tries in the
+   order you expect to work: the plain words first, then a narrower angle (a site, a year, a
+   synonym the trade uses, a forum, a filing). Each query's why says what it would prove. Show
+   the tree to the person before you run it. `search` runs every first try, then the next try
+   of each facet that stayed thin, and prints `tree`: what each try wrote, which facets reached
+   enough, which guide facets you did not cover. The budget is a guard rail, not a cap.
+
+   ```json
+   {"facets": [
+     {"name": "number", "why": "how often it happens", "tries": [
+       [{"terms": "<plain words> rate", "why": "..."}],
+       [{"terms": "<plain words> survey 2025", "why": "..."}, {"terms": "...", "site": "reddit.com", "why": "..."}]
+     ]},
+     {"name": "counter", "why": "who says it fails", "tries": [[{"terms": "...", "why": "..."}]]}
+   ]}
+   ```
+2. **Triage.** `brief` lists `hits.uncalled` with title, snippet and `facets`: the facets whose
+   queries found it, most first. A page two facets found is worth a look first. Call every one:
+   keep what can hold a fact that answers the ask, drop the rest (vendor pages, listicles, a
+   page the ask does not need). One why per call, short. A page you know of yourself: `open --url`.
+3. **Read.** `open`, then `show` each document and read it. Write each fact that answers the
+   ask as `add finding` with its exact quote; a quote that is not on the page fails. Say what
+   the page lacks as `add gap --on <document>`. For a run too big to read (tens of pages), or
+   in the runner, `extract` puts a model behind the same gate; then judge its findings in
+   `wrote` and drop what does not answer the ask (`add call <finding> drop --why`).
+4. **Check.** Read a sample of the kept findings again against their documents (`show`), a
+   different page each: `add check <finding> --ok|--fail --why`. A fail drops it. For a bulk
+   run, `check` does the same with a model; put a finding back with `add call <finding> keep
+   --why` only if you read the page and the check is wrong.
 5. **Patterns.** When kept findings from different sites say one thing, write it once:
    `add pattern` with the finding ids. The engine counts the distinct sites; one site is a
    claim, not a pattern, and it warns. A pattern is your sentence; the findings are its proof.
@@ -63,8 +83,9 @@ records show done.
    then the kept findings no pattern rests on, each with its quote, URL and date; the gaps; the
    cost line. Nothing in the report that is not a finding.
 8. **Learn.** If the run was good and the person agrees, `weaver learn <kind>` with what it
-   taught: a source order that yielded, a budget that fit, an age sentence. The next run of
-   that kind starts there. Never change a prompt without showing the person the diff.
+   taught: a source order that yielded, a budget that fit, an age sentence, a `--thin` that
+   fits the kind, a facet the guide should name (`--tree <file>`). The next run of that kind
+   starts there. Never change a prompt without showing the person the diff.
 
 Stop when the ask is answered or two rounds in a row added nothing that changed the answer.
 Say so in the edge's why.

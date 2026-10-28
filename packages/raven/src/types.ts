@@ -35,6 +35,9 @@ export const Query = z.object({
   site: z.string().optional(),
   /** Why this query serves the ask: the line a reviewer reads first. */
   why: z.string(),
+  /** The tree's facet it serves, and which try (1 = the first). Absent on a flat query. */
+  facet: z.string().optional(),
+  tier: z.number().int().positive().optional(),
   from: From,
   /** Model id, plan file id or a person's name. */
   by: z.string(),
@@ -48,6 +51,39 @@ export const Proposal = z.object({
   queries: z.array(Query.omit({ from: true, by: true })),
 });
 export type Proposal = z.infer<typeof Proposal>;
+
+/** One query as a leaf of the tree: what a person would type, and why. */
+export const Leaf = z.object({
+  terms: z.string().min(1),
+  why: z.string(),
+  site: z.string().optional(),
+});
+export type Leaf = z.infer<typeof Leaf>;
+
+/**
+ * One side of the ask a researcher covers: a number, a how, a who, a counter-view, a primary
+ * source. `tries` are its alternatives in order: the first runs; the next runs only when the
+ * one before it yielded thin (fewer new hits than the guide's `thin`), or when the agent asks.
+ */
+export const Facet = z.object({
+  name: z.string().min(1),
+  /** What this facet would prove. */
+  why: z.string(),
+  tries: z.array(z.array(Leaf).min(1)).min(1),
+});
+export type Facet = z.infer<typeof Facet>;
+
+/** The fan-out for one round: the facets, each with its tries. The agent writes it; weaver runs it. */
+export const QueryTree = z.object({ facets: z.array(Facet).min(1) });
+export type QueryTree = z.infer<typeof QueryTree>;
+
+/** The plan file's guide for a tree: the facets a tree of this kind covers, and what thin means. A guide, not a cap: a tree may add facets; one it leaves out is a warning. */
+export const TreeGuide = z.object({
+  facets: z.array(z.object({ name: z.string().min(1), why: z.string() })),
+  /** New hits under which a try counts as thin, so the next try runs. */
+  thin: z.number().int().nonnegative(),
+});
+export type TreeGuide = z.infer<typeof TreeGuide>;
 
 export const Budget = z.object({
   /** Queries per round after the merge. Human queries never count against it. */
@@ -82,6 +118,8 @@ export const PlanFile = z.object({
   budget: Budget,
   /** How much a source's age counts for this kind, one sentence: filled as `{age}`. Never a cutoff. */
   age: z.string().optional(),
+  /** The facets a query tree of this kind covers. Absent on a file from before version 6: the kind's default. */
+  tree: TreeGuide.optional(),
 });
 export type PlanFile = z.infer<typeof PlanFile>;
 

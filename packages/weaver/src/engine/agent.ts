@@ -9,7 +9,16 @@
  */
 import { type ClaimAnswer, gateFindings, patternOf } from "@wrenautomation/falcon/document";
 import { isTransient } from "@wrenautomation/models";
-import { type AskKind, type Edge, PlanFile, type YieldRow } from "@wrenautomation/raven";
+import {
+  type AskKind,
+  defaultPlanFile,
+  type Edge,
+  PlanFile,
+  QueryTree,
+  type TreeGuide,
+  treeOf,
+  type YieldRow,
+} from "@wrenautomation/raven";
 import {
   type DocumentRecord,
   type Envelope,
@@ -23,7 +32,7 @@ import { canonical } from "./canonical.js";
 import { costOf } from "./cost.js";
 import type { Deps } from "./ports.js";
 import { context } from "./runner.js";
-import { fold, found, kept, type Pointer, personRound, type RunState } from "./state.js";
+import { fold, found, kept, type Pointer, personRound, queriesOf, type RunState } from "./state.js";
 import {
   checkSample,
   extractDocuments,
@@ -182,6 +191,8 @@ export interface QueryInput {
   terms: string;
   why: string;
   site?: string;
+  /** The tree's facet it serves, when the agent adds one more leaf by hand. */
+  facet?: string;
 }
 
 /** Writes the agent's queries, then runs the fetch step: every searcher on every unsearched query of the round. */
@@ -200,11 +211,182 @@ export async function search(
     if (!terms) throw new Error("a query needs terms");
     if (!q.why.trim()) throw new Error(`query "${terms}": why?`);
     await ctx.write(
-      { type: "query", kind, terms, why: q.why, ...(q.site ? { site: q.site } : {}) },
+      {
+        type: "query",
+        kind,
+        terms,
+        why: q.why,
+        ...(q.site ? { site: q.site } : {}),
+        ...(q.facet ? { facet: q.facet } : {}),
+      },
       who,
     );
   }
   return stepRun(deps, run, "fetch", fetchStep);
+}
+
+/** One try of a facet as the brief shows it: its queries, each with the hits it wrote and the known ones it found again. */
+export interface TryView {
+  tier: number;
+  queries: { id: string; terms: string; hits: number; again: number }[];
+  /** New hits the try wrote, summed. */
+  hits: number;
+}
+
+export interface FacetView {
+  name: string;
+  tries: TryView[];
+  /** New hits over every try. */
+  hits: number;
+  /** The last try that ran reached the guide's `thin`: the facet stopped there. */
+  enough: boolean;
+}
+
+export interface TreeView {
+  thin: number;
+  facets: FacetView[];
+  /** Facets the guide names that no query of the round served. */
+  uncovered: string[];
+}
+
+/** The round's queries by facet and try, with what each wrote: rebuilt from the records. */
+export function treeView(state: RunState, round: number, guide: TreeGuide): TreeView {
+  const hitsOf = new Map<string, number>();
+  const againOf = new Map<string, number>();
+  for (const h of state.hits) for (const q of h.queries) hitsOf.set(q, (hitsOf.get(q) ?? 0) + 1);
+  for (const f of state.founds) againOf.set(f.query, (againOf.get(f.query) ?? 0) + 1);
+  const facets: FacetView[] = [];
+  for (const q of state.queries) {
+    if (q.round !== round || !q.facet) continue;
+    let facet = facets.find((f) => f.name === q.facet);
+    if (!facet) {
+      facet = { name: q.facet, tries: [], hits: 0, enough: false };
+      facets.push(facet);
+    }
+    const tier = q.tier ?? 1;
+    let t = facet.tries.find((x) => x.tier === tier);
+    if (!t) {
+      t = { tier, queries: [], hits: 0 };
+      facet.tries.push(t);
+    }
+    const hits = hitsOf.get(q.id) ?? 0;
+    t.queries.push({ id: q.id, terms: q.terms, hits, again: againOf.get(q.id) ?? 0 });
+    t.hits += hits;
+    facet.hits += hits;
+  }
+  for (const f of facets) {
+    f.tries.sort((a, b) => a.tier - b.tier);
+    f.enough = (f.tries.at(-1)?.hits ?? 0) >= guide.thin;
+  }
+  const served = new Set(facets.map((f) => f.name));
+  return {
+    thin: guide.thin,
+    facets,
+    uncovered: guide.facets.map((f) => f.name).filter((n) => !served.has(n)),
+  };
+}
+
+/** The guide a run's tree runs under: the kind's stored plan file, else its default. */
+async function guideOf(deps: Deps, kind: AskKind): Promise<TreeGuide> {
+  return treeOf((await deps.ledger.readPlan?.(kind)) ?? defaultPlanFile(kind));
+}
+
+export interface TreeDid extends Did {
+  tree: TreeView;
+}
+
+/**
+ * The round's search as a tree: every facet's first try in one fetch, then the next try of each
+ * facet still thin (fewer new hits than the guide's `thin`), until every facet has enough or
+ * runs out of tries. Breadth first, so a page two facets both found is a `found` on the first
+ * facet's hit, and the brief ranks it above one facet's. A facet whose every try wrote no hit is
+ * a gap. Never capped: the agent wrote the tree.
+ */
+export async function searchTree(
+  deps: Deps,
+  run: string,
+  tree: QueryTree,
+  who: Who,
+): Promise<TreeDid> {
+  QueryTree.parse(tree);
+  const first = await stateOf(deps, run);
+  planned(first);
+  const kind = (first.snapshot as NonNullable<RunState["snapshot"]>).ask.kind;
+  const round = first.round;
+  const guide = await guideOf(deps, kind);
+  const names = new Set<string>();
+  for (const f of tree.facets) {
+    if (names.has(f.name)) throw new Error(`facet "${f.name}" twice`);
+    names.add(f.name);
+  }
+  const live = tree.facets.map((facet) => ({ facet, tier: 0, done: false }));
+  const wrote: Shown[] = [];
+  const gapIds: string[] = [];
+  let last: Did | null = null;
+  while (live.some((x) => !x.done)) {
+    const ctx = context(deps, {}, run, round, "plan");
+    const ran = live.filter((x) => !x.done);
+    const ids: string[] = [];
+    for (const x of ran) {
+      x.tier++;
+      for (const leaf of x.facet.tries[x.tier - 1] ?? []) {
+        const terms = leaf.terms.replace(/\s+/g, " ").trim();
+        if (!terms) throw new Error(`facet "${x.facet.name}": a query needs terms`);
+        if (!leaf.why.trim()) throw new Error(`query "${terms}": why?`);
+        ids.push(
+          await ctx.write(
+            {
+              type: "query",
+              kind,
+              terms,
+              why: leaf.why,
+              facet: x.facet.name,
+              tier: x.tier,
+              ...(leaf.site ? { site: leaf.site } : {}),
+            },
+            who,
+          ),
+        );
+      }
+    }
+    const trace = await deps.ledger.trace(run);
+    for (const id of ids) wrote.push(shown(trace.find((r) => r.id === id) as LedgerRecord));
+    last = await stepRun(deps, run, "fetch", fetchStep);
+    wrote.push(...last.wrote);
+    if (!last.ok) break;
+    const view = treeView(await stateOf(deps, run), round, guide);
+    for (const x of ran) {
+      const facet = view.facets.find((f) => f.name === x.facet.name);
+      const got = facet?.tries.find((t) => t.tier === x.tier)?.hits ?? 0;
+      if (got >= guide.thin) x.done = true;
+      else if (x.tier >= x.facet.tries.length) {
+        x.done = true;
+        if (!facet?.hits) {
+          const fetch = context(deps, {}, run, round, "fetch");
+          gapIds.push(
+            await fetch.write(
+              {
+                type: "gap",
+                note: `facet "${x.facet.name}": no new hits in ${x.tier} ${x.tier === 1 ? "try" : "tries"}`,
+              },
+              { from: "tool", by: deps.runner },
+            ),
+          );
+        }
+      }
+    }
+  }
+  const did = last as Did;
+  const end = await stateOf(deps, run);
+  for (const id of gapIds) wrote.push(shown(end.records.find((r) => r.id === id) as LedgerRecord));
+  const view = treeView(end, round, guide);
+  const enough = view.facets.filter((f) => f.enough).length;
+  return {
+    ...did,
+    wrote,
+    note: `${did.note ?? ""}; ${enough} of ${view.facets.length} facets reached ${guide.thin}${view.uncovered.length ? `; not covered: ${view.uncovered.join(", ")}` : ""}`,
+    tree: view,
+  };
 }
 
 export interface OpenInput {
@@ -316,8 +498,9 @@ export async function check(
 
 /** What the agent or the person adds by hand. */
 export type Addition =
-  | { type: "query"; terms: string; why: string; site?: string }
+  | { type: "query"; terms: string; why: string; site?: string; facet?: string }
   | { type: "finding"; document: string; text: string; quote: string }
+  | { type: "check"; on: string; ok: boolean; why: string }
   | { type: "call"; on: string; verdict: "keep" | "drop"; why: string }
   | { type: "edge"; next: Edge["next"]; to?: Edge["to"]; why: string }
   | { type: "steer"; text: string }
@@ -340,7 +523,7 @@ export interface Added {
 export async function add(deps: Deps, run: string, a: Addition, who: Who): Promise<Added> {
   const state = await stateOf(deps, run);
   const round =
-    a.type === "query" || a.type === "finding" || a.type === "pattern"
+    a.type === "query" || a.type === "finding" || a.type === "pattern" || a.type === "check"
       ? state.round
       : personRound(state);
   const warnings: string[] = [];
@@ -374,6 +557,7 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
           terms,
           why: why(a.why, `query "${terms}"`),
           ...(a.site ? { site: a.site } : {}),
+          ...(a.facet ? { facet: a.facet } : {}),
         }),
         warnings,
       };
@@ -394,6 +578,13 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
         }),
         warnings,
       };
+    }
+    case "check": {
+      const f = state.findings.find((x) => x.id === a.on);
+      if (!f) throw new Error(`no finding ${a.on}`);
+      const record = await write({ type: "check", on: a.on, ok: a.ok, why: why(a.why, "check") });
+      if (!a.ok) await write({ type: "call", on: a.on, verdict: "drop", why: a.why });
+      return { record, warnings };
     }
     case "call": {
       const hit = state.hits.find((h) => h.id === a.on);
@@ -460,6 +651,7 @@ export interface PlanChanges {
   propose?: string;
   triage?: string;
   review?: string;
+  tree?: TreeGuide;
 }
 
 /**
@@ -476,6 +668,7 @@ export function tunePlan(current: PlanFile, changes: PlanChanges): PlanFile {
     ...(changes.propose ? { propose: changes.propose } : {}),
     ...(changes.triage ? { triage: changes.triage } : {}),
     ...(changes.review ? { review: changes.review } : {}),
+    ...(changes.tree ? { tree: changes.tree } : {}),
     version: current.version + 1,
   });
   if (JSON.stringify({ ...next, version: 0 }) === JSON.stringify({ ...current, version: 0 }))
@@ -484,7 +677,10 @@ export function tunePlan(current: PlanFile, changes: PlanChanges): PlanFile {
 }
 
 /** A hit as the brief shows it: the view, its id, round and queries. */
-export type HitBrief = Omit<HitRecord, "type" | "run" | "step" | "at" | "from" | "by" | "key">;
+export type HitBrief = Omit<HitRecord, "type" | "run" | "step" | "at" | "from" | "by" | "key"> & {
+  /** The facets whose queries found it; the brief lists hits by this count, most first. */
+  facets: string[];
+};
 
 export interface Brief {
   run: string;
@@ -511,6 +707,8 @@ export interface Brief {
   /** What the agent says several findings say together, with the count of distinct sites. */
   patterns: { id: string; round: number; text: string; findings: string[]; sources: number }[];
   verdicts: { document: string; url: string; quality: string; gap?: string }[];
+  /** This round's query tree with what each try wrote; null when the round's queries are flat. */
+  tree: TreeView | null;
   hits: {
     uncalled: HitBrief[];
     toRead: { id: string; url: string }[];
@@ -535,6 +733,14 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
     (r) => r.source === undefined || sources.includes(r.source),
   );
   const gapLine = (g: RunState["gaps"][number]) => `${g.step ?? g.by}: ${g.note}`;
+  const facetOf = new Map(state.queries.flatMap((q) => (q.facet ? [[q.id, q.facet]] : [])));
+  const qOf = queriesOf(state);
+  const facetsOf = (hit: string) =>
+    [...new Set([...(qOf.get(hit) ?? [])].flatMap((q) => facetOf.get(q) ?? []))].sort();
+  const tree =
+    s && state.queries.some((q) => q.round === round && q.facet)
+      ? treeView(state, round, await guideOf(deps, s.ask.kind))
+      : null;
   return {
     run,
     round,
@@ -574,10 +780,15 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
       quality: v.quality,
       ...(v.gap ? { gap: v.gap } : {}),
     })),
+    tree,
     hits: {
       uncalled: state.hits
         .filter((h) => !state.called.has(h.id))
-        .map(({ type: _t, run: _r, step: _s, at: _a, from: _f, by: _b, key: _k, ...view }) => view),
+        .map(({ type: _t, run: _r, step: _s, at: _a, from: _f, by: _b, key: _k, ...view }) => ({
+          ...view,
+          facets: facetsOf(view.id),
+        }))
+        .sort((a, b) => b.facets.length - a.facets.length),
       toRead: unread(state).map(({ id, url }) => ({ id, url })),
       read: state.documents.length,
       total: state.hits.length,

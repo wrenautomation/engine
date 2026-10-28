@@ -11,6 +11,7 @@ import {
   type DocumentRecord,
   type EdgeRecord,
   type FindingRecord,
+  type FoundRecord,
   type GapRecord,
   type HitRecord,
   type LedgerRecord,
@@ -57,8 +58,10 @@ export interface RunState {
   checks: CheckRecord[];
   /** What the agent says several findings say together. */
   patterns: PatternRecord[];
-  /** Keys of every hit in the run: a hit seen again in a later round is not a new record. */
-  seen: Set<string>;
+  /** A known hit found again by another query. */
+  founds: FoundRecord[];
+  /** The hit record for each canonical URL: a hit seen again, in any round, is a `found`, not a new record. */
+  hitByKey: Map<string, string>;
   /** The latest call on each hit and finding. */
   called: Map<string, "keep" | "drop">;
 }
@@ -111,7 +114,8 @@ export function fold(run: string, records: readonly LedgerRecord[]): RunState {
     gaps: ofType(records, "gap"),
     checks: ofType(records, "check"),
     patterns: ofType(records, "pattern"),
-    seen: new Set(hits.map((h) => h.key)),
+    founds: ofType(records, "found"),
+    hitByKey: new Map(hits.map((h) => [h.key, h.id])),
     called: latestCalls(records),
   };
 }
@@ -160,6 +164,13 @@ export const found = (state: RunState, round?: number): string[] =>
 export const personRound = (state: RunState): number => {
   const last = state.edges.at(-1);
   return last && (!state.next || state.next.step === "plan") ? last.round : state.round;
+};
+
+/** The queries that found a hit: the one that wrote it, then every one it came back for. */
+export const queriesOf = (state: RunState): Map<string, Set<string>> => {
+  const out = new Map(state.hits.map((h) => [h.id, new Set(h.queries)]));
+  for (const f of state.founds) out.get(f.hit)?.add(f.query);
+  return out;
 };
 
 /** The hits of a round, the ones no call has named yet. */

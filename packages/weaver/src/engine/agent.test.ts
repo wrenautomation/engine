@@ -12,6 +12,7 @@ import {
   open,
   planRound,
   search,
+  searchTree,
   tunePlan,
   type Who,
 } from "./agent.js";
@@ -176,6 +177,17 @@ describe("agent commands", () => {
     const checked = await check(d, runId);
     expect(checked.wrote.filter((r) => r.type === "check")).toHaveLength(2);
 
+    // The agent's own check: a fail is a check record and a drop; a person's keep puts it back.
+    const own = await add(
+      d,
+      runId,
+      { type: "check", on: byHand.record.id, ok: false, why: "the quote is a fragment" },
+      agent,
+    );
+    expect(own.record.type).toBe("check");
+    expect((await brief(d, runId)).findings.kept.map((f) => f.id)).not.toContain(byHand.record.id);
+    await add(d, runId, { type: "call", on: byHand.record.id, verdict: "keep", why: "fine" }, will);
+
     // A pattern rests on kept findings; its source count is counted, not claimed.
     const keptIds = (await brief(d, runId)).findings.kept.map((f) => f.id);
     const single = await add(
@@ -237,6 +249,77 @@ describe("agent commands", () => {
     expect(result.finished).toBe(true);
     expect((await d.ledger.trace(runId)).length).toBe(before);
     expect(fold(runId, await d.ledger.trace(runId)).next).toBeNull();
+  });
+
+  it("searches a tree: every first try, then the next try of a thin facet; a found hit ranks higher", async () => {
+    const answers: Record<string, string[]> = {
+      n1: ["https://x.example/a", "https://x.example/b"],
+      n2: ["https://x.example/c", "https://x.example/d", "https://x.example/e"],
+      h1: [
+        "https://x.example/a",
+        "https://x.example/f",
+        "https://x.example/g",
+        "https://x.example/h",
+      ],
+      c1: [],
+      c2: ["https://x.example/a"],
+    };
+    const tree: Source = {
+      name: "fake",
+      kind: "search",
+      cost: "free",
+      search: async (q) => (answers[q.terms] ?? []).map((url) => ({ url, title: url })),
+    };
+    const d = { ...deps(), sources: registry(tree, opener) };
+    const planned = await planRound(d, {
+      ask: { text: "what does a tree find", kind: "web" },
+      planFile,
+      model: "m",
+    });
+    const runId = planned.run;
+    const did = await searchTree(
+      d,
+      runId,
+      {
+        facets: [
+          {
+            name: "number",
+            why: "a figure",
+            tries: [[{ terms: "n1", why: "w" }], [{ terms: "n2", why: "w" }]],
+          },
+          { name: "how", why: "a method", tries: [[{ terms: "h1", why: "w" }]] },
+          {
+            name: "counter",
+            why: "the case against",
+            tries: [[{ terms: "c1", why: "w" }], [{ terms: "c2", why: "w" }]],
+          },
+        ],
+      },
+      agent,
+    );
+    expect(did.ok).toBe(true);
+    // Two tiers: number and counter fell through, how had enough (thin is 3) on its first try.
+    expect(
+      did.wrote.filter((r) => r.type === "done").map((r) => r.type === "done" && r.ok),
+    ).toEqual([true, true]);
+    expect(did.tree.facets.map((f) => [f.name, f.tries.length, f.hits, f.enough])).toEqual([
+      ["number", 2, 5, true],
+      ["how", 1, 3, true],
+      ["counter", 2, 0, false],
+    ]);
+    expect(did.tree.uncovered).toEqual(["who", "primary"]);
+    expect(did.wrote.filter((r) => r.type === "found")).toHaveLength(2);
+    const gaps = did.wrote.filter((r) => r.type === "gap");
+    expect(gaps.map((g) => g.type === "gap" && g.note)).toEqual([
+      'facet "counter": no new hits in 2 tries',
+    ]);
+    const b = await brief(d, runId);
+    expect(b.tree?.facets.map((f) => f.name)).toEqual(["number", "how", "counter"]);
+    expect(b.hits.uncalled[0]).toMatchObject({
+      url: "https://x.example/a",
+      facets: ["counter", "how", "number"],
+    });
+    expect(b.hits.total).toBe(8);
   });
 
   it("learns: the next plan file version carries the changes, and nothing else moves", () => {

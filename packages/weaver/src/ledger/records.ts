@@ -47,6 +47,7 @@ export const RECORD_TYPES = [
   "gap",
   "check",
   "pattern",
+  "found",
 ] as const;
 export const RecordType = z.enum(RECORD_TYPES);
 export type RecordType = z.infer<typeof RecordType>;
@@ -202,6 +203,17 @@ export const PatternRecord = Envelope.extend({ type: z.literal("pattern") }).ext
 );
 export type PatternRecord = z.infer<typeof PatternRecord>;
 
+/**
+ * A hit the run already had came back for another query: the hit's record stays one, this says
+ * which other query found it. The brief ranks a hit by how many facets found it.
+ */
+export const FoundRecord = Envelope.extend({
+  type: z.literal("found"),
+  hit: z.string().min(1),
+  query: z.string().min(1),
+});
+export type FoundRecord = z.infer<typeof FoundRecord>;
+
 export const LedgerRecord = z.discriminatedUnion("type", [
   QueryRecord,
   HitRecord,
@@ -217,6 +229,7 @@ export const LedgerRecord = z.discriminatedUnion("type", [
   GapRecord,
   CheckRecord,
   PatternRecord,
+  FoundRecord,
 ]);
 export type LedgerRecord = z.infer<typeof LedgerRecord>;
 

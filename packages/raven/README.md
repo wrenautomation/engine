@@ -15,7 +15,9 @@ Three calls, one record each:
 | `review` | what a round came to (counts, found lines with their dates, the extractor's verdict and gap per read, the steps' gaps, the sample check, notes) | the edge: `stop`, `again` (a new round from plan) or `back` (rerun one step), with why. The budget is shown, never enforced here: the runner parks past it |
 
 Ask kinds: `web`, `video`, `channel`, `person`, `site`. Each has a default plan file
-(prompts, sources, budget, and `age`: one sentence on how much a source's age counts). Copy one,
+(prompts, sources, budget, `age`: one sentence on how much a source's age counts, and `tree`: the
+facets a round's query tree covers and `thin`, the new hits under which a try falls through to the
+next). Copy one,
 tune it, keep it beside your ledger (`weaver learn`): that is where a run learns. Raven never
 loops; the runner takes the edge.
 

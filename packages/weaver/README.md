@@ -22,7 +22,7 @@ Three more doors run the research engine (wren's `designs/2026-10-26-research-en
 |---|---|
 | `@wrenautomation/weaver/engine` | `Source` (a name, `search` and/or `open`, a cost), `registry` and the plan's allow-list; the agent's calls (`planRound`, `search`, `open`, `extract`, `check`, `add`, `brief`), one step each; `run(deps, options)`: plan, fetch, triage, read, extract, check (a sample of findings against their documents), review, round after round until raven's edge says stop; `fold` rebuilds a run's state from its records, so a run resumes from the step it stopped on; `Transient`, the failure worth another try; raven's `Model`, `Ask`, `PlanFile` and record shapes re-exported, so a host pins weaver alone |
 | `@wrenautomation/weaver/sources` | `searxng`, `exa` (search), `youtube` (search and read, yt-dlp), `fetcher` (open, the polite fetcher), `ladder` (open, autobrowse's fetch ladder up to a browser), `paste` (a person's URLs), `ledger` (hits earlier runs saw) |
-| `@wrenautomation/weaver/ledger` | the records (`query`, `hit`, `document`, `finding`, `verdict`, `call`, `spend`, `snapshot`, `edge`, `done`, `steer`, `gap`, `check`, `pattern`), `FilesLedger` (a folder: `runs/<run>/<writer>.jsonl`, `plans/<kind>.json`), `MemoryLedger`, yield rows per source, person, channel and kind |
+| `@wrenautomation/weaver/ledger` | the records (`query`, `hit`, `document`, `finding`, `verdict`, `call`, `spend`, `snapshot`, `edge`, `done`, `steer`, `gap`, `check`, `pattern`, `found`), `FilesLedger` (a folder: `runs/<run>/<writer>.jsonl`, `plans/<kind>.json`), `MemoryLedger`, yield rows per source, person, channel and kind |
 
 Every record carries `from` (ai, human or tool) and `by` (a model id, a source, a person). A
 person's pasted URL, a person's keep or drop, are the same records as the model's. The plan
@@ -55,18 +55,22 @@ weaver plan "how do staffing firms win repeat clients" --known "referrals conver
 weaver brief 01M5YS...                              # the ask, budget, sources, what is open, hits, findings, cost
 weaver search 01M5YS... "staffing repeat client rate" --why "the ask's words"       # one query, then every searcher
 echo '[{"terms":"...","why":"..."},{"terms":"...","why":"..."}]' | weaver search 01M5YS...   # a batch
+weaver search 01M5YS... < tree.json                 # a query tree: {facets: [{name, why, tries: [[{terms, why}], [...]]}]}
 weaver add call 01M5YS... 01M5YT... keep --why "a survey with numbers"               # triage: a hit kept
 weaver add call 01M5YS... 01M5YU... drop --why "a vendor page"
 weaver open 01M5YS... 01M5YT... --url https://a.example/report --why "numbers"      # keep these, read every kept hit
-weaver extract 01M5YS...                            # the model behind the quote gate, every document without a verdict
+weaver show 01M5YS... 01M5YV...                     # a document's text, for the agent to read itself
 weaver add finding 01M5YS... 01M5YV... --text "412 firms were surveyed." --quote "A 2025 survey of 412 firms"
-weaver check 01M5YS... -n 3                         # a sample of findings read against their documents
+weaver add check 01M5YS... 01M5YW... --ok --why "the quote says it"   # the agent's own check; --fail also drops
+weaver extract 01M5YS...                            # or a model behind the quote gate, every document without a verdict
+weaver check 01M5YS... -n 3                         # or a model's sample of findings read against their documents
 weaver add gap 01M5YS... "no UK numbers yet"
 weaver add steer 01M5YS... "numbers only" --human will                                # the person's word, relayed
 weaver add pattern 01M5YS... "Repeat clients come from referrals." --on 01M5YV... 01M5YW...   # what findings say together; sites counted
 weaver add edge 01M5YS... again --why "thin on the UK"                                # the review: a new round
 weaver plan --run 01M5YS...                         # round 2: known, steer and what round 1 left open, in its snapshot
 weaver learn web --sources searxng exa --rounds 4   # the plan file's next version, after a good run
+weaver learn web --thin 2                           # the tree's guide: a try under 2 new hits falls through
 weaver learn web --show                             # the current one
 weaver add edge 01M5YS... stop --why "enough"
 ```
@@ -79,10 +83,26 @@ an edge `again` past `budget.rounds` prints a warning, never a refusal. `search`
 a step that gave up exits 2 with its note. `open` reads every kept hit of the run that has no
 document; `extract` every document without a verdict; `check` a sample across documents of the
 kept findings not yet checked. `add` writes one record by hand: a query, a finding (its quote
-must be on the document word for word, or the add fails with the gate's why), a call (keep or
+must be on the document word for word, or the add fails with the gate's why), a check (the
+agent's own read of a finding against its document; a fail also drops it), a call (keep or
 drop a hit or a finding), an edge (`again`, `stop`, `back --to <step>`), a gap, or a steer (always
 the person's: `--human [name]`). Every `add` takes `--why` where a decision needs one. A
 `--human` record is the person's word through the agent: `from: human`, `by` their name.
+
+A round's search is a tree when the agent gives one: facets (the sides a researcher covers: a
+number, a how, a who, a counter-view, a primary source; the plan file's `tree` guide names them),
+each with tries in order, each try a list of queries. `search` runs every facet's first try in
+one fetch, then the next try of each facet still thin (fewer new hits than the guide's `thin`,
+3 by default), until every facet has enough or runs out of tries. A page a second query brings
+back is a `found` record on the first hit, never a second hit; `brief.hits.uncalled` lists each
+hit with the facets that found it, most first, and `brief.tree` shows every try with what it
+wrote. A facet whose every try wrote nothing is a gap; a single thin try is not. A guide facet
+no query served is named in the note. `learn --thin <n>` or `--tree <file>` tunes the guide.
+
+The agent reads for itself: `show <run> <document>` prints a document's stored text, `add
+finding` writes what it read behind the same quote gate, `add check` its own check. `extract` and
+`check` put a model behind the same gate instead, for bulk or for the runner; both paths write
+the same records.
 
 The runner alone:
 

@@ -24,7 +24,10 @@ import {
   PLAN_KINDS,
   type PlanFile,
   type Proposal,
+  QueryTree,
   Step as RavenStep,
+  TreeGuide,
+  treeOf,
 } from "@wrenautomation/raven";
 import type { Command } from "commander";
 import {
@@ -45,6 +48,7 @@ import {
   type Sources,
   type StepEvent,
   search,
+  searchTree,
   tunePlan,
   type Who,
 } from "../engine/index.js";
@@ -97,11 +101,7 @@ export interface Common {
 }
 
 /** A ledger a host hands the commands: the contract, and what the files backend adds when it has it. */
-export type HostLedger = Ledger & {
-  readPlan?(kind: AskKind): Promise<PlanFile | null>;
-  writePlan?(planFile: PlanFile): Promise<string>;
-  problems?: Problem[];
-};
+export type HostLedger = Ledger & { problems?: Problem[] };
 
 /** What a host swaps in: the files backend, this machine's sources and `--model` are the defaults. */
 export interface EngineCliDeps {
@@ -496,26 +496,55 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
 
   agent(machine(common(program.command("search <run> [terms]"))))
     .description(
-      "one query in the agent's name, then every searcher on every unsearched query of the round; the new hits as JSON. No terms: a JSON array of {terms, why, site?} on stdin",
+      "one query in the agent's name, then every searcher on every unsearched query of the round; the new hits as JSON. No terms: on stdin, a JSON array of {terms, why, site?}, or a tree {facets: [{name, why, tries: [[{terms, why, site?}]]}]}: every facet's first try, then the next try of each facet still thin",
     )
     .option("--why <why>", "why this query serves the ask")
     .option("--site <host>", "keep the query on one host")
+    .option("--facet <name>", "the tree's facet this query serves")
     .action(
       async (
         runId: string,
         terms: string | undefined,
-        o: Common & Machine & Agent & { why?: string; site?: string },
+        o: Common & Machine & Agent & { why?: string; site?: string; facet?: string },
       ) => {
         if (!terms && process.stdin.isTTY)
-          throw new Error("search: terms, or a JSON array of {terms, why} on stdin");
-        const queries: QueryInput[] = terms
-          ? [{ terms, why: o.why ?? "", ...(o.site ? { site: o.site } : {}) }]
-          : (JSON.parse(await stdinText()) as QueryInput[]);
-        if (!queries.length) throw new Error("search: no queries");
+          throw new Error("search: terms, or a JSON array of {terms, why} or a tree on stdin");
         const s = setup(o);
-        printDid(await search(depsOf(s, agentOf(o)), runId, queries, whoOf(o)));
+        const deps = depsOf(s, agentOf(o));
+        if (terms) {
+          const q: QueryInput = {
+            terms,
+            why: o.why ?? "",
+            ...(o.site ? { site: o.site } : {}),
+            ...(o.facet ? { facet: o.facet } : {}),
+          };
+          printDid(await search(deps, runId, [q], whoOf(o)));
+          return;
+        }
+        const input = JSON.parse(await stdinText()) as QueryInput[] | QueryTree;
+        if (Array.isArray(input)) {
+          if (!input.length) throw new Error("search: no queries");
+          printDid(await search(deps, runId, input, whoOf(o)));
+          return;
+        }
+        const did = await searchTree(deps, runId, QueryTree.parse(input), whoOf(o));
+        printDid(did);
       },
     );
+
+  common(program.command("show <run> <document>"))
+    .description("a document's text as the run stored it, for the agent to read itself")
+    .option("--head <chars>", "only the first N characters", Number)
+    .action(async (runId: string, document: string, o: Common & { head?: number }) => {
+      const ledger = ledgerOf(o);
+      const state = fold(runId, await ledger.trace(runId));
+      const d = state.documents.find((x) => x.id === document);
+      if (!d) throw new Error(`run ${runId}: no document ${document}`);
+      console.error(
+        `${d.id} ${d.url}${d.title ? ` | ${d.title}` : ""}${d.date ? ` | ${d.date}` : ""} | ${d.text.length} chars`,
+      );
+      console.log(o.head ? d.text.slice(0, o.head) : d.text);
+    });
 
   agent(machine(common(program.command("open <run> [hit...]"))))
     .description(
@@ -582,8 +611,37 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     .description("a query for the next search")
     .requiredOption("--why <why>", "why it serves the ask")
     .option("--site <host>")
-    .action((runId: string, terms: string, o: Common & Agent & { why: string; site?: string }) =>
-      added(o, runId, { type: "query", terms, why: o.why, ...(o.site ? { site: o.site } : {}) }),
+    .option("--facet <name>", "the tree's facet it serves")
+    .action(
+      (
+        runId: string,
+        terms: string,
+        o: Common & Agent & { why: string; site?: string; facet?: string },
+      ) =>
+        added(o, runId, {
+          type: "query",
+          terms,
+          why: o.why,
+          ...(o.site ? { site: o.site } : {}),
+          ...(o.facet ? { facet: o.facet } : {}),
+        }),
+    );
+  agent(common(adds.command("check <run> <finding>")))
+    .description(
+      "the agent's own check of a finding against its document: --ok or --fail (a fail also drops it)",
+    )
+    .option("--ok", "the quote backs the sentence")
+    .option("--fail", "it does not")
+    .requiredOption("--why <why>")
+    .action(
+      (
+        runId: string,
+        finding: string,
+        o: Common & Agent & { ok?: boolean; fail?: boolean; why: string },
+      ) => {
+        if (o.ok === o.fail) throw new Error("check: --ok or --fail");
+        return added(o, runId, { type: "check", on: finding, ok: !!o.ok, why: o.why });
+      },
     );
   agent(common(adds.command("finding <run> <document>")))
     .description(
@@ -650,6 +708,8 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     .option("--propose <file>", "the propose prompt, from a file")
     .option("--triage <file>", "the triage prompt, from a file")
     .option("--review <file>", "the review prompt, from a file")
+    .option("--thin <n>", "new hits under which a tree's try is thin, so the next try runs", Number)
+    .option("--tree <file>", "the query tree's guide, as JSON {facets: [{name, why}], thin}")
     .action(
       async (
         kind: string,
@@ -664,6 +724,8 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
           propose?: string;
           triage?: string;
           review?: string;
+          thin?: number;
+          tree?: string;
         },
       ) => {
         const k = kindOf(kind);
@@ -688,6 +750,11 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
           ...(o.propose ? { propose: await text(o.propose) } : {}),
           ...(o.triage ? { triage: await text(o.triage) } : {}),
           ...(o.review ? { review: await text(o.review) } : {}),
+          ...(o.tree
+            ? { tree: TreeGuide.parse(JSON.parse(await text(o.tree))) }
+            : o.thin !== undefined
+              ? { tree: { ...treeOf(current), thin: o.thin } }
+              : {}),
         });
         const path = await ledger.writePlan(next);
         console.error(`${k}: plan file version ${next.version} at ${path}`);

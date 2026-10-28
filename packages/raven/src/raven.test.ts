@@ -87,7 +87,7 @@ describe("merge", () => {
     expect(p.snapshot).toEqual({
       at: "2026-10-27T00:00:00.000Z",
       known: ["referrals convert"],
-      planFile: { id: "raven/web", version: 5 },
+      planFile: { id: "raven/web", version: 6 },
       model: "m1",
       yieldRows: 0,
     });
