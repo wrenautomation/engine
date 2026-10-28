@@ -172,9 +172,10 @@ describe("ladder", () => {
     const ok = await ladderSource({ sites: fetched(null) }).open?.(hit("https://e.example"));
     expect(ok?.url).toBe("https://e.example/final");
     expect(ok?.text).toContain("ladder text");
-    await expect(
-      ladderSource({ sites: fetched("captcha") }).open?.(hit("https://e.example")),
-    ).rejects.toThrow("blocked (captcha) at render");
+    // A block is a miss, like the fetcher's 403: the read step writes a gap and goes on.
+    expect(
+      await ladderSource({ sites: fetched("captcha") }).open?.(hit("https://e.example")),
+    ).toBeNull();
   });
   it("speaks autobrowse's wire: GET with a query, a bearer token, errors by status", async () => {
     const seen: { url: string; init: RequestInit | undefined }[] = [];

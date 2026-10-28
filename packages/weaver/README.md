@@ -91,9 +91,11 @@ with free text. Every `steer` record is rendered first in every prompt of the ro
 under "The person says:". `--resume` goes on.
 
 The steps talk in English records. A query every searcher answered with no new hit, and a kept
-hit no source could open, each write a `gap`; so does `weaver gap`. The round's review reads
-the gaps; the next round's plan reads them, and the review's why on `again`, under "The last
-round left open". `weaver back` writes a person's edge: the fold takes it like raven's.
+hit no source could open (a 403, a block the ladder could not pass), each write a `gap`; so does
+`weaver gap`. The round's review reads the gaps and a person's `keep` or `drop` with its why;
+the next round's plan reads them, and the review's why on `again`, under "The last round left
+open". The last round of the budget is reviewed too: its edge is stop, and its why is what the
+ask still lacks. `weaver back` writes a person's edge: the fold takes it like raven's.
 
 The check step reads a sample of the round's kept findings (`budget.checks`, 3 by default;
 spread across documents) against the text around each quote. The extract gate proves a quote is

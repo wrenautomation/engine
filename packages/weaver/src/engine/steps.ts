@@ -72,12 +72,24 @@ const tool = (by: string) => ({ from: "tool" as const, by });
 /** A gap as a prompt line: the step that wrote it, or the person. */
 const gapLine = (g: GapRecord): string => `${g.step ?? g.by}: ${g.note}`;
 
-/** What round `round` left open: its review's why when it said again, and its gaps. */
+/** A person's keep or drop on a finding of round `round`, as prompt lines: the finding, then why. */
+const personCalls = (state: RunState, round: number): string[] => {
+  const textOf = new Map(state.findings.map((f) => [f.id, f.text]));
+  return state.calls
+    .filter((c) => c.from === "human" && c.round === round && textOf.has(c.on))
+    .map((c) => `${c.by} ${c.verdict}s "${textOf.get(c.on)}": ${c.why}`);
+};
+
+/**
+ * What round `round` left open: its review's why when it said again, its gaps, and a person's
+ * keep or drop on its findings (often written after the review, between rounds).
+ */
 export const openAfter = (state: RunState, round: number): string[] => {
   const edge = state.edges.filter((e) => e.round === round).at(-1);
   return [
     ...(edge?.next === "again" ? [edge.why] : []),
     ...state.gaps.filter((g) => g.round === round).map(gapLine),
+    ...personCalls(state, round),
   ];
 };
 
@@ -475,6 +487,7 @@ export const reviewStep: StepFn = async (ctx, state) => {
           .filter((s) => inRound(s) && !s.ok)
           .map((s) => `${s.source} ${s.op} failed: ${s.error ?? "?"}`),
       ),
+      ...personCalls(state, ctx.round),
     ],
     gaps: state.gaps.filter(inRound).map(gapLine),
     checks: state.checks

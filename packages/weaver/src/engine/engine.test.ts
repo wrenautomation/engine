@@ -685,9 +685,20 @@ describe("gaps, checks and age", () => {
 
     const a = await paused();
     await a.d.ledger.append({ ...a.human, type: "gap", id: "g1", note: "no UK numbers" });
+    const kept = fold(a.run, await a.d.ledger.trace(a.run)).findings.find((f) =>
+      f.text.startsWith("38%"),
+    );
+    await a.d.ledger.append({
+      ...a.human,
+      type: "call",
+      id: "c1",
+      on: kept?.id ?? "",
+      verdict: "drop",
+      why: "a forecast, not a result",
+    });
     await run(a.d, { resume: a.run, planFile: a.file, steps: 1 });
     expect(a.prompts.filter((p) => p.startsWith("You plan")).at(-1)).toContain(
-      "- read: no source could open https://c.example/missing\n- will: no UK numbers\n",
+      '- read: no source could open https://c.example/missing\n- will: no UK numbers\n- will drops "38% of placements came from repeat clients.": a forecast, not a result\n',
     );
 
     const b = await paused();
@@ -700,5 +711,25 @@ describe("gaps, checks and age", () => {
       why: "searxng was down",
     });
     expect(fold(b.run, await b.d.ledger.trace(b.run)).next).toEqual({ round: 1, step: "fetch" });
+  });
+
+  it("asks the model on the last round too: the stop says what is still open", async () => {
+    const prompts: string[] = [];
+    const d: Deps = {
+      ...deps(routed(prompts, { next: "again", why: "no UK numbers" })),
+      sources: registry(search, dated),
+    };
+    const file = {
+      ...planFile,
+      sources: ["fake", "dated"],
+      budget: { ...planFile.budget, rounds: 2 },
+    };
+    const out = await run(d, { ask: { text: "repeat clients", kind: "web" }, planFile: file });
+    expect(out.state.edges.map((e) => [e.next, e.why])).toEqual([
+      ["again", "no UK numbers"],
+      ["stop", "round budget spent (2 of 2): no UK numbers"],
+    ]);
+    const reviews = prompts.filter((p) => p.startsWith("You decide what happens"));
+    expect(reviews.map((p) => p.includes("This is the last round"))).toEqual([false, true]);
   });
 });

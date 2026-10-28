@@ -22,13 +22,13 @@ export function ladderSource(o: {
     async open(h) {
       if (!/^https?:/.test(h.url)) return null;
       const r = await fetchLadder(o.sites, h.url, o.from ?? "impersonate");
-      // offline: the worker did not answer, worth another try. cap: the day's bucket is spent.
+      // offline: the worker did not answer, worth another try. The rest is a miss, like the
+      // fetcher's 403: the read step writes a gap and goes on to the next hit.
       if ("failed" in r) {
         if (r.failed === "offline") throw new Transient("ladder: offline");
-        throw new Error(`ladder: ${r.failed}`);
+        return null;
       }
-      if (r.fetched.block)
-        throw new Error(`ladder: blocked (${r.fetched.block}) at ${r.fetched.tier}`);
+      if (r.fetched.block) return null;
       const html = readers.get("html");
       if (!html) return null;
       return html.read({

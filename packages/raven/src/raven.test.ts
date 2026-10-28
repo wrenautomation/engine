@@ -290,9 +290,17 @@ describe("review", () => {
     expect(Round.parse({ ...round, verdicts: undefined }).verdicts).toEqual([]);
   });
 
-  it("stops on a spent round budget without asking the model", async () => {
-    const e = await review({ ...round, round: 2 }, scriptedModel([]));
-    expect(e).toMatchObject({ next: "stop", by: "raven:budget" });
+  it("stops on a spent round budget, with the model's word on what is still open", async () => {
+    const e = await review(
+      { ...round, round: 2 },
+      scriptedModel([{ next: "again", why: "no cost per hire" }], "m1"),
+    );
+    expect(e).toEqual({
+      next: "stop",
+      why: "round budget spent (2 of 2): no cost per hire",
+      from: "ai",
+      by: "m1",
+    });
   });
 
   it("takes the model's edge and defaults a back to fetch", async () => {
