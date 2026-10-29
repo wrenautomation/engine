@@ -803,6 +803,9 @@ describe("gaps, checks and age", () => {
     expect(out.state.next).toEqual({ round: 3, step: "plan" });
     const reviews = prompts.filter((p) => p.startsWith("You decide what happens"));
     expect(reviews).toHaveLength(2);
+    // Round 2's review sees round 1's counts: the trend is its to weigh.
+    expect(reviews[0]).not.toContain("earlier rounds");
+    expect(reviews[1]).toMatch(/Hits \d+ new \(earlier rounds: \d+\)/);
     // A resume goes one more round, then parks again.
     const more = await run(d, { resume: out.run, planFile: file });
     expect(more.state.edges).toHaveLength(3);

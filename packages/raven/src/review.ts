@@ -17,16 +17,26 @@ const EdgeAnswer = z.object({
 
 const verdictLine = (v: Verdict): string => `${v.url}: ${v.quality}${v.gap ? `. ${v.gap}` : ""}`;
 
+/** A count with the earlier rounds' after it: rides the `{hits}` and `{kept}` slots, so a stored plan file shows it too. */
+const trend = (now: string, before: number[]): string =>
+  before.length ? `${now} (earlier rounds: ${before.join(", ")})` : now;
+
 export function reviewPrompt(round: Round, planFile: PlanFile): string {
   return fill(planFile.review, {
     ask: round.ask.text,
     steer: renderSteer(round.ask),
     round: String(round.round),
     rounds: String(round.budget.rounds),
-    hits: String(round.hits),
+    hits: trend(
+      `${round.hits} new`,
+      round.earlier.map((e) => e.hits),
+    ),
     reads: String(round.reads),
     proposed: String(round.proposed),
-    kept: String(round.kept),
+    kept: trend(
+      String(round.kept),
+      round.earlier.map((e) => e.kept),
+    ),
     found: lines(round.found),
     notes: lines(round.notes, "(none)"),
     gaps: lines(round.gaps, "(none)"),

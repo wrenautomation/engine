@@ -33,7 +33,7 @@ const REVIEW = `You decide what happens after one round of research.
 ${SHAPE_EDGE}
 
 Rules:
-- "stop" when the found lines answer the ask, or when another round would likely add nothing.
+- "stop" when the found lines answer the ask, or when another round would likely add nothing. New hits and kept findings that fall round by round point that way.
 - "again" when the ask is still open and new queries could find more. The gaps say what is missing; say what to look for next in "why".
 - "again" too when the reads were mostly "thin" or "off": the queries found the wrong pages, so plan different ones.
 - "back" when one step of this round failed for a reason a rerun fixes (a source was down, reads timed out). Name the step in "to".

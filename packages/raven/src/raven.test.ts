@@ -174,6 +174,7 @@ describe("merge", () => {
       verdicts: [],
       gaps: [],
       checks: [],
+      earlier: [],
     };
     expect(reviewPrompt(r, defaultPlanFile("web"))).toContain(
       "The person says:\n- numbers only\n- skip vendor pages\nRound 1",
@@ -292,7 +293,24 @@ describe("review", () => {
     ],
     gaps: ['fetch: query "staffing repeat clients": no new hits', "william: no UK numbers yet"],
     checks: ["ok: referrals convert. The quote says so."],
+    earlier: [],
   };
+
+  it("shows new hits and kept findings round by round: the trend is the review's to weigh", () => {
+    expect(reviewPrompt(round, defaultPlanFile("web"))).toContain("Hits 10 new, reads");
+    const third = {
+      ...round,
+      round: 3,
+      earlier: [
+        { hits: 40, kept: 6 },
+        { hits: 15, kept: 3 },
+      ],
+    };
+    const p = reviewPrompt(third, defaultPlanFile("web"));
+    expect(p).toContain("Hits 10 new (earlier rounds: 40, 15), reads");
+    expect(p).toContain("kept 2 (earlier rounds: 6, 3).");
+    expect(Round.parse({ ...round, earlier: undefined }).earlier).toEqual([]);
+  });
 
   it("shows the gaps, the checks and the kind's word on age", () => {
     const p = reviewPrompt(round, defaultPlanFile("web"));

@@ -693,6 +693,10 @@ export const reviewStep: StepFn = async (ctx, state) => {
     checks: state.checks
       .filter(inRound)
       .map((c) => `${c.ok ? "ok" : "failed"}: ${textOf.get(c.on) ?? c.on} (${c.why})`),
+    earlier: Array.from({ length: ctx.round - 1 }, (_, i) => ({
+      hits: state.hits.filter((h) => h.round === i + 1).length,
+      kept: found(state, i + 1).length,
+    })),
   };
   const edge = ctx.model
     ? await review(round, ctx.model, {

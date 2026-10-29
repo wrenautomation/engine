@@ -241,6 +241,15 @@ export const Round = z.object({
   gaps: z.array(z.string()).default([]),
   /** The sample check: whether each checked finding's quote backs it, one line each. */
   checks: z.array(z.string()).default([]),
+  /** Each earlier round's new hits and kept findings: the review sees the trend, and decides. */
+  earlier: z
+    .array(
+      z.object({
+        hits: z.number().int().nonnegative(),
+        kept: z.number().int().nonnegative(),
+      }),
+    )
+    .default([]),
 });
 export type Round = z.infer<typeof Round>;
 
