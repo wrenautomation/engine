@@ -71,8 +71,9 @@ records show done.
    id becomes a premise too. The guide then names a `premise` facet: one try per premise that
    would show it wrong. `tree.uncovered` lists it until a query serves it. A premise that fails
    changes the ask: tell the person.
-2. **Plan the tree.** Read the ask and `brief`. Write the round's query tree: one facet per
-   side of the ask the guide names (`brief.planFile` kind's guide: a number, a how, a who, a
+2. **Plan the tree.** Read the ask and `brief`. `brief.guide` holds the kind's age sentence and
+   rules: heed them when you plan and when you triage. Write the round's query tree: one facet per
+   side of the ask the guide names (`birdwatch plans <kind>`: a number, a how, a who, a
    counter-view, a primary source; add a facet the ask needs), each with 2 or 3 tries in the
    order you expect to work: the plain words first, then a narrower angle (a site, a year, a
    synonym the trade uses, a forum, a filing). Each query's why says what it would prove. Show
@@ -121,8 +122,8 @@ records show done.
    wrong side. Call the middle yourself. Your bar, your why: the records are yours.
 4. **Read.** `open`, then `show` each document and read it. Write each fact that answers the
    ask as `add finding` with its exact quote; a quote that is not on the page fails. Say what
-   the page lacks as `add gap --on <document>`. For a run too big to read (tens of pages), or
-   in the runner, `extract` puts a model behind the same gate; then judge its findings in
+   the page lacks as `add gap --on <document>`. For a run too big to read (tens of pages),
+   `extract` puts a model behind the same gate; then judge its findings in
    `wrote` and drop what does not answer the ask (`add call <finding> drop --why`). Class each
    page with a kept finding (`brief.documents.unclassed`): `add class <document> <class> --why`.
    Its findings take the class. When one finding differs (a vendor page that quotes a survey),
@@ -188,9 +189,10 @@ records show done.
    findings, and each number comes from a cited quote, or the gate drops the item. A draft is
    never final: the person writes the SOP or the decision.
 10. **Learn.** If the run was good and the person agrees, `birdwatch learn <kind>` with what it
-   taught: a source order that yielded, a budget that fit, an age sentence, a `--thin` that
-   fits the kind, a facet the guide should name (`--tree <file>`). The next run of that kind
-   starts there. Never change a prompt without showing the person the diff.
+   taught: a source order that yielded, a budget that fit, an age sentence, a rule for the
+   kind (`--rule`, every line), a `--thin` that fits the kind, a facet the guide should name
+   (`--tree <file>`). The next run of that kind starts there. Never change a rule without
+   showing the person the diff.
 
 Stop when the ask is answered or two rounds in a row added nothing that changed the answer.
 Say so in the edge's why.
@@ -198,7 +200,7 @@ Say so in the edge's why.
 ## The person
 
 Their words are theirs: `birdwatch add steer <run> "<their words>" --human <name>`. A steer is
-rendered first in every later prompt and snapshot. Their keep or drop on a hit or finding:
+shown first in every later brief and snapshot. Their keep or drop on a hit or finding:
 `add call ... --human <name>`; their gap, `add gap ... --human <name>`; a step they want rerun,
 `add edge <run> back --to <step> --why "<their why>" --human <name>`. Never put your words in a `--human` record.
 
@@ -209,8 +211,8 @@ they did not ask for.
 
 Every record carries `from` (ai, human, tool), `by` (your id, their name, a source or model
 id), its round, and on a decision, a why. `birdwatch trace <run>` prints them all;
-`birdwatch trace <run> --type finding` one type. `birdwatch run --resume <run>` hands a run to the
-runner (the planner's prompts decide instead of you); `brief` reads a run the runner made the same way.
+`birdwatch trace <run> --type finding` one type. A run from before 0.30.0 that the old runner
+made reads the same way in `brief`.
 
 To let a person watch or check a run, start `birdwatch serve` (same `--ledger`) in the background
 and tell them to open the portal's Research page on this Mac. It updates live as you write.

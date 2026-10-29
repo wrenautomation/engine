@@ -1,7 +1,7 @@
 /**
  * The records a ledger holds: one JSON object per line, append only. Every record has the same
  * envelope (`type`, `id`, `run`, `round`, `step`, `at`, `from`, `by`) and then its own fields;
- * the planner's (`./plan`) and the document's (`./document`) shapes are spread in with the envelope's fields taken out, so a record
+ * the ask's (`./engine`) and the document's (`./document`) shapes are spread in with the envelope's fields taken out, so a record
  * has one `by`. A correction is a new record that points at the old one, never an edit.
  *
  * One rule for the lake: a top-level key keeps one JSON type across every record type, so
@@ -21,13 +21,13 @@ import {
   Query as PlanQuery,
   Snapshot as PlanSnapshot,
   z,
-} from "../plan/index.js";
+} from "../engine/types.js";
 
-/** Who wrote a record: a model, a person, or a tool (a source adapter, the runner). */
+/** Who wrote a record: a model, a person, or a tool (a source adapter, the engine). */
 export const From = z.enum(["ai", "human", "tool"]);
 export type From = z.infer<typeof From>;
 
-/** The runner's steps, in order. The planner's `Edge.to` names one of the first five. */
+/** The steps, in order. An edge's `to` names one of the first five. */
 export const Step = z.enum(["plan", "fetch", "triage", "read", "extract", "check", "review"]);
 export type Step = z.infer<typeof Step>;
 export const STEPS = Step.options;
@@ -160,7 +160,7 @@ export const SpendRecord = Envelope.extend({
 });
 export type SpendRecord = z.infer<typeof SpendRecord>;
 
-/** What the plan step was given for one round: the ask, the allow-list, the budget, the planner's snapshot. */
+/** What the plan step was given for one round: the ask, the allow-list, the budget, the snapshot. */
 export const SnapshotRecord = Envelope.extend({ type: z.literal("snapshot") })
   .extend(PlanSnapshot.omit({ at: true }).shape)
   .extend({
@@ -290,7 +290,7 @@ export type SourceClass = z.infer<typeof SourceClass>;
 /**
  * The agent's word on what kind of source a document is, with why. Its findings take the class;
  * a class on a finding overrides it (a vendor page that quotes a survey). The latest per target
- * wins. The runner writes none.
+ * wins. A model never writes one.
  */
 export const ClassRecord = Envelope.extend({
   type: z.literal("class"),

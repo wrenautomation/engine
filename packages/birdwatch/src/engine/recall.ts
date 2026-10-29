@@ -9,7 +9,7 @@
 import MiniSearch from "minisearch";
 import { type Filter, type Ledger, latestCalls, ofType } from "../ledger/ledger.js";
 import { byTime } from "../ledger/records.js";
-import type { AskKind } from "../plan/index.js";
+import type { AskKind } from "./plan.js";
 
 export interface Recalled {
   finding: string;

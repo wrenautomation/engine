@@ -5,7 +5,7 @@
  */
 
 import type { Source } from "../engine/ports.js";
-import type { HitViewIn } from "../plan/index.js";
+import type { HitViewIn } from "../engine/types.js";
 
 export function paste(hits: readonly HitViewIn[], by: string): Source {
   let given = false;

@@ -23,7 +23,7 @@ import {
   SOURCE_CLASSES,
   type SourceClass,
 } from "../ledger/records.js";
-import type { Criterion } from "../plan/index.js";
+import type { Criterion } from "./plan.js";
 import { kept, type RunState } from "./state.js";
 import type { StepContext } from "./steps.js";
 

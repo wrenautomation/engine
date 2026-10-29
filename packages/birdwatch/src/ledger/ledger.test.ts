@@ -241,7 +241,7 @@ describe("files ledger", () => {
     const root = await tmp();
     const a = new FilesLedger(root, "w");
     expect(await a.readPlan("web")).toBeNull();
-    const { defaultPlanFile } = await import("../plan/index.js");
+    const { defaultPlanFile } = await import("../engine/plan.js");
     const pf = defaultPlanFile("web");
     await a.writePlan(pf);
     expect(await a.readPlan("web")).toEqual(pf);

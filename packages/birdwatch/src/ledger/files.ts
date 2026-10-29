@@ -6,7 +6,7 @@
  */
 import { appendFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { type AskKind, PlanFile } from "../plan/index.js";
+import { type AskKind, PlanFile } from "../engine/types.js";
 import { type Filter, type Ledger, matches, type YieldFilter, yieldRows } from "./ledger.js";
 import { byTime, LedgerRecord } from "./records.js";
 

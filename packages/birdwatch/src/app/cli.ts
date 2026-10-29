@@ -6,7 +6,7 @@
  * text and links, `watch <video>` what a video file shows and says. `plans [kind]` prints a stock
  * plan file to tune. Keys come from the environment: COHERE_API_KEY (or COHERE_API_KEY_1..n),
  * GEMINI_API_KEY. The engine's commands are in `engine-cli.ts`: the agent's (`plan`, `search`,
- * `open`, `extract`, `check`, `add`, `brief`), the runner's (`run`), the plan file's (`learn`) and
+ * `open`, `extract`, `check`, `add`, `brief`), the plan file's (`learn`) and
  * the ledger's (`trace`, `yield`, `sources`). A person's word goes through `add ... --human`.
  */
 import { readFile } from "node:fs/promises";
@@ -25,7 +25,7 @@ import {
   watchFile,
 } from "@wrenautomation/read/video";
 import { Command } from "commander";
-import { AskKind, defaultPlanFile, PLAN_KINDS } from "../plan/index.js";
+import { AskKind, defaultPlanFile, PLAN_KINDS } from "../engine/plan.js";
 import { addEngineCommands, keys } from "./engine-cli.js";
 
 const program = new Command()

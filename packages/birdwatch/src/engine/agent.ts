@@ -3,9 +3,8 @@
  * agent) plans, triages, reviews and stops in its own head; the engine does the fixed work
  * (search, open, extract through the quote gate, check) and keeps the records. Every record the
  * agent writes carries its id and, on a decision, a why; the person's words come through it
- * marked `from: human`. The runner loops over the same step functions, so `birdwatch run --resume`
- * can take a run over, and the fold reads both the same. The budget is a guard rail here: the
- * brief shows it, nothing cuts a query or stops a round by it.
+ * marked `from: human`. The budget is a guard rail: the brief shows it, nothing cuts a query or
+ * stops a round by it.
  */
 
 import { isTransient } from "@wrenautomation/models";
@@ -24,6 +23,7 @@ import {
   type Step,
 } from "../ledger/records.js";
 import {
+  ageOf,
   type AskKind,
   type Criterion,
   defaultPlanFile,
@@ -31,9 +31,10 @@ import {
   PlanFile,
   QueryTree,
   type TreeGuide,
+  rulesOf,
   treeOf,
   type YieldRow,
-} from "../plan/index.js";
+} from "./plan.js";
 import { canonical } from "./canonical.js";
 import { costOf } from "./cost.js";
 import { classGuess, type JudgeStats, judgeStats, pickOf, yesOf } from "./judge.js";
@@ -45,7 +46,7 @@ import {
   unfollowedOf,
 } from "./people.js";
 import type { Deps } from "./ports.js";
-import { context } from "./runner.js";
+import { context } from "./context.js";
 import {
   checkCount,
   classesOf,
@@ -120,14 +121,14 @@ function planned(state: RunState): void {
     );
 }
 
-const tool = (deps: Deps) => ({ from: "tool" as const, by: deps.runner });
+const tool = (deps: Deps) => ({ from: "tool" as const, by: deps.writer });
 
-/** One step over the run as the runner runs it: the fold, the step, its `done`, the fold again. */
+/** One step over the run: the fold, the step, its `done`, the fold again. */
 async function stepRun(deps: Deps, run: string, step: Step, fn: StepFn): Promise<Did> {
   const state = await stateOf(deps, run);
   planned(state);
   const before = new Set(state.records.map((r) => r.id));
-  const ctx = context(deps, {}, run, state.round, step);
+  const ctx = context(deps, run, state.round, step);
   let result: StepResult;
   try {
     result = await fn(ctx, state);
@@ -212,7 +213,7 @@ export async function planRound(deps: Deps, input: PlanInput): Promise<Did> {
     ...(base.site ? { site: base.site } : {}),
   };
   const yieldRows = await deps.ledger.yield();
-  const ctx = context(deps, { planFile: input.planFile }, run, round, "plan");
+  const ctx = context(deps, run, round, "plan");
   await ctx.write(
     {
       type: "snapshot",
@@ -264,7 +265,7 @@ export async function search(
   const state = await stateOf(deps, run);
   planned(state);
   const kind = (state.snapshot as NonNullable<RunState["snapshot"]>).ask.kind;
-  const ctx = context(deps, {}, run, state.round, "plan");
+  const ctx = context(deps, run, state.round, "plan");
   for (const q of queries) {
     const terms = q.terms.replace(/\s+/g, " ").trim();
     if (!terms) throw new Error("a query needs terms");
@@ -309,7 +310,7 @@ export async function follow(deps: Deps, run: string, input: FollowInput, who: W
   if (input.document && !doc) throw new Error(`no document ${input.document}`);
   const url = input.url ?? doc?.url;
   if (!url) throw new Error("follow: a URL or a document");
-  const ctx = context(deps, {}, run, state.round, "plan");
+  const ctx = context(deps, run, state.round, "plan");
   const reach = [...snapshot.sources, ...snapshot.opens];
   const joining = (input.with ?? []).filter((n) => !reach.includes(n));
   for (const n of joining) {
@@ -527,7 +528,7 @@ export async function searchTree(
   const before = treeView(first, round, guide);
   const wrote: Shown[] = [];
   const lines: string[] = [];
-  const ctx = context(deps, {}, run, round, "plan");
+  const ctx = context(deps, run, round, "plan");
   const ids: string[] = [];
   for (const facet of tree.facets) {
     if (before.dead.includes(facet.name)) {
@@ -557,8 +558,8 @@ export async function searchTree(
     if (!next) {
       const note = `facet "${facet.name}": ${ran?.kept ?? 0} kept in ${tier - 1} ${tier === 2 ? "try" : "tries"}, none left`;
       if (ran && !ran.enough && !first.gaps.some((g) => g.round === round && g.note === note)) {
-        const fetch = context(deps, {}, run, round, "fetch");
-        const id = await fetch.write({ type: "gap", note }, { from: "tool", by: deps.runner });
+        const fetch = context(deps, run, round, "fetch");
+        const id = await fetch.write({ type: "gap", note }, { from: "tool", by: deps.writer });
         const trace = await deps.ledger.trace(run);
         wrote.push(shown(trace.find((r) => r.id === id) as LedgerRecord));
       }
@@ -650,7 +651,7 @@ export async function open(deps: Deps, run: string, input: OpenInput, who: Who):
     throw new Error("open: why read these?");
   const ids = new Set(state.hits.map((h) => h.id));
   for (const id of named) if (!ids.has(id)) throw new Error(`no hit ${id}`);
-  const ctx = context(deps, {}, run, state.round, "triage");
+  const ctx = context(deps, run, state.round, "triage");
   const byKey = new Map(state.hits.map((h) => [h.key, h.id]));
   for (const url of input.urls ?? []) {
     const key = canonical(url);
@@ -1071,9 +1072,7 @@ export interface PlanChanges {
   sources?: string[];
   budget?: Partial<PlanFile["budget"]>;
   age?: string;
-  propose?: string;
-  triage?: string;
-  review?: string;
+  rules?: string[];
   tree?: TreeGuide;
   runs?: PlanFile["runs"];
 }
@@ -1081,7 +1080,7 @@ export interface PlanChanges {
 /**
  * The next version of a plan file: the current one with the changes, version plus one. Pure:
  * the ledger writes it (`birdwatch learn`), at the end of a run the agent and the person agreed
- * was good. The sources stay an allow-list the planner narrows, never widens; `learn` is how it widens.
+ * was good. The sources stay an allow-list a run narrows, never widens; `learn` is how it widens.
  */
 export function tunePlan(current: PlanFile, changes: PlanChanges): PlanFile {
   const next = PlanFile.parse({
@@ -1089,9 +1088,7 @@ export function tunePlan(current: PlanFile, changes: PlanChanges): PlanFile {
     ...(changes.sources ? { sources: changes.sources } : {}),
     budget: { ...current.budget, ...(changes.budget ?? {}) },
     ...(changes.age !== undefined ? { age: changes.age } : {}),
-    ...(changes.propose ? { propose: changes.propose } : {}),
-    ...(changes.triage ? { triage: changes.triage } : {}),
-    ...(changes.review ? { review: changes.review } : {}),
+    ...(changes.rules ? { rules: changes.rules } : {}),
     ...(changes.tree ? { tree: changes.tree } : {}),
     ...(changes.runs ? { runs: changes.runs } : {}),
     version: current.version + 1,
@@ -1115,7 +1112,7 @@ export type HitBrief = Omit<HitRecord, "type" | "run" | "step" | "at" | "from" |
 export interface Brief {
   run: string;
   round: number;
-  /** Where the runner would go next; null when an edge said stop. */
+  /** The next step the fold points at; null when an edge said stop. */
   next: Pointer | null;
   /** The last edge's why, or the step that gave up. */
   note: string | null;
@@ -1123,6 +1120,8 @@ export interface Brief {
   budget: NonNullable<RunState["snapshot"]>["budget"] | null;
   sources: string[];
   planFile: NonNullable<RunState["snapshot"]>["planFile"] | null;
+  /** The kind's word for the agent, from its plan file: how much a source's age counts, and the rules to heed when it plans and triages. */
+  guide: { age: string | null; rules: string[] } | null;
   /** What the person said, oldest first. */
   steer: string[];
   /** What the last round left open: its edge's why, its gaps, the person's calls. */
@@ -1222,7 +1221,7 @@ const hitRank = (h: {
 const pageRank = (d: { worth?: number; criteria?: Record<string, number> }) =>
   d.criteria ? mean(Object.values(d.criteria)) : (d.worth ?? -1);
 
-/** What the planner's prompts see, as JSON: everything the agent needs to plan, triage, review and stop. */
+/** The brief, as JSON: everything the agent needs to plan, triage, review and stop. */
 export async function brief(deps: Deps, run: string): Promise<Brief> {
   const state = await stateOf(deps, run);
   const s = state.snapshot;
@@ -1248,6 +1247,9 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
     );
     return Object.keys(out).length ? out : undefined;
   };
+  const kindFile = s
+    ? ((await deps.ledger.readPlan?.(s.ask.kind)) ?? defaultPlanFile(s.ask.kind))
+    : null;
   const tree =
     s && state.queries.some((q) => q.round === round && q.facet)
       ? treeView(state, round, await guideOf(deps, s.ask))
@@ -1261,6 +1263,7 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
     budget: s?.budget ?? null,
     sources,
     planFile: s?.planFile ?? null,
+    guide: kindFile ? { age: ageOf(kindFile) ?? null, rules: rulesOf(kindFile) } : null,
     steer: state.steers.map((x) => x.text),
     open: round > 1 ? openAfter(state, round - 1) : [],
     gaps: state.gaps.filter((g) => g.round === round).map(gapLine),

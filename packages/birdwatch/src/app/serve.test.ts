@@ -6,7 +6,7 @@ import { type Deps, registry, type Source } from "../engine/ports.js";
 import type { RunRow, RunView } from "../engine/view.js";
 import { countingIds } from "../ledger/ids.js";
 import { MemoryLedger } from "../ledger/memory.js";
-import { defaultPlanFile } from "../plan/index.js";
+import { defaultPlanFile } from "../engine/plan.js";
 import { type Changes, serveApp } from "./serve.js";
 
 const fake: Source = {
@@ -31,7 +31,7 @@ async function setup() {
     extractor: claimExtractor,
     clock: () => new Date(Date.UTC(2026, 9, 28, 10, 0, ++t)),
     ids: countingIds(),
-    runner: "claude-code",
+    writer: "claude-code",
   };
   const { run } = await planRound(d, {
     ask: { text: "repeat clients", kind: "web" },

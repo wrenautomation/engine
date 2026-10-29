@@ -1,6 +1,6 @@
 /**
  * A run's state is the fold of its records, never held between steps: every step reads the
- * trace again. The fold gives the ask, the round, the plan as the planner made it, what each step
+ * trace again. The fold gives the ask, the round, the plan, what each step
  * has handled, and the pointer: the next step to run, from the `done` and `edge` records.
  */
 import { hostOf } from "../document/index.js";
@@ -30,7 +30,6 @@ import {
   type Step,
   type VerdictRecord,
 } from "../ledger/records.js";
-import { Plan } from "../plan/index.js";
 
 export interface Pointer {
   round: number;
@@ -143,33 +142,6 @@ export function fold(run: string, records: readonly LedgerRecord[]): RunState {
     hitByKey: new Map(hits.map((h) => [h.key, h.id])),
     called: latestCalls(records),
   };
-}
-
-const inRound =
-  (round: number) =>
-  <T extends { round: number }>(r: T) =>
-    r.round === round;
-
-/** The plan of a round as the planner made it, rebuilt from its snapshot and queries. */
-export function planOf(state: RunState, round: number): Plan {
-  const s = ofType(state.records, "snapshot").filter(inRound(round)).at(-1);
-  if (!s) throw new Error(`round ${round} has no snapshot`);
-  const { ask, sources, budget, known, planFile, model, yieldRows, at } = s;
-  return Plan.parse({
-    ask,
-    round,
-    queries: state.queries.filter(inRound(round)).map((q) => ({
-      kind: q.kind,
-      terms: q.terms,
-      ...(q.site ? { site: q.site } : {}),
-      why: q.why,
-      from: q.from === "tool" ? "ai" : q.from,
-      by: q.by,
-    })),
-    sources,
-    budget,
-    snapshot: { at, known, planFile, model, yieldRows },
-  });
 }
 
 /** A finding stays kept unless its latest call is a drop. */

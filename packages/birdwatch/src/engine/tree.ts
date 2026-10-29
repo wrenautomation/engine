@@ -8,7 +8,7 @@
  */
 
 import type { SnapshotRecord, SpendRecord } from "../ledger/records.js";
-import type { Budget, PlanFile } from "../plan/index.js";
+import type { Budget, PlanFile } from "./plan.js";
 import { costOf } from "./cost.js";
 import type { Deps } from "./ports.js";
 import { recall } from "./recall.js";

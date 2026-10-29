@@ -1,20 +1,19 @@
 /**
- * The engine from a shell: `run` an ask, `trace` a run, `keep` or `drop` a finding by hand, `steer`
- * a run, say a `gap`, send it `back` to a step,
- * `yield` per source, `sources` on this machine. Every command prints JSON, so Claude Code
- * can drive it. The ledger is a folder (`--ledger`, BIRDWATCH_LEDGER, default `./ledger`); a
+ * The engine from a shell, one step per command for the agent that drives it: `plan`, `search`,
+ * `open`, `extract`, `check`, `add`, `brief`, `trace` a run, `yield` per source, `sources` on this
+ * machine. Every command prints JSON. The ledger is a folder (`--ledger`, BIRDWATCH_LEDGER, default `./ledger`); a
  * writer names this terminal's file in it (`--writer`, BIRDWATCH_WRITER, default the user name).
  * The model is a `@wrenautomation/models` spec: `anthropic` by default (Claude Haiku direct,
  * ANTHROPIC_API_KEY), `gateway[:alias]`, `gemini`, `claude-code`, `command:<cmd>` and the rest
  * of its grammar. A host with its own ledger, sources or
  * model passes them in `EngineCliDeps`; wren's `research` command is these commands over
- * Postgres. A run that stops on a transient failure (a 429, a 5xx, a dropped connection) is
- * resumed by `run` itself after a pause, up to RESUMES times.
+ * Postgres. A step that stops on a transient failure (a 429, a 5xx, a dropped connection) exits
+ * with its note; the agent runs it again, and it skips what its records show done.
  */
 import { mkdir, readFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { serve } from "@hono/node-server";
-import { isTransient, type Model } from "@wrenautomation/models";
+import type { Model } from "@wrenautomation/models";
 import { type Judge, judgeFromSpec } from "@wrenautomation/models/judge";
 import { modelFromSpec } from "@wrenautomation/models/spec";
 import type { LadderClient } from "@wrenautomation/read/fetch";
@@ -43,10 +42,8 @@ import {
   RESERVED,
   recall,
   registry,
-  run,
   type Source,
   type Sources,
-  type StepEvent,
   search,
   searchTree,
   tunePlan,
@@ -67,12 +64,11 @@ import {
   defaultPlanFile,
   PLAN_KINDS,
   type PlanFile,
-  Step as PlanStep,
-  type Proposal,
   QueryTree,
   TreeGuide,
   treeOf,
-} from "../plan/index.js";
+} from "../engine/plan.js";
+import { Step as PlanStep } from "../engine/types.js";
 import {
   accountsFrom,
   arxivSource,
@@ -84,7 +80,6 @@ import {
   ingressLadderClient,
   ladderSource,
   ledgerSource,
-  paste,
   redditSource,
   searxng,
   ytdlpSource,
@@ -92,21 +87,7 @@ import {
 import { SERVE_ORIGINS, SERVE_PORT, serveApp, watchRuns } from "./serve.js";
 
 const DEFAULT_MODEL = "anthropic";
-/** Resumes `run` makes on its own after a transient failure. */
-export const RESUMES = 5;
-/** The longest pause before a resume, whatever `retry-after` said. */
-const MAX_RESUME_WAIT_MS = 300_000;
-
 export { costOf };
-
-/** The pause before a resume: to `retryAfter` (five minutes at most), else 15 s per resume so far. */
-export function resumeWaitMs(n: number, retryAfter: string | undefined, now = Date.now()): number {
-  if (retryAfter) {
-    const until = Date.parse(retryAfter) - now;
-    if (!Number.isNaN(until)) return Math.max(0, Math.min(until, MAX_RESUME_WAIT_MS));
-  }
-  return 15_000 * n;
-}
 
 /** `NAME`, then `NAME_1`, `NAME_2`, ... in order: a fleet of keys for one vendor. */
 export function keys(printed: NodeJS.ProcessEnv, name: string): string[] {
@@ -156,8 +137,6 @@ export interface EngineCliDeps {
   /** The judge for a `--judge` spec; the default is models' `judgeFromSpec`. */
   judge?(spec: string, printed: NodeJS.ProcessEnv): Judge | null;
   extractor?: Extractor;
-  /** The pause before a resume; a test passes a stub. */
-  sleep?(ms: number): Promise<void>;
 }
 
 const filesLedger = (o: Common) => new FilesLedger(o.ledger, o.writer);
@@ -209,7 +188,7 @@ export function sourcesHere(
           url: printed.RESTATE_INGRESS_URL,
           token: printed.RESTATE_AUTH_TOKEN ?? null,
           ...(printed.AUTOBROWSE_SERVICE ? { service: printed.AUTOBROWSE_SERVICE } : {}),
-          caller: `birdwatch:${printed.BIRDWATCH_AGENT ?? "runner"}`,
+          caller: `birdwatch:${printed.BIRDWATCH_AGENT ?? "cli"}`,
         })
       : null;
   if (sites) {
@@ -249,15 +228,9 @@ export function allowList(
   return { sources: out, opens };
 }
 
-const progress = (e: StepEvent) =>
-  console.error(
-    `${e.run} ${e.round}.${e.step} ${e.ok ? "ok" : "gave up"} ${e.ms}ms${e.note ? `: ${e.note}` : ""}`,
-  );
-
 /** The options a command that runs sources or a model takes. */
 interface Machine {
   model: string | false;
-  decider?: string;
   judge: string | false;
   ytDlp: string;
 }
@@ -275,7 +248,7 @@ export const kindOf = (kind: string): AskKind => {
   return k;
 };
 
-/** Prints what a command did as JSON; a step that gave up exits 2, like `run`. */
+/** Prints what a command did as JSON; a step that gave up exits 2. */
 function printDid(did: Did): void {
   console.error(
     `${did.run} ${did.round}.${did.step} ${did.ok ? "ok" : "gave up"}${did.note ? `: ${did.note}` : ""}`,
@@ -293,7 +266,6 @@ async function stdinText(): Promise<string> {
 
 export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): void {
   const ledgerOf = deps.ledger ?? filesLedger;
-  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const common = (c: Command) =>
     c
       .option("--ledger <dir>", "the ledger folder", process.env.BIRDWATCH_LEDGER ?? "./ledger")
@@ -310,11 +282,6 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
         process.env.BIRDWATCH_MODEL ?? DEFAULT_MODEL,
       )
       .option("--no-model", "no model: nothing extracted or checked")
-      .option(
-        "--decider <spec>",
-        "the model for the steps that decide what comes next (plan, triage, review); default: anthropic:sonnet when --model is Haiku, else --model",
-        process.env.BIRDWATCH_DECIDER,
-      )
       .option(
         "--judge <spec>",
         "cheap typed answers on every hit, page and finding (a hint and a router): jev[:model], fake, off",
@@ -337,7 +304,6 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     sources: Sources;
     model: Model | null;
     judge: Judge | null;
-    decider?: Model;
   } => {
     const ledger = ledgerOf(o);
     const sources = deps.sources
@@ -345,15 +311,9 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       : sourcesHere(process.env, ledger as FilesLedger, o.ytDlp);
     const model: Model | null =
       o.model === false ? null : (deps.model ?? modelFromSpec)(o.model, process.env);
-    // Haiku restates, Sonnet decides: a few cents a run.
-    const deciderSpec =
-      o.decider ??
-      (o.model === "anthropic" || o.model === "anthropic:haiku" ? "anthropic:sonnet" : null);
-    const decider: Model | null =
-      model && deciderSpec ? (deps.model ?? modelFromSpec)(deciderSpec, process.env) : null;
     const judge: Judge | null =
       o.judge === false ? null : (deps.judge ?? judgeFromSpec)(o.judge, process.env);
-    return { ledger, sources, model, judge, ...(decider ? { decider } : {}) };
+    return { ledger, sources, model, judge };
   };
   /**
    * The ledger's tuned plan file for the kind (the stock one when none), its sources the run's
@@ -374,16 +334,16 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
         `plan file ${kind} is version ${tuned.version}; birdwatch ships ${stock.version}: delete it to take the new one`,
       );
     const wanted = byHand ?? [...first, ...tuned.sources];
-    // The planner narrows to the plan file's sources, so the run's allow-list goes in as the plan file's.
+    // A run narrows to the plan file's sources, so the run's allow-list goes in as the plan file's.
     const { sources: list, opens } = allowList(sources, wanted, !!byHand);
     return { planFile: { ...tuned, sources: list }, opens };
   };
-  const depsOf = (s: ReturnType<typeof setup>, runner: string) => ({
+  const depsOf = (s: ReturnType<typeof setup>, writer: string) => ({
     ...s,
     extractor: deps.extractor ?? claimExtractor,
     clock: () => new Date(),
     ids: ulids(),
-    runner,
+    writer,
   });
   /** The agent's id: `--by` or BIRDWATCH_AGENT. Every record it writes names it. */
   const agentOf = (o: Agent): string => {
@@ -395,185 +355,6 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     o.human
       ? { from: "human", by: o.human === true ? o.writer : o.human }
       : { from: "ai", by: agentOf(o) };
-
-  machine(common(program.command("run [ask]")))
-    .description(
-      "run an ask through plan, fetch, triage, read, extract, check and review; prints the run as JSON",
-    )
-    .option("--kind <kind>", `one of ${PLAN_KINDS.join(", ")}`, "web")
-    .option(
-      "--known <line...>",
-      "what is known already, one line each, with its URL or ledger id; a line without one is a premise",
-    )
-    .option(
-      "--premise <line...>",
-      "what the ask takes as given (a buyer, an offer, a price): the tree tests each",
-    )
-    .option(
-      "--criterion <name=question...>",
-      'a yes-or-no test of a good source (code="Is code released?"): the judge asks it on every hit and every page read whole, a hint only',
-    )
-    .option("--steer <line...>", "what you say to the model, first in every prompt")
-    .option("--site <host>", "the site the ask is about")
-    .option(
-      "--sources <name...>",
-      "the allow-list for this run (default: the plan file's, as far as this machine has them)",
-    )
-    .option("--propose <terms...>", "queries from you, merged with the model's in round 1")
-    .option("--url <url...>", "pages you want read: a paste source, first in the allow-list")
-    .option(
-      "--by <who>",
-      "who proposes or pastes",
-      process.env.BIRDWATCH_WRITER ?? userInfo().username,
-    )
-    .option("--resume <run>", "continue an earlier run from the step it stopped on")
-    .option("--run <id>", "the new run's id")
-    .option("--pause", "stop after each round's review: `birdwatch steer`, then --resume")
-    .option(
-      "--parent <run>",
-      "a new run's parent: this run is a child of it (one niche of a wide run)",
-    )
-    .option("--why <why>", "with --parent: why this child")
-    .action(
-      async (
-        ask: string | undefined,
-        o: Common & {
-          kind: string;
-          known?: string[];
-          premise?: string[];
-          criterion?: string[];
-          steer?: string[];
-          site?: string;
-          sources?: string[];
-          propose?: string[];
-          url?: string[];
-          by: string;
-          resume?: string;
-          run?: string;
-          pause?: boolean;
-          parent?: string;
-          why?: string;
-        } & Machine,
-      ) => {
-        if (!ask && !o.resume) throw new Error("run needs an ask, or --resume <run>");
-        const kind = kindOf(o.kind);
-        const s = setup(o);
-        const { ledger, sources } = s;
-        if (o.url?.length)
-          sources.set(
-            "paste",
-            paste(
-              o.url.map((url) => ({ url })),
-              o.by,
-            ),
-          );
-        const { planFile, opens } = await planFileOf(
-          ledger,
-          sources,
-          kind,
-          o.sources,
-          o.url?.length ? ["paste"] : [],
-        );
-        const byHand = [
-          ...(o.propose ?? []).map((terms) => ({ kind, terms, why: "proposed by hand" })),
-          // The paste answers the first query it sees: this one, when nothing else is proposed.
-          ...(o.url?.length && !o.propose?.length && ask
-            ? [{ kind, terms: ask, why: "the pasted pages" }]
-            : []),
-        ];
-        const proposals: Proposal[] = byHand.length
-          ? [{ from: "human", by: o.by, queries: byHand }]
-          : [];
-        const id = o.resume ?? o.run ?? ulids()();
-        const engineDeps = depsOf(s, o.writer);
-        const options = {
-          ...(ask
-            ? {
-                ask: {
-                  text: ask,
-                  kind,
-                  known: o.known ?? [],
-                  premises: o.premise ?? [],
-                  criteria: criteriaOf(o.criterion),
-                  steer: o.steer ?? [],
-                  ...(o.site ? { site: o.site } : {}),
-                },
-              }
-            : {}),
-          planFile,
-          opens,
-          proposals,
-          onStep: progress,
-          ...(o.pause ? { pause: true } : {}),
-          ...(o.parent ? { parent: { run: o.parent, why: o.why ?? "" } } : {}),
-        };
-        let result: Awaited<ReturnType<typeof run>> | null = null;
-        for (let n = 0; result === null; n++) {
-          try {
-            result = await run(engineDeps, {
-              ...options,
-              ...(n === 0 && !o.resume ? { run: id } : { resume: id }),
-            });
-          } catch (err) {
-            if (!isTransient(err)) throw err;
-            if (n >= RESUMES) {
-              console.error(`${id}: ${err.message}; stopped after ${RESUMES} resumes`);
-              break;
-            }
-            const ms = resumeWaitMs(n + 1, err.retryAfter);
-            console.error(
-              `${id}: ${err.message}; resume ${n + 1} of ${RESUMES} in ${Math.round(ms / 1000)}s`,
-            );
-            await sleep(ms);
-          }
-        }
-        const state = result?.state ?? fold(id, await ledger.trace(id));
-        if (result?.paused)
-          console.error(
-            `${id}: paused after round ${state.edges.length}; birdwatch add steer ${id} "<their words>" --human, then birdwatch run --resume ${id} --pause`,
-          );
-        if (result?.parked)
-          console.error(
-            `${id}: ${result.parked}; birdwatch run --resume ${id} goes one more round, birdwatch plan --run ${id} opens it by hand`,
-          );
-        const cost = costOf(state.spends);
-        // The last review's word: what the ask still lacks, or that it is answered.
-        const last = state.edges.at(-1);
-        if (last) console.error(`${id}: ${last.next}: ${last.why}`);
-        console.error(`${id}: ${cost.line}`);
-        console.log(
-          JSON.stringify(
-            {
-              run: id,
-              rounds: state.round,
-              cost: cost.total,
-              finished: result?.finished ?? false,
-              ...(result?.paused ? { paused: true } : {}),
-              ...(result?.parked ? { parked: result.parked } : {}),
-              note: result ? result.note : "stopped on a transient failure: --resume to go on",
-              ...(last ? { edge: { next: last.next, why: last.why } } : {}),
-              hits: state.hits.length,
-              documents: state.documents.length,
-              findings: state.findings.filter((f) => state.called.get(f.id) !== "drop"),
-              spends: state.spends.map(({ source, op, about, ok, cost, ms, usd, tokens }) => ({
-                source,
-                op,
-                about,
-                ok,
-                cost,
-                ms,
-                ...(usd !== undefined ? { usd } : {}),
-                ...(tokens ? { tokens } : {}),
-              })),
-              problems: ledger.problems ?? [],
-            },
-            null,
-            2,
-          ),
-        );
-        if (!result?.finished && !result?.paused && !result?.parked) process.exitCode = 2;
-      },
-    );
 
   agent(machine(common(program.command("plan [ask]"))))
     .description(
@@ -1002,12 +783,10 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     .option("--sources <name...>", "the allow-list, in order of preference")
     .option("--queries <n>", "queries per round", Number)
     .option("--reads <n>", "reads per round", Number)
-    .option("--rounds <n>", "rounds before the runner parks", Number)
+    .option("--rounds <n>", "rounds a run should take: a guard rail", Number)
     .option("--checks <n>", "findings checked per round", Number)
     .option("--age <sentence>", "how much a source's age counts")
-    .option("--propose <file>", "the propose prompt, from a file")
-    .option("--triage <file>", "the triage prompt, from a file")
-    .option("--review <file>", "the review prompt, from a file")
+    .option("--rule <line...>", "the rules the agent heeds for this kind, one line each: replaces them all")
     .option("--thin <n>", "new hits under which a tree's try is thin, so the next try runs", Number)
     .option("--tree <file>", "the query tree's guide, as JSON {facets: [{name, why}], thin}")
     .action(
@@ -1021,9 +800,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
           rounds?: number;
           checks?: number;
           age?: string;
-          propose?: string;
-          triage?: string;
-          review?: string;
+          rule?: string[];
           thin?: number;
           tree?: string;
         },
@@ -1047,9 +824,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
           ...(o.sources ? { sources: o.sources } : {}),
           budget,
           ...(o.age !== undefined ? { age: o.age } : {}),
-          ...(o.propose ? { propose: await text(o.propose) } : {}),
-          ...(o.triage ? { triage: await text(o.triage) } : {}),
-          ...(o.review ? { review: await text(o.review) } : {}),
+          ...(o.rule ? { rules: o.rule } : {}),
           ...(o.tree
             ? { tree: TreeGuide.parse(JSON.parse(await text(o.tree))) }
             : o.thin !== undefined

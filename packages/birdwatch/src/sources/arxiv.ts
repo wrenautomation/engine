@@ -13,7 +13,7 @@ import { DomUtils, parseDocument } from "htmlparser2";
 import { defaultReaders, type Media, type Reader } from "../document/index.js";
 import { arxivId } from "../engine/canonical.js";
 import type { Source } from "../engine/ports.js";
-import type { HitViewIn } from "../plan/index.js";
+import type { HitViewIn } from "../engine/types.js";
 import { readResponse } from "./fetcher.js";
 
 export const ARXIV = "https://export.arxiv.org";

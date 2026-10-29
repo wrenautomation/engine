@@ -1,6 +1,6 @@
 /**
- * The engine from a host's CLI: `addEngineCommands(program, deps)` mounts run, trace, keep,
- * drop, yield and sources with the host's ledger, sources and model. A `--model` spec is read by
+ * The engine from a host's CLI: `addEngineCommands(program, deps)` mounts the agent's commands,
+ * trace, yield and sources with the host's ledger, sources and model. A `--model` spec is read by
  * `@wrenautomation/models/spec`.
  */
 export {
@@ -10,7 +10,5 @@ export {
   type EngineCliDeps,
   type HostLedger,
   keys,
-  RESUMES,
-  resumeWaitMs,
   sourcesHere,
 } from "./engine-cli.js";

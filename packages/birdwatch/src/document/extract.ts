@@ -19,7 +19,7 @@ import { bodyOf } from "./body.js";
 import { addUsage, isCut, type Model, type Usage } from "./model.js";
 import { type Document, type Finding, Quality, type Verdict } from "./types.js";
 
-/** What the run is after; the same fields the planner's `Ask` has, met by structure. */
+/** What the run is after; the same fields the engine's `Ask` has, met by structure. */
 export interface AskView {
   text: string;
   /** Facts already in hand, one line each: the extractor looks past them. */

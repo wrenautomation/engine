@@ -6,7 +6,7 @@ Wren's research engine and the map engine: four npm packages in one repo, one ve
 |---|---|---|
 | [`@wrenautomation/models`](packages/models) | Every model call: Anthropic, Gemini, Cohere, any OpenAI-compatible server, a shell command. Text, image, video, audio and PDF parts in; text, tokens and USD out. Key rings, fallbacks, ears for speech, one price table. | nothing of ours |
 | [`@wrenautomation/read`](packages/read) | The web and files in, text out: the polite fetcher, robots, the fetch ladder, HTML and PDF to text, a video or podcast from a URL or a file (`watch`, captions, audio to markdown), the study core. | models |
-| [`@wrenautomation/birdwatch`](packages/birdwatch) | Research, driven by an agent one step per command: the planner's shapes and plan files, the document side and claim extractor, the sources, the runner, the ledger, and the one CLI (`birdwatch`). | models, read |
+| [`@wrenautomation/birdwatch`](packages/birdwatch) | Research, driven by an agent one step per command: the ask and plan files, the steps, the document side and claim extractor, the sources, the ledger, and the one CLI (`birdwatch`). | models, read |
 | [`@wrenautomation/orrery`](packages/orrery) | The logic of a map you fold: the fold tree, nested layout over a layout engine you pass, the glide between frames. No renderer. | nothing of ours |
 
 A model call goes through models, never a vendor API or SDK in the caller. birdwatch depends on

@@ -5,7 +5,7 @@ import { criteriaOf } from "../app/engine-cli.js";
 import { claimExtractor } from "../document/index.js";
 import { countingIds } from "../ledger/ids.js";
 import { MemoryLedger } from "../ledger/memory.js";
-import { defaultPlanFile } from "../plan/index.js";
+import { defaultPlanFile } from "./plan.js";
 import {
   accept,
   add,
@@ -23,7 +23,6 @@ import {
 import { aucOf } from "./judge.js";
 import { type Deps, registry, type Source } from "./ports.js";
 import { recall } from "./recall.js";
-import { run } from "./runner.js";
 import { checkCount, classesOf, echoOf, fold, type RunState, sourcesOf } from "./state.js";
 
 const pages: Record<string, string> = {
@@ -101,14 +100,14 @@ const deps = (): Deps => {
     extractor: claimExtractor,
     clock: () => new Date(Date.UTC(2026, 9, 28, 10, 0, ++t)),
     ids: countingIds(),
-    runner: "claude-code",
+    writer: "claude-code",
   };
 };
 const agent: Who = { from: "ai", by: "claude-code" };
 const will: Who = { from: "human", by: "will" };
 
 describe("agent commands", () => {
-  it("drives a run step by step; the runner then has nothing to do", async () => {
+  it("drives a run step by step; after a stop the fold points nowhere", async () => {
     const d = deps();
     const planned = await planRound(d, {
       ask: { text: "how do staffing firms win repeat clients", kind: "web" },
@@ -342,6 +341,8 @@ describe("agent commands", () => {
     expect(b.hits.toRead).toEqual([]);
     expect(b.documents.toExtract).toEqual([]);
     expect(b.steer).toEqual(["numbers only"]);
+    expect(b.guide?.age).toContain("Prices");
+    expect(b.guide?.rules[0]).toContain("Each facet's tries");
     expect(b.patterns.map((p) => [p.text, p.sources])).toEqual([
       ["Surveys agree.", 1],
       ["Repeat clients drive placements.", 2],
@@ -360,10 +361,6 @@ describe("agent commands", () => {
 
     const stop = await add(d, runId, { type: "edge", next: "stop", why: "enough" }, agent);
     expect(stop.record.round).toBe(2);
-    const before = (await d.ledger.trace(runId)).length;
-    const result = await run(d, { resume: runId });
-    expect(result.finished).toBe(true);
-    expect((await d.ledger.trace(runId)).length).toBe(before);
     expect(fold(runId, await d.ledger.trace(runId)).next).toBeNull();
   });
 
@@ -1173,23 +1170,6 @@ describe("agent commands", () => {
     );
     expect(snap.ask.open).toContain(`child run ${b} ("coaches") has not stopped`);
     expect(snap.ask.premises).toEqual([]);
-
-    // The runner links a child the same way.
-    await run(
-      { ...d, model: null },
-      {
-        run: "by-runner",
-        ask: { text: "staffing repeat clients", kind: "web" },
-        planFile: { ...planFile, runs },
-        parent: { run: root, why: "the runner's niche" },
-        steps: 1,
-      },
-    );
-    const byRunner = fold("by-runner", await d.ledger.trace("by-runner")).snapshot;
-    expect(byRunner?.parent).toEqual({ run: root, round: 2, why: "the runner's niche" });
-    expect(byRunner?.ask.known).toContain(
-      "38% of placements came from repeat clients. (https://a.example/one)",
-    );
   });
 
   it("the tree's reads are the one hard stop: a read past them and a new child both fail", async () => {
@@ -1307,12 +1287,14 @@ describe("agent commands", () => {
       sources: ["fake"],
       budget: { rounds: 4 },
       age: "Age counts.",
+      rules: ["Drop vendor pages."],
     });
     expect(next.version).toBe(planFile.version + 1);
     expect(next.sources).toEqual(["fake"]);
     expect(next.budget).toEqual({ ...planFile.budget, rounds: 4 });
     expect(next.age).toBe("Age counts.");
-    expect(next.propose).toBe(planFile.propose);
+    expect(next.rules).toEqual(["Drop vendor pages."]);
+    expect(next.tree).toEqual(planFile.tree);
     expect(() => tunePlan(planFile, { budget: {} })).toThrow("nothing changed");
     expect(() => tunePlan(planFile, { budget: { rounds: 0 } })).toThrow();
   });

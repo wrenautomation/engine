@@ -1,51 +1,19 @@
 /**
- * The interpreter: fold the trace, take the pointer's step from the table, write `done`, fold
- * again. `--resume` is the same loop on an old run: the fold says where it stopped. Every model
- * ask and source call writes a `spend` with what it cost and whether it worked. A call that
- * fails with a `Transient` is tried again with a pause, three tries in all, every attempt on
- * record; a step that still cannot go on throws it past the runner with no `done`, so a resume
- * runs the step again once the cause has passed. A model answer the output cap cut (models'
- * `Cut`) is a spend that worked, with its tokens: the extractor goes on from it. `pause` stops
- * the loop after a review that says `again`, so the person can steer before the next round.
+ * The step context each agent command builds: `write` fills a record's envelope, `invoke` and the
+ * model write a `spend` per call with what it cost and whether it worked. A call that fails with
+ * a `Transient` is tried again with a pause, three tries in all, every attempt on record. A model
+ * answer the output cap cut (models' `Cut`) is a spend that worked, with its tokens.
  */
-import {
-  isCut,
-  isTransient,
-  type Model,
-  modelOf,
-  promptText,
-  type Usage,
-} from "@wrenautomation/models";
+import { isCut, isTransient, type Model, modelOf, promptText, type Usage } from "@wrenautomation/models";
 import { judgeFailure } from "@wrenautomation/models/judge";
-import { type Envelope, type From, LedgerRecord, type Step } from "../ledger/records.js";
-import type { Deps, RunOptions, Source } from "./ports.js";
-import { fold, type RunState } from "./state.js";
-import { STEP_TABLE, type StepContext } from "./steps.js";
-
-export interface RunResult {
-  run: string;
-  rounds: number;
-  /** Why the run stopped: the last edge's why, or the step that gave up. */
-  note: string | null;
-  /** The run stopped on an edge, not on a step that gave up. */
-  finished: boolean;
-  /** The run stopped after a review that said `again`, on `pause`: `resume` goes on. */
-  paused: boolean;
-  /**
-   * The review said `again` into a round past the budget: the runner parked, and this says so.
-   * The budget is a guard rail: `resume` goes one more round; the agent's `plan --run` opens it.
-   */
-  parked: string | null;
-  state: RunState;
-}
+import { LedgerRecord, type Step } from "../ledger/records.js";
+import type { Deps, Source } from "./ports.js";
+import type { StepContext } from "./steps.js";
 
 /** Tries per call over a Transient. */
 export const TRIES = 3;
 /** The longest pause before another try, whatever `retry-after` said. */
 const MAX_WAIT_MS = 60_000;
-/** The default step bound: three full rounds and some backs. */
-export const DEFAULT_STEPS = 64;
-
 /** The pause before the next try: to `retryAfter` (a minute at most), else a second per try so far. */
 export function waitMs(attempt: number, retryAfter: string | undefined, now: () => Date): number {
   if (retryAfter) {
@@ -57,62 +25,6 @@ export function waitMs(attempt: number, retryAfter: string | undefined, now: () 
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-export async function run(deps: Deps, options: RunOptions = {}): Promise<RunResult> {
-  const id = options.resume ?? options.run ?? deps.ids();
-  if (!options.resume && !options.ask) throw new Error("a new run needs an ask");
-  const steps = options.steps ?? DEFAULT_STEPS;
-  let state = fold(id, await deps.ledger.trace(id));
-  if (options.resume && !state.records.length) throw new Error(`run ${id}: no records`);
-  let paused = false;
-  let parked: string | null = null;
-  for (let n = 0; n < steps && state.next; n++) {
-    const { round, step } = state.next;
-    const ctx = context(deps, options, id, round, step);
-    const t0 = performance.now();
-    let result: Awaited<ReturnType<(typeof STEP_TABLE)[Step]>>;
-    try {
-      result = await STEP_TABLE[step](ctx, state);
-    } catch (err) {
-      if (isTransient(err)) throw err;
-      result = { ok: false, note: message(err) };
-    }
-    await ctx.write(
-      { type: "done", step, ok: result.ok, ...(result.note ? { note: result.note } : {}) },
-      { from: "tool", by: deps.runner },
-    );
-    const ms = Math.round(performance.now() - t0);
-    options.onStep?.({
-      run: id,
-      round,
-      step,
-      ok: result.ok,
-      ...(result.note ? { note: result.note } : {}),
-      ms,
-    });
-    state = fold(id, await deps.ledger.trace(id));
-    if (!result.ok) break;
-    if (step !== "review" || state.next?.step !== "plan") continue;
-    const budget = state.snapshot?.budget;
-    if (budget && state.next.round > budget.rounds) {
-      parked = `round ${state.next.round} is past the budget of ${budget.rounds}: parked. The edge says: ${state.note}`;
-      break;
-    }
-    if (options.pause) {
-      paused = true;
-      break;
-    }
-  }
-  return {
-    run: id,
-    rounds: state.round,
-    note: state.note,
-    finished: !state.next && state.edges.at(-1)?.next === "stop",
-    paused,
-    parked,
-    state,
-  };
-}
 
 type Outcome =
   | { ok: true; usd?: number; tokens?: { input?: number; output?: number } }
@@ -130,13 +42,9 @@ const tokens = (u: Usage | undefined): Omit<Extract<Outcome, { ok: true }>, "ok"
     : {}),
 });
 
-/** The steps that decide what comes next: the decider's. The bulk (extract, check) is the model's. */
-const DECIDES = new Set<Step>(["plan", "triage", "review"]);
-
-/** The step context: `write` fills the envelope, `invoke` and `modelOn` write every spend. The agent commands build one per call. */
+/** The step context: `write` fills the envelope, `invoke` and `modelOn` write every spend. */
 export function context(
   deps: Deps,
-  options: RunOptions,
   run: string,
   round: number,
   step: Step,
@@ -177,7 +85,7 @@ export function context(
         ms: Math.round(performance.now() - t0),
         ...outcome,
       },
-      { from: "tool", by: deps.runner },
+      { from: "tool", by: deps.writer },
     );
   /** One attempt, its spend written either way. */
   const once = async <T>(
@@ -225,7 +133,7 @@ export function context(
   };
   // Every call writes a spend, a repair's too: the wrap is on `complete`, and `ask` is built over it.
   const modelOn = (on?: string): Model | null => {
-    const m = deps.model && ((DECIDES.has(step) && deps.decider) || deps.model);
+    const m = deps.model;
     if (!m) return null;
     return modelOf({
       id: m.id,
@@ -261,7 +169,5 @@ export function context(
       return { failure: judgeFailure(err) };
     }
   };
-  return { deps, options, model: modelOn(), modelOn, run, round, step, write, invoke, judge };
+  return { deps, model: modelOn(), modelOn, run, round, step, write, invoke, judge };
 }
-
-export type { Envelope, From };

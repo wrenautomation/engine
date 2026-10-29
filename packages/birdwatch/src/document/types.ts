@@ -58,8 +58,8 @@ export type Quality = z.infer<typeof Quality>;
 
 /**
  * The extractor's word on one document after its findings: the quality, and the gap, one
- * sentence on what the ask still lacks after this document. A filter's report to the planner,
- * never a query: the planner reads the round's verdicts before it picks the edge.
+ * sentence on what the ask still lacks after this document. A filter's report to the agent,
+ * never a query: the agent reads the round's verdicts before it picks the edge.
  */
 export const Verdict = z.object({
   quality: Quality,

@@ -7,7 +7,7 @@
 
 import type { LadderClient } from "@wrenautomation/read/fetch";
 import type { Source } from "../engine/ports.js";
-import type { HitViewIn } from "../plan/index.js";
+import type { HitViewIn } from "../engine/types.js";
 import { routeCall } from "./sites.js";
 
 interface Serp {

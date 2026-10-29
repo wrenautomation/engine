@@ -21,7 +21,7 @@ import { Transient } from "@wrenautomation/models";
 import type { LadderClient } from "@wrenautomation/read/fetch";
 import type { Document } from "../document/index.js";
 import type { Source } from "../engine/ports.js";
-import type { HitViewIn } from "../plan/index.js";
+import type { HitViewIn } from "../engine/types.js";
 import { junkReason } from "./junk.js";
 import { LadderCallError } from "./ladder.js";
 

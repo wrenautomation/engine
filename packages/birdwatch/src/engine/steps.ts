@@ -1,7 +1,6 @@
 /**
- * The step table: one typed call per step, records in, records out. The runner interprets it in
- * order; wren's executor mounts the same table as stations. A step reads the fold, calls ports,
- * and appends records; it holds nothing between calls. Source calls fan out (per query across
+ * The fixed steps the agent commands run: search, read, extract, check. A step reads the fold,
+ * calls ports, and appends records; it holds nothing between calls. Source calls fan out (per query across
  * the searchers; reads and extracts a few at a time) and their records land in order, so a
  * trace reads the same whatever answered first. A step runs again after a transient failure
  * from where its records say it got to: a search with an ok spend, a hit with a document, a
@@ -21,23 +20,20 @@ import type {
   LedgerRecord,
   Step,
 } from "../ledger/records.js";
-import { dedupeHits, defaultPlanFile, plan, review, triage, withPremises } from "../plan/index.js";
 import { canonical } from "./canonical.js";
+import { HitView, type HitViewIn } from "./types.js";
 import { DOUBT, judgeDocuments, judgeFindings, judgeHits, passNote, yesOf } from "./judge.js";
-import { type Deps, FOLLOW_N, pick, type RunOptions, type Source, searchersFor } from "./ports.js";
+import { type Deps, FOLLOW_N, pick, type Source, searchersFor } from "./ports.js";
 import {
   fold,
   found,
   kept,
-  planOf,
   type RunState,
-  toCheck,
   toExtract,
   toRead,
   uncalledHits,
 } from "./state.js";
 import {
-  budgetUnder,
   fromChildren,
   fromSiblings,
   linkTo,
@@ -50,7 +46,6 @@ const message = (err: unknown) => (err instanceof Error ? err.message : String(e
 
 export interface StepContext {
   deps: Deps;
-  options: RunOptions;
   /** The run's model, wrapped so every ask writes a spend; a Transient after the tries run out. */
   model: Model | null;
   /** The same model, its spends marked with the record they are about. */
@@ -173,8 +168,45 @@ async function batched<I, O>(
   return { transient };
 }
 
+/** A line with a URL or a ledger id on it: a fact someone can go and check. */
+export const sourced = (line: string): boolean =>
+  /https?:\/\/\S|\b[0-9A-HJKMNP-TV-Z]{26}\b/.test(line);
+
 /**
- * What a round's plan reads, for the agent's plan and the runner's alike: the known lines (what
+ * The ask with each known line that names no source moved to its premises. A run seeded with
+ * "the buyer is X" plans inside X unless something tests X; a sourced line is looked past.
+ */
+export function withPremises<A extends { known?: readonly string[]; premises?: readonly string[] }>(
+  ask: A,
+): A & { known: string[]; premises: string[] } {
+  const known = ask.known ?? [];
+  return {
+    ...ask,
+    known: known.filter(sourced),
+    premises: [...new Set([...(ask.premises ?? []), ...known.filter((l) => !sourced(l))])],
+  };
+}
+
+/** One hit per url, sources merged, order of first sight. */
+export function dedupeHits(hits: readonly HitViewIn[]): HitView[] {
+  const byUrl = new Map<string, HitView>();
+  for (const h of hits.map((x) => HitView.parse(x))) {
+    const url = h.url.trim();
+    const have = byUrl.get(url);
+    if (!have) {
+      byUrl.set(url, { ...h, url, sources: [...new Set(h.sources)] });
+      continue;
+    }
+    for (const s of h.sources) if (!have.sources.includes(s)) have.sources.push(s);
+    for (const k of ["title", "channel", "length", "date", "snippet"] as const) {
+      if (have[k] === undefined && h[k] !== undefined) (have as Record<string, unknown>)[k] = h[k];
+    }
+  }
+  return [...byUrl.values()];
+}
+
+/**
+ * What a round's plan reads: the known lines (what
  * the ask brought, what the run kept, then what its children found), the premises, and what is
  * open (the last round's holes, children still going). A new child also reads what its parent
  * and siblings found.
@@ -198,51 +230,6 @@ export async function planAsk(
     open: [...(round > 1 ? openAfter(state, round - 1) : []), ...children.open],
   };
 }
-
-export const planStep: StepFn = async (ctx, state) => {
-  const ask = state.snapshot?.ask ?? ctx.options.ask;
-  if (!ask) return { ok: false, note: "no ask: a new run needs one" };
-  const planFile = ctx.options.planFile ?? defaultPlanFile(ask.kind);
-  const yieldRows = await ctx.deps.ledger.yield();
-  // A resume passes the same options: only a new run links; later rounds take the snapshot's.
-  const asked = state.snapshot ? undefined : ctx.options.parent;
-  const link = asked ? await linkTo(ctx.deps, asked, planFile) : null;
-  const parent = link?.parent ?? state.snapshot?.parent;
-  const { known, premises, open } = await planAsk(ctx.deps, state, ask, ctx.round, parent);
-  const steer = [...new Set([...(ask.steer ?? []), ...state.steers.map((s) => s.text)])];
-  const p = await plan({
-    ask: { ...ask, known, premises, steer, open, criteria: ask.criteria ?? [] },
-    planFile,
-    model: ctx.model,
-    proposals: ctx.round === 1 ? (ctx.options.proposals ?? []) : [],
-    yieldRows,
-    ...(ctx.options.sources ? { sources: ctx.options.sources } : {}),
-    round: ctx.round,
-    now: ctx.deps.clock,
-  });
-  pick(ctx.deps.sources, p.sources);
-  const { at: _at, ...snapshot } = p.snapshot;
-  await ctx.write(
-    {
-      type: "snapshot",
-      ask: p.ask,
-      sources: p.sources,
-      opens: (ctx.options.opens ?? state.snapshot?.opens ?? []).filter(
-        (n) => !p.sources.includes(n),
-      ),
-      budget: await budgetUnder(ctx.deps, parent, p.budget),
-      ...snapshot,
-      ...(parent ? { parent } : { treeReads: treeReadsOf(planFile, p.budget) }),
-    },
-    tool(ctx.deps.runner),
-  );
-  for (const { from, by, ...q } of p.queries)
-    await ctx.write({ type: "query", ...q }, { from, by });
-  const warned = link?.warnings.length ? `; ${link.warnings.join("; ")}` : "";
-  return p.queries.length
-    ? { ok: true, note: `${p.queries.length} queries over ${p.sources.join(", ")}${warned}` }
-    : { ok: false, note: "no queries: nothing proposed" };
-};
 
 export const fetchStep: StepFn = async (ctx, state) => {
   const queries = state.queries.filter((q) => q.round === ctx.round);
@@ -343,7 +330,7 @@ export const fetchStep: StepFn = async (ctx, state) => {
       continue;
     await ctx.write(
       { type: "gap", on: q.id, note: `query "${q.terms}": no new hits` },
-      tool(ctx.deps.runner),
+      tool(ctx.deps.writer),
     );
     empty++;
   }
@@ -354,68 +341,6 @@ export const fetchStep: StepFn = async (ctx, state) => {
   };
 };
 
-export const triageStep: StepFn = async (ctx, state) => {
-  const hits = uncalledHits(state, ctx.round);
-  if (!hits.length) return { ok: true, note: "no hits to triage" };
-  const p = planOf(state, ctx.round);
-  const byUrl = new Map(hits.map((h) => [h.url, h]));
-  if (!ctx.model) {
-    const budget = Math.max(0, p.budget.reads - toRead(state, ctx.round).length);
-    for (const [i, h] of hits.entries())
-      await ctx.write(
-        {
-          type: "call",
-          on: h.id,
-          verdict: i < budget ? "keep" : "drop",
-          why: i < budget ? "no model: read in order" : "no model: over the read budget",
-        },
-        tool(ctx.deps.runner),
-      );
-    return { ok: true, note: `no model: ${Math.min(budget, hits.length)} reads` };
-  }
-  const planFile = ctx.options.planFile ?? defaultPlanFile(p.ask.kind);
-  const views = hits.map(
-    ({
-      type: _t,
-      id: _i,
-      run: _r,
-      round: _ro,
-      step: _s,
-      at: _a,
-      from: _f,
-      by: _b,
-      key: _k,
-      queries: _q,
-      ...view
-    }) => {
-      // Jev's yes on serves and each criterion: a hint the model sees, never the call
-      const odds = ["serves", ...(p.ask.criteria ?? []).map((c) => c.name)].flatMap((q) => {
-        const yes = yesOf(state, _i, q);
-        return yes === undefined ? [] : [[q, yes] as const];
-      });
-      return odds.length ? { ...view, odds: Object.fromEntries(odds) } : view;
-    },
-  );
-  const calls = await triage(views, p, ctx.model, {
-    planFile,
-    yieldRows: await ctx.deps.ledger.yield(),
-  });
-  let reads = 0;
-  for (const c of calls) {
-    const h = byUrl.get(c.url);
-    if (!h) continue;
-    if (c.read) reads++;
-    await ctx.write(
-      { type: "call", on: h.id, verdict: c.read ? "keep" : "drop", why: c.why },
-      { from: c.from, by: c.by },
-    );
-  }
-  return { ok: true, note: `${reads} of ${hits.length} hits to read` };
-};
-
-export const readStep: StepFn = (ctx, state) => readHits(ctx, state, toRead(state, ctx.round));
-
-/** Opens `hits`, each by the first opener that has it; the agent's `open` passes its own list. */
 export async function readHits(
   ctx: StepContext,
   state: RunState,
@@ -475,7 +400,7 @@ export async function readHits(
       const why = g.missed.length ? `: ${g.missed.join("; ")}` : "";
       await ctx.write(
         { type: "gap", on: h.id, note: `no source could open ${h.url}${why}` },
-        tool(ctx.deps.runner),
+        tool(ctx.deps.writer),
       );
       missed++;
       return;
@@ -503,10 +428,6 @@ export async function readHits(
   };
 }
 
-export const extractStep: StepFn = (ctx, state) =>
-  extractDocuments(ctx, state, toExtract(state, ctx.round));
-
-/** A transient stop that says what the step finished first: the next try does only the rest. */
 const stopped = (t: Transient, finished: string) =>
   new Transient(`${t.message} (${finished} before it stopped; run the step again for the rest)`, {
     retryAfter: t.retryAfter,
@@ -583,15 +504,6 @@ export async function extractDocuments(
  * drop call; one that holds gets a check record. The share that fails is the review's read on
  * the extract. A check record is the checkpoint: a rerun checks only the rest of the sample.
  */
-export const checkStep: StepFn = (ctx, state) =>
-  checkSample(ctx, state, toCheck(state, ctx.round, planOf(state, ctx.round).budget.checks));
-
-/**
- * Checks `findings` against their documents; the agent's `check` passes its own sample. The
- * judge first reads every kept, unchecked finding with a quote; each one it doubts joins the
- * sample. A judge's yes never takes a finding out of it. A fail's fix (a narrower sentence on
- * the same quote) passes the gate and a second check before it lands as a new finding.
- */
 export async function checkSample(
   ctx: StepContext,
   state: RunState,
@@ -662,73 +574,3 @@ export async function checkSample(
     note: `${ok + failed} checked${why}, ${failed} not backed by their quote${fixed ? ` (${fixed} fixed: a narrower sentence on the same quote)` : ""}${judgeNote}`,
   };
 }
-
-export const reviewStep: StepFn = async (ctx, state) => {
-  const p = planOf(state, ctx.round);
-  const inRound = <T extends { round: number }>(r: T) => r.round === ctx.round;
-  const hits = state.hits.filter(inRound).length;
-  const reads = state.documents.filter(inRound).length;
-  const proposed = state.findings.filter(inRound).length;
-  const foundNow = found(state, ctx.round);
-  const dated = state.findings
-    .filter((f) => inRound(f) && kept(state, f))
-    .map((f) => (f.date ? `${f.text} [${f.date}]` : f.text));
-  const textOf = new Map(state.findings.map((f) => [f.id, f.text]));
-  const urlOf = new Map(state.documents.map((d) => [d.id, d.url]));
-  const round = {
-    ask: p.ask,
-    round: ctx.round,
-    budget: p.budget,
-    hits,
-    reads,
-    proposed,
-    kept: foundNow.length,
-    found: dated,
-    verdicts: state.verdicts.filter(inRound).map((v) => ({
-      url: urlOf.get(v.document) ?? v.document,
-      quality: v.quality,
-      ...(v.gap ? { gap: v.gap } : {}),
-    })),
-    notes: [
-      ...new Set(
-        state.spends
-          .filter((s) => inRound(s) && !s.ok)
-          .map((s) => `${s.source} ${s.op} failed: ${s.error ?? "?"}`),
-      ),
-      ...personCalls(state, ctx.round),
-    ],
-    gaps: state.gaps.filter(inRound).map(gapLine),
-    checks: state.checks
-      .filter(inRound)
-      .map((c) => `${c.ok ? "ok" : "failed"}: ${textOf.get(c.on) ?? c.on} (${c.why})`),
-    earlier: Array.from({ length: ctx.round - 1 }, (_, i) => ({
-      hits: state.hits.filter((h) => h.round === i + 1).length,
-      kept: found(state, i + 1).length,
-    })),
-  };
-  const edge = ctx.model
-    ? await review(round, ctx.model, {
-        planFile: ctx.options.planFile ?? defaultPlanFile(p.ask.kind),
-      })
-    : {
-        next: "stop" as const,
-        why: "no model: one round",
-        from: "human" as const,
-        by: ctx.deps.runner,
-      };
-  if (edge.next === "back" && !edge.to)
-    return { ok: false, note: "the edge says back but names no step" };
-  const { from, by, ...rest } = edge;
-  await ctx.write({ type: "edge", ...rest }, { from, by });
-  return { ok: true, note: `${edge.next}${edge.to ? ` to ${edge.to}` : ""}: ${edge.why}` };
-};
-
-export const STEP_TABLE: Record<Step, StepFn> = {
-  plan: planStep,
-  fetch: fetchStep,
-  triage: triageStep,
-  read: readStep,
-  extract: extractStep,
-  check: checkStep,
-  review: reviewStep,
-};

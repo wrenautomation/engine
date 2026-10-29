@@ -1,10 +1,10 @@
 /**
  * The ledger contract: four calls every backend answers. `append` one record; `trace` one run's
  * records in time order; `scan` records across runs by a filter; `yield` what sources, proposers,
- * channels and ask kinds yielded, as the planner's rows. The yield is a fold over records, shared here
+ * channels and ask kinds yielded, as the yield rows. The yield is a fold over records, shared here
  * so the files backend and a database compute the same rows (a database may do it in SQL).
  */
-import type { AskKind, PlanFile, YieldRow } from "../plan/index.js";
+import type { AskKind, PlanFile, YieldRow } from "../engine/types.js";
 import {
   byTime,
   type From,

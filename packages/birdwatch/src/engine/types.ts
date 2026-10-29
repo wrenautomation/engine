@@ -1,15 +1,14 @@
 /**
- * The planner's shapes. A query says what to look for and who asked for it; a plan is the
- * queries of one round plus the sources and budget it runs under; a plan file is the tuned
- * recipe per ask kind. Hits are the engine's; the planner sees them through `HitView`, the fields a
- * source shows for free, because the engine depends on the planner and not the reverse.
+ * The ask and its plan file: what to look for, who asked, the tuned recipe per ask kind (sources,
+ * budget, tree guide). The agent plans; these are its shapes. `HitView` is a hit's free fields;
+ * the ledger's records extend these, so old ledgers still parse.
  */
 import { z } from "zod";
 
 export const AskKind = z.enum(["web", "video", "channel", "person", "site"]);
 export type AskKind = z.infer<typeof AskKind>;
 
-/** Who wrote a record: a model, a plan file or a person. */
+/** Who wrote a record: the agent or a person. */
 export const From = z.enum(["ai", "human"]);
 export type From = z.infer<typeof From>;
 
@@ -27,13 +26,13 @@ export type Criterion = z.infer<typeof Criterion>;
 export const Ask = z.object({
   text: z.string().min(1),
   kind: AskKind,
-  /** Facts already in hand, one line each: the planner looks past them. */
+  /** Facts already in hand, one line each: the plan looks past them. */
   known: z.array(z.string()).default([]),
   /** Lines taken as given with no source behind them: the plan tests each, never looks past it. */
   premises: z.array(z.string()).default([]),
-  /** What the person said along the way, one line each: every prompt renders it first. */
+  /** What the person said along the way, one line each: the brief shows it first. */
   steer: z.array(z.string()).default([]),
-  /** What the last round left open, one line each: its review's why, its gaps. The planner looks there first. */
+  /** What the last round left open, one line each: its edge's why, its gaps. The next plan looks there first. */
   open: z.array(z.string()).default([]),
   /** The person's tests of a good source; empty: none. */
   criteria: z.array(Criterion).default([]),
@@ -59,14 +58,6 @@ export const Query = z.object({
   by: z.string(),
 });
 export type Query = z.infer<typeof Query>;
-
-/** Queries from one proposer. The model is one; a plan file, a teammate or a second model are others. */
-export const Proposal = z.object({
-  from: From,
-  by: z.string(),
-  queries: z.array(Query.omit({ from: true, by: true })),
-});
-export type Proposal = z.infer<typeof Proposal>;
 
 /** One query as a leaf of the tree: what a person would type, and why. */
 export const Leaf = z.object({
@@ -104,11 +95,11 @@ export const TreeGuide = z.object({
 export type TreeGuide = z.infer<typeof TreeGuide>;
 
 export const Budget = z.object({
-  /** Queries per round after the merge. Human queries never count against it. */
+  /** Queries per round: a guard rail the brief shows, never a cap. */
   queries: z.number().int().positive(),
   /** Documents to read per round. */
   reads: z.number().int().positive(),
-  /** Rounds before `review` must stop. */
+  /** Rounds before a review should stop: a guard rail; past it the why says why. */
   rounds: z.number().int().positive(),
   /** Kept findings per round that a model checks against their document: a sample spread across the documents. 0: none. */
   checks: z.number().int().nonnegative().default(3),
@@ -116,26 +107,21 @@ export const Budget = z.object({
 export type Budget = z.infer<typeof Budget>;
 
 /**
- * The recipe for one ask kind: the prompts, the sources it may use, the budget. Versioned and
- * tuned like an SOP, stored beside the ledger. `{name}` marks in a prompt are filled from the
- * ask: `{ask}`, `{known}`, `{yield}`, `{n}`, `{year}`, `{site}`, `{open}`, `{age}`; the review's
- * also `{gaps}` and `{checks}`.
+ * The recipe for one ask kind: the sources it may use, the budget, the tree guide. Versioned and
+ * tuned like an SOP, stored beside the ledger. A file from before 0.30.0 carries the old
+ * model planner's prompts: parsing drops them.
  */
 export const PlanFile = z.object({
   id: z.string().min(1),
   kind: AskKind,
   version: z.number().int().positive(),
-  /** Asks the model for queries. Must say to answer with `{"queries":[{"terms","why","site?"}]}`. */
-  propose: z.string().min(1),
-  /** Asks the model to read or skip each hit. Must say to answer with `{"hits":[{"url","read","why"}]}`. */
-  triage: z.string().min(1),
-  /** Asks the model which edge to take after a round. Must say to answer with `{"next","to?","why"}`. */
-  review: z.string().min(1),
   /** Source names a run may use, in order of preference. A run can narrow the list, never widen it. */
   sources: z.array(z.string()),
   budget: Budget,
-  /** How much a source's age counts for this kind, one sentence: filled as `{age}`. Never a cutoff. */
+  /** How much a source's age counts for this kind, one sentence the brief shows. Never a cutoff. */
   age: z.string().optional(),
+  /** What the agent heeds for this kind when it plans and triages, one line each. Absent: the kind's default. */
+  rules: z.array(z.string().min(1)).optional(),
   /** The facets a query tree of this kind covers. Absent on a file from before version 6: the kind's default. */
   tree: TreeGuide.optional(),
   /**
@@ -153,7 +139,7 @@ export const PlanFile = z.object({
 });
 export type PlanFile = z.infer<typeof PlanFile>;
 
-/** What a source, channel or proposer yielded before. The planner reads it; wren or the files ledger writes it. */
+/** What a source, channel or proposer yielded before. The files ledger writes it. */
 export const YieldRow = z.object({
   by: z.string().optional(),
   source: z.string().optional(),
@@ -166,7 +152,7 @@ export const YieldRow = z.object({
 });
 export type YieldRow = z.infer<typeof YieldRow>;
 
-/** What the planner was given for one round: the RL state, kept with the plan. */
+/** What a round was planned from, kept with its snapshot. */
 export const Snapshot = z.object({
   at: z.string(),
   known: z.array(z.string()),
@@ -175,16 +161,6 @@ export const Snapshot = z.object({
   yieldRows: z.number().int().nonnegative(),
 });
 export type Snapshot = z.infer<typeof Snapshot>;
-
-export const Plan = z.object({
-  ask: Ask,
-  round: z.number().int().positive(),
-  queries: z.array(Query),
-  sources: z.array(z.string()),
-  budget: Budget,
-  snapshot: Snapshot,
-});
-export type Plan = z.infer<typeof Plan>;
 
 /** A hit as a source shows it for free: no read has happened. `sources` is every source that returned it. */
 export const HitView = z.object({
@@ -197,22 +173,12 @@ export const HitView = z.object({
   date: z.string().optional(),
   snippet: z.string().optional(),
   sources: z.array(z.string()).default([]),
-  /** The judge's yes odds by question (serves, each criterion): a hint the triage prompt shows. */
+  /** The judge's yes odds by question (serves, each criterion): a hint the brief shows. */
   odds: z.record(z.string(), z.number()).optional(),
 });
 export type HitView = z.infer<typeof HitView>;
 /** A hit as a caller may pass it: `sources` optional. */
 export type HitViewIn = z.input<typeof HitView>;
-
-export const Triage = z.object({
-  url: z.string(),
-  read: z.boolean(),
-  /** The model's line on a read; a skip's is fixed text, so the model writes none. */
-  why: z.string(),
-  from: From,
-  by: z.string(),
-});
-export type Triage = z.infer<typeof Triage>;
 
 /** The extractor's word on one read document: how much of the ask it served, what is still missing. */
 export const Verdict = z.object({
@@ -221,37 +187,6 @@ export const Verdict = z.object({
   gap: z.string().optional(),
 });
 export type Verdict = z.infer<typeof Verdict>;
-
-/** What one round came to, as counts, verdicts and notes. The runner fills it; the planner reads it. */
-export const Round = z.object({
-  ask: Ask,
-  round: z.number().int().positive(),
-  budget: Budget,
-  hits: z.number().int().nonnegative(),
-  reads: z.number().int().nonnegative(),
-  proposed: z.number().int().nonnegative(),
-  kept: z.number().int().nonnegative(),
-  /** What the kept findings say, one line each: the planner sees what is answered. */
-  found: z.array(z.string()).default([]),
-  /** What went wrong or ran out, one line each. */
-  notes: z.array(z.string()).default([]),
-  /** The extractor's verdict on each document read this round: the planner sees what the reads were worth. */
-  verdicts: z.array(Verdict).default([]),
-  /** What a step or a person said the round lacks, one line each, the step or the person first. */
-  gaps: z.array(z.string()).default([]),
-  /** The sample check: whether each checked finding's quote backs it, one line each. */
-  checks: z.array(z.string()).default([]),
-  /** Each earlier round's new hits and kept findings: the review sees the trend, and decides. */
-  earlier: z
-    .array(
-      z.object({
-        hits: z.number().int().nonnegative(),
-        kept: z.number().int().nonnegative(),
-      }),
-    )
-    .default([]),
-});
-export type Round = z.infer<typeof Round>;
 
 export const Step = z.enum(["plan", "fetch", "triage", "read", "extract"]);
 export type Step = z.infer<typeof Step>;

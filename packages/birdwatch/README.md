@@ -7,23 +7,22 @@ run read. `skills/birdwatch/SKILL.md` (in this repo) is how an agent drives it.
 
 Reading the web and files (the fetch ladder, HTML and PDF to text, video) is
 [`@wrenautomation/read`](https://github.com/wrenautomation/engine/tree/main/packages/read)'s. Every model call goes through
-[`@wrenautomation/models`](https://github.com/wrenautomation/engine/tree/main/packages/models). Until 0.29.0 this was three packages: raven (the planner,
-now `./plan`), falcon's `./document` and weaver (the engine, sources, ledger and CLI).
+[`@wrenautomation/models`](https://github.com/wrenautomation/engine/tree/main/packages/models). Until 0.29.0 this was three packages: raven (a model planner, gone at 0.30.0: the
+agent plans), falcon (`./document`) and weaver (the engine, sources, ledger and CLI).
 
 | Import | Does |
 |---|---|
-| `@wrenautomation/birdwatch/engine` | `Source` (a name, `search` and/or `open`, a cost), `registry` and the plan's allow-list; the agent's calls (`planRound`, `search`, `open`, `extract`, `check`, `add`, `accept`, `brief`), one step each; the judge's passes (`judgeHits`, `judgeDocuments`, `judgeFindings`, `judgeStats`); `run(deps, options)`: plan, fetch, triage, read, extract, check (a sample of findings against their documents), review, round after round until the planner's edge says stop; `fold` rebuilds a run's state from its records, so a run resumes from the step it stopped on; `Transient`, the failure worth another try; the planner's `Ask`, `PlanFile` and record shapes re-exported |
+| `@wrenautomation/birdwatch/engine` | `Source` (a name, `search` and/or `open`, a cost), `registry` and the plan's allow-list; the agent's calls (`planRound`, `search`, `open`, `extract`, `check`, `add`, `accept`, `brief`), one step each; the judge's passes (`judgeHits`, `judgeDocuments`, `judgeFindings`, `judgeStats`); `fold` rebuilds a run's state from its records, so a step run again skips what is done; `Transient`, the failure worth another try; the ask and plan file shapes (`Ask`, `PlanFile`, `Query`, `QueryTree`, `Edge`, `Snapshot`) and a stock plan file per ask kind (`web`, `video`, `channel`, `person`, `site`: sources, budget, `age`, `rules`, the query tree's guide) |
 | `@wrenautomation/birdwatch/sources` | `searxng`, `exa` (search), `youtube` (search and read, yt-dlp), `fetcher` (open, the polite fetcher), `ladder` (open, autobrowse's fetch ladder up to a browser), `reddit` and `facebook` (open a thread or a group post through autobrowse's site routes), `google` (Google's own page through the desk's browser: each result a hit, the AI Overview one hit with its text as the snippet, each page it cites a hit), `arxiv` (search and read: the API inside `BIRDWATCH_ARXIV_CATEGORIES`, each hit led by its OpenAlex citation count and comment; the paper read whole from its HTML, else its PDF; one call per 3 s), `paste` (a person's URLs), `ledger` (hits earlier runs saw). A query with a `site` skips a searcher that cannot keep to it (`Source.keeps`: `youtube` keeps to YouTube only). A follow (`Source.follows`, `follow`) lists a page's author's posts (`youtube`: a channel's uploads, from a video or the channel, and a TikTok profile; `reddit`: a user's top posts and comments) or pages like it (`exa`: findSimilar) |
 | `@wrenautomation/birdwatch/ledger` | the records (`query`, `hit`, `document`, `finding`, `verdict`, `call`, `spend`, `snapshot`, `edge`, `done`, `steer`, `gap`, `check`, `pattern`, `found`, `judge`, `person`), `FilesLedger` (a folder: `runs/<run>/<writer>.jsonl`, `plans/<kind>.json`), `MemoryLedger`, yield rows per source, person, channel and kind |
-| `@wrenautomation/birdwatch/plan` | the planner: `plan` (an ask, proposals and yield rows in; typed queries out, each with `why`, `from`, `by`), `triage` (read or skip per hit), `review` (the edge after a round: `stop`, `again`, `back`), the shapes (`Ask`, `Plan`, `PlanFile`, `Query`, `Edge`, `Snapshot`), a stock plan file per ask kind (`web`, `video`, `channel`, `person`, `site`: prompts, sources, budget, `age`, the query tree's guide), the renderers. Pure functions and prompts; the model is injected. The runner uses all of it; an agent makes the three decisions itself and uses the shapes |
 | `@wrenautomation/birdwatch/document` | the document side: `Document`, `Finding`, `Proof`, `Verdict` (zod), readers by media (`html`, `pdf`, `text`), `claimExtractor` (findings that quote the document, through the gate, and a verdict on the document: its quality and the ask's gap; no cap on findings or their length, and an answer the model's output cap cut is continued from its last kept quote), the `Model` seam it takes and the `Cut` a model throws when its cap cut an answer |
 
-Every record carries `from` (ai, human or tool) and `by` (a model id, a source, a person). A
-person's pasted URL, a person's keep or drop, are the same records as the model's. The plan
-file in `plans/<kind>.json` beside the ledger (prompts, sources, budget) is where a run learns:
-`birdwatch learn <kind>` writes its next version from what a run taught (sources, budget, age, a
-prompt), on the person's agreement; a kind with no tuned file runs the stock one
-(`birdwatch plans <kind>` prints it).
+Every record carries `from` (ai, human or tool) and `by` (an agent or model id, a source, a
+person). A person's keep or drop is the same record as the agent's. The plan file in
+`plans/<kind>.json` beside the ledger (sources, budget, age, rules, the tree guide) is where a run
+learns: `birdwatch learn <kind>` writes its next version from what a run taught, on the person's
+agreement; a kind with no tuned file runs the stock one (`birdwatch plans <kind>` prints it).
+`brief.guide` shows the kind's age sentence and rules to the agent.
 
 ## CLI
 
@@ -41,12 +40,9 @@ COHERE_API_KEY=... npx birdwatch watch talk.mp4                           # spee
 npx birdwatch plans web > ledger/plans/web.json                           # a stock plan file, to tune
 ```
 
-The engine has two drivers over the same steps. An agent (Claude Code, or any agent with a
-shell) drives it one command at a time: it plans, triages, reviews and stops in its own head and
-the engine does the fixed work (search, open, extract behind the quote gate, check) and keeps the
-records. `run` is the runner: the planner's prompts make those decisions and the loop runs alone. Both
-write the same ledger, so `run --resume` takes over a run an agent started and `brief` reads a
-run the runner made. Every command prints JSON.
+An agent (Claude Code, or any agent with a shell) drives the engine one command at a time: it
+plans, triages, reviews and stops in its own head, and the engine does the fixed work (search,
+open, extract behind the quote gate, check) and keeps the records. Every command prints JSON.
 
 ```sh
 export BIRDWATCH_AGENT=claude-code                     # the agent's id on every record it writes
@@ -115,21 +111,14 @@ hit with the facets that found it, most first; `brief.tree` shows every try with
 
 The agent reads for itself: `show <run> <document>` prints a document's stored text, `add
 finding` writes what it read behind the same quote gate, `add check` its own check. `extract` and
-`check` put a model behind the same gate instead, for bulk or for the runner; both paths write
-the same records.
+`check` put a model behind the same gate instead, for bulk; both paths write the same records.
 
-The runner alone:
+The person, through the agent or by hand:
 
 ```sh
-BIRDWATCH_CONTACT=you@example.com npx birdwatch run "how do staffing firms win repeat clients" --known "referrals convert"
-npx birdwatch run "..." --kind video --propose "cold email teardown" --by will   # your queries, merged with the model's
-npx birdwatch run "..." --url https://a.example/report https://b.example/post    # pages you want read, first
-npx birdwatch run --resume 01M5YS... --url https://a.example/report             # from the step it stopped on; same --url, same --model
-npx birdwatch run "..." --pause                                                   # stop after each round's review
-npx birdwatch add steer 01M5YS... "numbers only; skip vendor pages" --human       # what you say, first in every prompt after
-npx birdwatch run --resume 01M5YS... --pause                                      # the next round, steered
-npx birdwatch add gap 01M5YS... "no UK numbers yet" --human                       # what the run lacks: its review and next plan read it
-npx birdwatch add edge 01M5YS... back --to fetch --why "searxng was down" --human # rerun one step of the round; then --resume
+npx birdwatch add steer 01M5YS... "numbers only; skip vendor pages" --human       # what you say: the brief shows it first
+npx birdwatch add gap 01M5YS... "no UK numbers yet" --human                       # what the run lacks: the next plan reads it
+npx birdwatch add edge 01M5YS... back --to fetch --why "searxng was down" --human # the step to run again
 npx birdwatch trace 01M5YS... --type finding spend                                # the run's records, JSON lines
 npx birdwatch add call 01M5YS... 01M5YT... drop --why "a forecast, not a result" --human   # a call in your name
 npx birdwatch yield --source exa                                                  # hits, reads, proposed, kept
@@ -141,8 +130,7 @@ The model is `anthropic` by default (Claude Haiku direct, `ANTHROPIC_API_KEY`; `
 anthropic:sonnet|opus|id` for another), `--model gateway[:alias]` for Wren's LLM gateway
 (`WREN_LLM_GATEWAY_URL`, `WREN_LLM_GATEWAY_TOKEN`), or any command that reads a prompt on stdin
 and prints the answer (`claude -p --output-format json` is Claude Code headless). The model does
-the bulk (extract, check); `--decider <spec>` (`BIRDWATCH_DECIDER`) takes the steps that decide what
-comes next (plan, triage, review): `anthropic:sonnet` when the model is Haiku, else the model. Sources come
+the bulk (extract, check) only; the agent decides. Sources come
 from the environment: `SEARXNG_URL` (and `SEARXNG_TOKEN`, a bearer, for an instance behind a
 proxy), `EXA_API_KEY` (or `_1..n`), `GEMINI_API_KEY` for videos without captions,
 `BIRDWATCH_CONTACT` for the fetcher and `arxiv` (no contact, no page opens; `OPENALEX_API_KEY`, free, gives `arxiv` its own citation budget, and `SEMANTIC_SCHOLAR_API_KEY`, free, its own rate for `--as refs`; `--sources arxiv` names it, since no stock plan file does), and for the ladder either
@@ -191,24 +179,21 @@ that still cannot go on writes no `done`, and `run` waits and resumes it, five t
 before it exits 2. Searches, reads and extracts fan out (four reads or extracts at a time);
 each document's records land as its batch settles, and a step run again skips what its records
 show done. An extract that fails for good (the model's answer would not parse, a 400) stops the
-step with its findings so far on record and `run` exits 2: `--resume` asks only for the
+step with its findings so far on record and exits 2: `extract` again asks only for the
 documents without a verdict. A model answer the output cap cut is not a failure: the whole
 findings before the cut go through the gate and the model is asked again for the rest of the
 document, with those findings known (`./document`'s `Cut`; the `spend` carries both calls' tokens).
 
-`--pause` stops the run after a review that says `again`, with no exit code: between rounds
-you (or a Claude Code session) read `brief`, keep or drop findings (`add call`), and steer the
-run with free text (`add steer`). Every `steer` record is rendered first in every prompt of the
-rounds after it, under "The person says:". `--resume` goes on. A review that says `again` into
-a round past `budget.rounds` parks the run the same way (`parked` says so, no exit code): the
-budget is a guard rail, not a stop rule. `--resume` goes one more round; `plan --run` opens it
-by hand.
+Between rounds the person reads `brief` (or the agent tells them), keeps or drops findings (`add
+call`), and steers the run with free text (`add steer`). Every `steer` record shows first in the
+brief and in the extract's prompt of the rounds after it. `budget.rounds` is a guard
+rail, not a stop rule: past it, the edge's why says why one more round is worth it.
 
 The steps talk in English records. A query every searcher answered with no new hit, and a kept
 hit no source could open (a 403, a block the ladder could not pass), each write a `gap`; so does
 `add gap`. The round's review reads the gaps and a person's keep or drop with its why; the next
 round's plan reads them, and the review's why on `again`, under "The last round left open".
-`add edge back --to <step>` writes a person's edge: the fold takes it like the planner's. A `pattern`
+`add edge back --to <step>` writes a person's edge: the fold takes it like the agent's. A `pattern`
 (`add pattern`) is what several kept findings say together, in the agent's words; its count of
 distinct sites is computed from the findings' proofs, never claimed, and `brief.patterns` lists
 them for the report. A run can be a child (`--parent <run> --why`): its snapshot names the parent, its plan reads
@@ -258,16 +243,14 @@ gates on it yet.
 From 0.25.0 the judge reads a page whole: the body to its references (an appendix stays), in
 parts of 64,000 characters, 4 at most, each answer the most yes of any part. Jev's input is
 cheap (about $0.04 per million tokens), so a paper costs about a tenth of a cent. A run's
-criteria (`--criterion name="question"`, on `run` and `plan`) are the person's own yes-or-no
-tests of a good source: the judge asks each one on every hit and every page. Every prompt shows
-them with the person's steer, and the runner's triage sees the judge's odds on each hit (serves
-and each test) as a hint. Their mean sorts `hits.uncalled` and `documents.toExtract`; `brief.judge.criteria` gives each one's AUC against
+criteria (`--criterion name="question"`, on `plan`) are the person's own yes-or-no tests of a
+good source: the judge asks each one on every hit and every page, and the brief shows its odds
+on each hit (serves and each test) as a hint. Their mean sorts `hits.uncalled` and `documents.toExtract`; `brief.judge.criteria` gives each one's AUC against
 "a finding on it was kept", on hits and on pages. A sort and a hint, never a gate.
 
 From 0.27.0 the extractor reads the body too (the reference list holds no finding). Each review
 sees every earlier round's new hits and kept findings, and decides when to stop. A paper's
-`follow --as refs` and `--as citers` list what it cites and what cites it. `--decider` runs plan,
-triage and review on Sonnet while Haiku does the bulk. A check (25 papers, Sonnet as reference):
+`follow --as refs` and `--as citers` list what it cites and what cites it. A check (25 papers, Sonnet as reference):
 on the whole page, Jev's criteria odds rank Sonnet's yes over its no with AUC 0.94 to 1.00; on the
 abstract, 0.77 to 1.00.
 
@@ -308,21 +291,21 @@ The engine, with your own model and sources:
 
 ```ts
 import { claimExtractor } from "@wrenautomation/birdwatch/document";
-import { registry, run } from "@wrenautomation/birdwatch/engine";
+import { extract, open, planRound, registry, search } from "@wrenautomation/birdwatch/engine";
 import { FilesLedger, ulids } from "@wrenautomation/birdwatch/ledger";
 import { exa, fetcherSource } from "@wrenautomation/birdwatch/sources";
 
 const ledger = new FilesLedger("./ledger", "will");
 const sources = registry(exa({ keys }), fetcherSource({ fetcher }));
-const result = await run(
-  { sources, ledger, model, extractor: claimExtractor, clock: () => new Date(), ids: ulids(), runner: "will" },
-  { ask: { text: "how do staffing firms win repeat clients", kind: "web", known: [] }, planFile },
-);
-result.state.findings; // each with its proof: a quote on a page the run read
+const deps = { sources, ledger, model, extractor: claimExtractor, clock: () => new Date(), ids: ulids(), writer: "will" };
+const agent = { from: "ai" as const, by: "my-agent" };
+const { run } = await planRound(deps, { ask: { text: "how do staffing firms win repeat clients", kind: "web" }, planFile, model: model.id });
+await search(deps, run, [{ terms: "staffing repeat client rate", why: "the ask's words" }], agent);
+await open(deps, run, { urls: ["https://a.example/report"], why: "a survey" }, agent);
+await extract(deps, run); // findings, each with its proof: a quote on a page the run read
 ```
 
-`RunOptions.steps` bounds one call (64 by default): a loop that advances a run a little per pass
-passes a few and calls again with `resume`. A host with its own ledger, sources or model mounts
+A host with its own ledger, sources or model mounts
 the same commands: `addEngineCommands(program, { ledger, sources, model, extractor })` from
 `@wrenautomation/birdwatch` (wren's `research` command is these over Postgres).
 
