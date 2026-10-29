@@ -228,23 +228,25 @@ export function sourcesHere(
 }
 
 /**
- * The run's allow-list: the names wanted that exist here, then (unless the list was given by
- * hand) every opener here. A name wanted that this machine lacks is dropped with a line on stderr.
+ * The run's allow-list: the names wanted that exist here. `opens`: unless the list was given by
+ * hand, every other opener here, let in to open and follow, never to search (arxiv searched every
+ * web run when it joined the list). A name wanted that this machine lacks is dropped with a line on stderr.
  */
 export function allowList(
   sources: Sources,
   wanted: readonly string[],
   byHand: boolean,
   warn: (line: string) => void = (l) => console.error(l),
-): string[] {
+): { sources: string[]; opens: string[] } {
   const out: string[] = [];
   for (const name of wanted) {
     if (sources.has(name)) out.push(name);
     else warn(`no source named ${name} here: skipped`);
   }
-  if (!byHand)
-    for (const s of sources.values()) if (s.open && !out.includes(s.name)) out.push(s.name);
-  return out;
+  const opens = byHand
+    ? []
+    : [...sources.values()].filter((s) => s.open && !out.includes(s.name)).map((s) => s.name);
+  return { sources: out, opens };
 }
 
 const progress = (e: StepEvent) =>
@@ -356,7 +358,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
   /**
    * The ledger's tuned plan file for the kind (the stock one when none), its sources the run's
    * allow-list: the names given by hand, else `first` then the plan file's, as far as this
-   * machine has them.
+   * machine has them. `opens`: the other openers, let in to open and follow only.
    */
   const planFileOf = async (
     ledger: HostLedger,
@@ -364,7 +366,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     kind: AskKind,
     byHand: string[] | undefined,
     first: string[] = [],
-  ): Promise<PlanFile> => {
+  ): Promise<{ planFile: PlanFile; opens: string[] }> => {
     const stock = defaultPlanFile(kind);
     const tuned = (await ledger.readPlan?.(kind)) ?? stock;
     if (tuned.version < stock.version)
@@ -373,7 +375,8 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       );
     const wanted = byHand ?? [...first, ...tuned.sources];
     // raven narrows to the plan file's sources, so the run's allow-list goes in as the plan file's.
-    return { ...tuned, sources: allowList(sources, wanted, !!byHand) };
+    const { sources: list, opens } = allowList(sources, wanted, !!byHand);
+    return { planFile: { ...tuned, sources: list }, opens };
   };
   const depsOf = (s: ReturnType<typeof setup>, runner: string) => ({
     ...s,
@@ -464,7 +467,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
               o.by,
             ),
           );
-        const planFile = await planFileOf(
+        const { planFile, opens } = await planFileOf(
           ledger,
           sources,
           kind,
@@ -498,6 +501,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
               }
             : {}),
           planFile,
+          opens,
           proposals,
           onStep: progress,
           ...(o.pause ? { pause: true } : {}),
@@ -621,7 +625,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
         const kind = o.run
           ? (fold(o.run, await s.ledger.trace(o.run)).snapshot?.ask.kind ?? kindOf(o.kind))
           : kindOf(o.kind);
-        const planFile = await planFileOf(s.ledger, s.sources, kind, o.sources);
+        const { planFile, opens } = await planFileOf(s.ledger, s.sources, kind, o.sources);
         printDid(
           await planRound(depsOf(s, agentOf(o)), {
             ...(o.run ? { run: o.run } : {}),
@@ -638,6 +642,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
                 }
               : {}),
             planFile,
+            opens,
             model: s.model?.id ?? null,
             ...(o.parent ? { parent: { run: o.parent, why: o.why ?? "" } } : {}),
           }),

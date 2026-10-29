@@ -166,6 +166,8 @@ export const SnapshotRecord = Envelope.extend({ type: z.literal("snapshot") })
   .extend({
     ask: Ask,
     sources: z.array(z.string()),
+    /** Openers let in only to open or follow, never to search: a source in `sources` does all three. */
+    opens: z.array(z.string()).default([]),
     budget: Budget,
     /** The run this one is a child of: its round when the child began, and why. Every round of the child carries it. */
     parent: z

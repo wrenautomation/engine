@@ -62,7 +62,7 @@ weaver search 01M5YS... < tree.json                 # after triage, the same fil
 weaver add call 01M5YS... 01M5YT... keep --why "a survey with numbers"               # triage: a hit kept
 weaver add call 01M5YS... 01M5YU... drop --why "a vendor page"
 weaver open 01M5YS... 01M5YT... --url https://a.example/report --why "numbers"      # keep these, read every kept hit
-weaver open 01M5YS... --with ladder                                                  # an opener the run's allow-list lacks joins it
+weaver open 01M5YS... --with ladder                                                  # an opener the run lacks joins it, to open only
 weaver show 01M5YS... 01M5YV...                     # a document's text, for the agent to read itself
 weaver add finding 01M5YS... 01M5YV... --text "412 firms were surveyed." --quote "A 2025 survey of 412 firms"
 weaver add check 01M5YS... 01M5YW... --ok --why "the quote says it"   # the agent's own check; --fail also drops
@@ -170,8 +170,10 @@ as a PDF) is a miss: the source throws, its `spend` says `ok: false` with the re
 opener gets its turn, and a hit every opener missed is a `gap` that lists each reason. A page
 that answered 200 and still holds nothing (a captcha wall, a "not found" shell, under 200
 characters of text) is the same miss, with the title or the count as the reason. A run's
-allow-list pins its openers at `plan`; `open --with <source>` writes a new snapshot that adds
-one the registry has (the read note names them when hits missed). The
+snapshot pins its sources at `plan`: `sources`, the allow-list, which search, open and follow;
+`opens`, the registry's other openers (unless `--sources` was given), which open and follow but
+never search. `open --with <source>` writes a new snapshot that adds one to `opens` (the read
+note names them when hits missed). The
 ladder costs browser time and one of the worker's daily `fetch` bucket per call. Exa's search
 asks for one highlight per result (three sentences, billed per result) as the hit's `snippet`.
 
@@ -271,7 +273,8 @@ abstract, 0.77 to 1.00.
 A follow is a query record with `follow: {url, as, document?}` and terms `<as> of <url>`. The
 fetch step sends it to the sources whose `follows` takes it, `follow` lists up to 30, and the
 hits go through triage, the read and the caps like a search's. Each query goes to the allow-list
-as it stood when it was written: a source `follow --with` lets in runs the follow only. A
+as it stood when it was written: a source `follow --with` lets in joins `opens`, so it runs
+follows, never searches. A
 `person` names one author across sites (profile URLs, names they post under); a document is
 theirs when a posts follow from their profile found it, when its URL sits under a profile, or
 when its channel (or its hit's) is one of their names. `brief.people` counts each person's

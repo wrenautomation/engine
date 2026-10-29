@@ -3,6 +3,7 @@ import { fakeModel, type Model, scriptedModel, Transient } from "@wrenautomation
 import { fakeJudge } from "@wrenautomation/models/judge";
 import { defaultPlanFile } from "@wrenautomation/raven";
 import { describe, expect, it } from "vitest";
+import { allowList } from "../app/engine-cli.js";
 import { countingIds } from "../ledger/ids.js";
 import { MemoryLedger } from "../ledger/memory.js";
 import { canonical } from "./canonical.js";
@@ -561,6 +562,49 @@ describe("runner", () => {
     expect(out.state.documents).toHaveLength(3);
     expect(out.state.calls.map((c) => c.verdict)).toEqual(["keep", "keep", "keep"]);
     expect(out.state.queries.map((q) => q.from)).toEqual(["human", "human"]);
+  });
+
+  it("lets an opener in by opens to read, never to search", async () => {
+    const both: Source = {
+      name: "both",
+      kind: "search",
+      cost: "free",
+      search: async () => [{ url: "https://b.example/four" }],
+      open: async (h) => ({ url: h.url, media: "text", text: pages[h.url] ?? "" }),
+    };
+    const d = { ...deps(null), sources: registry(fake, both) };
+    const out = await run(d, {
+      ask: { text: "x", kind: "web" },
+      planFile: { ...planFile, sources: ["fake"] },
+      opens: ["both"],
+      proposals: [{ from: "human", by: "will", queries: [{ kind: "web", terms: "a", why: "w" }] }],
+    });
+    expect(out.state.snapshot?.opens).toEqual(["both"]);
+    const spends = out.state.spends.map((s) => `${s.source} ${s.op}`);
+    expect(spends).not.toContain("both search");
+    expect(spends).toContain("both open");
+    expect(out.state.documents.map((x) => x.url)).toEqual([
+      "https://a.example/one",
+      "https://a.example/two",
+    ]);
+  });
+});
+
+describe("allowList", () => {
+  it("keeps the names wanted; the other openers join only to open, unless the list is by hand", () => {
+    const both: Source = {
+      ...fake,
+      name: "both",
+      open: async (h) => ({ url: h.url, media: "text", text: "" }),
+    };
+    const sources = registry(fake, video, both);
+    const warned: string[] = [];
+    expect(allowList(sources, ["fake", "gone"], false, (l) => warned.push(l))).toEqual({
+      sources: ["fake"],
+      opens: ["video", "both"],
+    });
+    expect(warned).toEqual(["no source named gone here: skipped"]);
+    expect(allowList(sources, ["fake"], true)).toEqual({ sources: ["fake"], opens: [] });
   });
 });
 

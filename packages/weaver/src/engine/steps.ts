@@ -128,6 +128,12 @@ export const openAfter = (state: RunState, round: number): string[] => {
 const sourcesOf = (ctx: StepContext, state: RunState): Source[] =>
   pick(ctx.deps.sources, state.snapshot?.sources ?? []);
 
+/** The allow-list plus the openers let in to open and follow; one this machine lacks is skipped. */
+const readersOf = (ctx: StepContext, state: RunState): Source[] => [
+  ...sourcesOf(ctx, state),
+  ...(state.snapshot?.opens ?? []).flatMap((n) => ctx.deps.sources.get(n) ?? []),
+];
+
 /** Settled calls in order: the values, the first Transient, and any other error thrown on. */
 function gather<T>(settled: PromiseSettledResult<T>[]): {
   values: (T | null)[];
@@ -228,6 +234,9 @@ export const planStep: StepFn = async (ctx, state) => {
       type: "snapshot",
       ask: p.ask,
       sources: p.sources,
+      opens: (ctx.options.opens ?? state.snapshot?.opens ?? []).filter(
+        (n) => !p.sources.includes(n),
+      ),
       budget: await budgetUnder(ctx.deps, parent, p.budget),
       ...snapshot,
       ...(parent ? { parent } : { treeReads: treeReadsOf(planFile, p.budget) }),
@@ -245,6 +254,7 @@ export const planStep: StepFn = async (ctx, state) => {
 export const fetchStep: StepFn = async (ctx, state) => {
   const queries = state.queries.filter((q) => q.round === ctx.round);
   const searchers = sourcesOf(ctx, state);
+  const followers = readersOf(ctx, state);
   if (!searchers.some((s) => s.search) && !queries.some((q) => q.follow))
     return { ok: false, note: "no search source in the allow-list" };
   const searched = new Set(
@@ -257,7 +267,7 @@ export const fetchStep: StepFn = async (ctx, state) => {
   const listOf = new Map<string, Set<string>>();
   let list: Set<string> | null = null;
   for (const r of state.records)
-    if (r.type === "snapshot") list = new Set(r.sources);
+    if (r.type === "snapshot") list = new Set([...r.sources, ...r.opens]);
     else if (r.type === "query" && list) listOf.set(r.id, list);
   const idOf = new Map(state.hitByKey);
   let written = 0;
@@ -266,7 +276,7 @@ export const fetchStep: StepFn = async (ctx, state) => {
   let answered = 0;
   let transient: Transient | null = null;
   for (const q of queries) {
-    const todo = searchersFor(searchers, q).filter(
+    const todo = searchersFor(q.follow ? followers : searchers, q).filter(
       (s) => !searched.has(`${q.id}\u0000${s.name}`) && (listOf.get(q.id)?.has(s.name) ?? true),
     );
     calls += todo.length;
@@ -332,7 +342,12 @@ export const fetchStep: StepFn = async (ctx, state) => {
   for (const q of queries) {
     // A tree's query is thin, not a gap: the tree says so when a facet's every try came up empty.
     if (q.facet || hitOn.has(q.id) || gapOn.has(q.id)) continue;
-    if (!searchersFor(searchers, q).every((s) => okOn.has(`${q.id}\u0000${s.name}`))) continue;
+    if (
+      !searchersFor(q.follow ? followers : searchers, q).every((s) =>
+        okOn.has(`${q.id}\u0000${s.name}`),
+      )
+    )
+      continue;
     await ctx.write(
       { type: "gap", on: q.id, note: `query "${q.terms}": no new hits` },
       tool(ctx.deps.runner),
@@ -423,7 +438,7 @@ export async function readHits(
   const hits = room ? wanted.slice(0, room.left) : wanted;
   const capped =
     hits.length < wanted.length ? `; the tree's cap left ${hits.length} of ${wanted.length}` : "";
-  const listed = sourcesOf(ctx, state).filter((s) => s.open);
+  const listed = readersOf(ctx, state).filter((s) => s.open);
   // A site's own reader before the general openers; the allow-list's order inside each.
   const openers = [...listed.filter((s) => s.first), ...listed.filter((s) => !s.first)];
   if (hits.length && !openers.length)

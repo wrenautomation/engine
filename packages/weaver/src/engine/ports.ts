@@ -99,6 +99,8 @@ export interface RunOptions {
   proposals?: readonly Proposal[];
   /** Narrows the plan file's sources for this run. */
   sources?: readonly string[];
+  /** Openers let in only to open and follow, never to search. Absent: the last snapshot's. */
+  opens?: readonly string[];
   /** A new run's parent, and why this child: `--parent`. */
   parent?: { run: string; why: string };
   /** An earlier run to continue. */

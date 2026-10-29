@@ -165,6 +165,8 @@ export interface PlanInput {
   ask?: AskInput;
   /** Its `sources` are the run's allow-list, every name one this machine has. */
   planFile: PlanFile;
+  /** Openers let in only to open and follow, never to search. Absent: the last snapshot's. */
+  opens?: readonly string[];
   /** The model id the extract will use, for the snapshot; null when none. */
   model: string | null;
   /** A new run's parent, and why this child. */
@@ -213,6 +215,9 @@ export async function planRound(deps: Deps, input: PlanInput): Promise<Did> {
       type: "snapshot",
       ask,
       sources: input.planFile.sources,
+      opens: (input.opens ?? state.snapshot?.opens ?? []).filter(
+        (n) => !input.planFile.sources.includes(n),
+      ),
       budget: await budgetUnder(deps, parent, input.planFile.budget),
       known: ask.known,
       planFile: { id: input.planFile.id, version: input.planFile.version },
@@ -283,7 +288,7 @@ export interface FollowInput {
   url?: string;
   /** The read page that led here. */
   document?: string;
-  /** Follow sources this machine has that the run's allow-list lacks. */
+  /** Follow sources this machine has that the run lacks: they join to follow, never to search. */
   with?: readonly string[];
 }
 
@@ -302,13 +307,14 @@ export async function follow(deps: Deps, run: string, input: FollowInput, who: W
   const url = input.url ?? doc?.url;
   if (!url) throw new Error("follow: a URL or a document");
   const ctx = context(deps, {}, run, state.round, "plan");
-  const joining = (input.with ?? []).filter((n) => !snapshot.sources.includes(n));
+  const reach = [...snapshot.sources, ...snapshot.opens];
+  const joining = (input.with ?? []).filter((n) => !reach.includes(n));
   for (const n of joining) {
     const s = deps.sources.get(n);
     if (!s) throw new Error(`no source named ${n}`);
     if (!s.follow) throw new Error(`${n} follows nothing`);
   }
-  const names = [...snapshot.sources, ...joining];
+  const names = [...reach, ...joining];
   const followers = names.filter((n) => deps.sources.get(n)?.follows?.(input.as, url));
   if (!followers.length) {
     const here = [...deps.sources.values()].filter((s) => s.follows?.(input.as, url));
@@ -318,7 +324,7 @@ export async function follow(deps: Deps, run: string, input: FollowInput, who: W
   }
   if (joining.length) {
     const { id: _id, at: _at, from: _from, by: _by, ...rest } = snapshot;
-    await ctx.write({ ...rest, sources: names }, who);
+    await ctx.write({ ...rest, opens: [...snapshot.opens, ...joining] }, who);
   }
   await ctx.write(
     {
@@ -657,7 +663,9 @@ export async function open(deps: Deps, run: string, input: OpenInput, who: Who):
   for (const id of new Set(named))
     await ctx.write({ type: "call", on: id, verdict: "keep", why: input.why as string }, who);
   const snapshot = state.snapshot;
-  const joining = (input.with ?? []).filter((n) => !snapshot?.sources.includes(n));
+  const joining = (input.with ?? []).filter(
+    (n) => !snapshot?.sources.includes(n) && !snapshot?.opens.includes(n),
+  );
   if (joining.length && snapshot) {
     for (const n of joining) {
       const s = deps.sources.get(n);
@@ -665,7 +673,7 @@ export async function open(deps: Deps, run: string, input: OpenInput, who: Who):
       if (!s.open) throw new Error(`${n} opens nothing: only an open source joins a read`);
     }
     const { id: _id, at: _at, from: _from, by: _by, ...rest } = snapshot;
-    await ctx.write({ ...rest, sources: [...snapshot.sources, ...joining] }, who);
+    await ctx.write({ ...rest, opens: [...snapshot.opens, ...joining] }, who);
   }
   return stepRun(deps, run, "read", (c, s) => readHits(c, s, unread(s)));
 }
@@ -855,6 +863,17 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
       const hit = state.hits.find((h) => h.id === a.on);
       const finding = hit ? undefined : state.findings.find((f) => f.id === a.on);
       if (!hit && !finding) throw new Error(`no hit or finding ${a.on}`);
+      // Last call wins: a flip is said out loud; a person's call outranks the agent's.
+      const last = state.calls.filter((c) => c.on === a.on).at(-1);
+      if (last && last.verdict !== a.verdict) {
+        if (last.from === "human" && who.from === "ai")
+          throw new Error(
+            `${a.on}: ${last.by} called it ${last.verdict} (${last.why}); a person's call stands over the agent's`,
+          );
+        warnings.push(
+          `flips ${last.by}'s ${last.verdict} from round ${last.round} (${last.why}): the last call wins`,
+        );
+      }
       return {
         record: await write({
           type: "call",

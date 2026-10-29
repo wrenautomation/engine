@@ -146,6 +146,20 @@ describe("agent commands", () => {
     const [one, two] = hits.map((h) => h.id);
     if (!one || !two) throw new Error("the search wrote fewer than two hits");
     await add(d, runId, { type: "call", on: two, verdict: "drop", why: "empty" }, agent);
+    // A flip is said out loud; the agent never flips a person's call.
+    const flipped = await add(
+      d,
+      runId,
+      { type: "call", on: two, verdict: "keep", why: "a number" },
+      will,
+    );
+    expect(flipped.warnings).toEqual([
+      "flips claude-code's drop from round 1 (empty): the last call wins",
+    ]);
+    await expect(
+      add(d, runId, { type: "call", on: two, verdict: "drop", why: "empty" }, agent),
+    ).rejects.toThrow("a person's call stands over the agent's");
+    await add(d, runId, { type: "call", on: two, verdict: "drop", why: "empty after all" }, will);
     const opened = await open(
       d,
       runId,
@@ -162,14 +176,15 @@ describe("agent commands", () => {
     // The same page again: no new hit, no new read.
     const again = await open(d, runId, { urls: ["https://b.example/four"], why: "x" }, agent);
     expect(again.wrote.filter((r) => r.type === "hit" || r.type === "document")).toEqual([]);
-    // An opener that came after the plan joins the run by name: a new snapshot says so.
+    // An opener that came after the plan joins the run by name, to open only: a new snapshot says so.
     const late: Source = { ...opener, name: "late" };
     const seeker: Source = { ...fake, name: "seeker" };
     const dl = { ...d, sources: registry(...d.sources.values(), late, seeker) };
     const joined = await open(dl, runId, { with: ["late"] }, agent);
     expect(joined.step).toBe("read");
     const grew = fold(runId, await dl.ledger.trace(runId)).snapshot;
-    expect(grew?.sources).toEqual(["fake", "opener", "late"]);
+    expect(grew?.sources).toEqual(["fake", "opener"]);
+    expect(grew?.opens).toEqual(["late"]);
     expect(grew?.by).toBe(agent.by);
     await expect(open(dl, runId, { with: ["seeker"] }, agent)).rejects.toThrow("opens nothing");
 
