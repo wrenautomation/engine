@@ -6,8 +6,8 @@ them, and keeps every record in a ledger. Every finding is a sentence with a quo
 run read. `skills/birdwatch/SKILL.md` (in this repo) is how an agent drives it.
 
 Reading the web and files (the fetch ladder, HTML and PDF to text, video) is
-[`@wrenautomation/read`](../read)'s. Every model call goes through
-[`@wrenautomation/models`](../models). Until 0.29.0 this was three packages: raven (the planner,
+[`@wrenautomation/read`](https://github.com/wrenautomation/engine/tree/main/packages/read)'s. Every model call goes through
+[`@wrenautomation/models`](https://github.com/wrenautomation/engine/tree/main/packages/models). Until 0.29.0 this was three packages: raven (the planner,
 now `./plan`), falcon's `./document` and weaver (the engine, sources, ledger and CLI).
 
 | Import | Does |

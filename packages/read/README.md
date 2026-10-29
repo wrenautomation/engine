@@ -2,7 +2,7 @@
 
 The web and files in, text out. No database, no accounts, no business rules: a library that
 fetches and reads. Until 0.29.0 this was falcon (files, markup, media) and the fetch and video
-halves of weaver; the research engine on top is [`@wrenautomation/birdwatch`](../birdwatch),
+halves of weaver; the research engine on top is [`@wrenautomation/birdwatch`](https://github.com/wrenautomation/engine/tree/main/packages/birdwatch),
 whose `birdwatch` CLI carries these readers (`fetch`, `read`, `list`, `text`, `page`, `watch`).
 
 | Import | Does |
