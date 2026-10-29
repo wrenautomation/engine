@@ -1,7 +1,7 @@
 {
   "name": "@wrenautomation/engine-workspace",
   "private": true,
-  "version": "0.27.0",
+  "version": "0.27.1",
   "type": "module",
   "description": "The research engine (models, raven, falcon, weaver) and the map engine (orrery), one npm package each.",
   "license": "PolyForm-Strict-1.0.0",
