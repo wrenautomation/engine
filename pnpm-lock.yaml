@@ -21,23 +21,32 @@ importers:
         specifier: 5.0.1
         version: 5.0.1(@opentelemetry/api@1.10.0)(@types/node@22.20.3)(vite@8.3.5(@types/node@22.20.3))
 
-  packages/falcon:
+  packages/birdwatch:
     dependencies:
+      '@hono/node-server':
+        specifier: 2.1.3
+        version: 2.1.3(hono@4.13.12)
       '@wrenautomation/models':
         specifier: workspace:*
         version: link:../models
+      '@wrenautomation/read':
+        specifier: workspace:*
+        version: link:../read
       commander:
         specifier: 15.0.0
         version: 15.0.0
-      entities:
-        specifier: 8.1.0
-        version: 8.1.0
+      hono:
+        specifier: 4.13.12
+        version: 4.13.12
       htmlparser2:
         specifier: 12.0.0
         version: 12.0.0
-      unpdf:
-        specifier: 1.8.1
-        version: 1.8.1
+      minisearch:
+        specifier: 7.2.0
+        version: 7.2.0
+      ulid:
+        specifier: 3.0.2
+        version: 3.0.2
       zod:
         specifier: 4.6.5
         version: 4.6.5
@@ -68,50 +77,23 @@ importers:
 
   packages/orrery: {}
 
-  packages/raven:
+  packages/read:
     dependencies:
       '@wrenautomation/models':
         specifier: workspace:*
         version: link:../models
-      commander:
-        specifier: 15.0.0
-        version: 15.0.0
-      zod:
-        specifier: 4.6.5
-        version: 4.6.5
-
-  packages/weaver:
-    dependencies:
-      '@hono/node-server':
-        specifier: 2.1.3
-        version: 2.1.3(hono@4.13.12)
-      '@wrenautomation/falcon':
-        specifier: workspace:*
-        version: link:../falcon
-      '@wrenautomation/models':
-        specifier: workspace:*
-        version: link:../models
-      '@wrenautomation/raven':
-        specifier: workspace:*
-        version: link:../raven
-      commander:
-        specifier: 15.0.0
-        version: 15.0.0
-      hono:
-        specifier: 4.13.12
-        version: 4.13.12
+      entities:
+        specifier: 8.1.0
+        version: 8.1.0
       htmlparser2:
         specifier: 12.0.0
         version: 12.0.0
-      minisearch:
-        specifier: 7.2.0
-        version: 7.2.0
       robots-parser:
         specifier: 3.0.1
         version: 3.0.1
-      ulid:
-        specifier: 3.0.2
-        version: 3.0.2
+      unpdf:
+        specifier: 1.8.1
+        version: 1.8.1
       zod:
         specifier: 4.6.5
         version: 4.6.5

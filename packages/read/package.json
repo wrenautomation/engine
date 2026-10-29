@@ -1,0 +1,58 @@
+{
+  "name": "@wrenautomation/read",
+  "version": "0.28.0",
+  "description": "The web and files in, text out. Polite HTTP fetching with robots and a fetch ladder up to a browser; HTML and PDF to text, a page to title, text and links; a video or podcast from a URL or a file (captions, ffmpeg and a vision model, audio to markdown, what a channel or search holds); a study's synthesis reader whose every claim quotes a page.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wrenautomation/engine.git",
+    "directory": "packages/read"
+  },
+  "license": "PolyForm-Strict-1.0.0",
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "README.md",
+    "LICENSE.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./fetch": {
+      "types": "./dist/fetch/index.d.ts",
+      "import": "./dist/fetch/index.js"
+    },
+    "./study": {
+      "types": "./dist/study/index.d.ts",
+      "import": "./dist/study/index.js"
+    },
+    "./text": {
+      "types": "./dist/text/index.d.ts",
+      "import": "./dist/text/index.js"
+    },
+    "./video": {
+      "types": "./dist/video/index.d.ts",
+      "import": "./dist/video/index.js"
+    }
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "sh ../../scripts/build.sh"
+  },
+  "dependencies": {
+    "@wrenautomation/models": "workspace:*",
+    "entities": "8.1.0",
+    "htmlparser2": "12.0.0",
+    "robots-parser": "3.0.1",
+    "unpdf": "1.8.1",
+    "zod": "4.6.5"
+  }
+}

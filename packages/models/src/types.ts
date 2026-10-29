@@ -1,7 +1,7 @@
 /**
  * The one shape every model call has. A prompt is a string or a list of parts; a reply is text,
- * tokens, USD and why it stopped. `ask` parses the reply to a zod shape. raven's and falcon's
- * `Model` (`id` plus `ask(prompt, shape)`) are met by structure: a `Model` from here is one.
+ * tokens, USD and why it stopped. `ask` parses the reply to a zod shape. birdwatch's
+ * `Model` seams (`id` plus `ask(prompt, shape)`) are met by structure: a `Model` from here is one.
  */
 import type { ZodType } from "zod";
 

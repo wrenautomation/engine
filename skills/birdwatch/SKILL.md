@@ -1,20 +1,21 @@
 ---
 name: birdwatch
-description: Research a question from the open web with weaver's engine, one step per command. Use when the user says "research <topic>", "find out <question>", "what do sources say about <x>", "look into <vertical>", or wants a sourced answer. You plan, triage, review and stop; the engine searches, opens pages, extracts findings behind a quote gate, checks them, and keeps every record. Every finding is a sentence with a quote on a page the run read.
+description: Research a question from the open web with birdwatch, one step per command. Use when the user says "research <topic>", "find out <question>", "what do sources say about <x>", "look into <vertical>", or wants a sourced answer. You plan, triage, review and stop; the engine searches, opens pages, extracts findings behind a quote gate, checks them, and keeps every record. Every finding is a sentence with a quote on a page the run read.
 ---
 
 # birdwatch
 
-You drive. The engine is a CLI (`weaver`, `@wrenautomation/weaver`) that prints JSON and writes
-a ledger. It never decides what to search next, what to read, or when to stop: you do, in your
+You drive. The engine is a CLI (`birdwatch`, `@wrenautomation/birdwatch`) that prints JSON and
+writes a ledger. In the engine repo it is `node packages/birdwatch/dist/app/cli.js`; elsewhere
+`npx @wrenautomation/birdwatch`. It never decides what to search next, what to read, or when to stop: you do, in your
 own head, and you write each decision as a record with a why. The person steers you in chat;
 their words reach the ledger through you as `--human` records.
 
-Set `WEAVER_AGENT` to your id (`claude-code`, `codex`, a name) once: every record you write
-names it. The ledger folder is `WEAVER_LEDGER` (default `./ledger`). Sources come from the
-environment; `weaver sources` lists what this machine can run. A Reddit thread and a Facebook
+Set `BIRDWATCH_AGENT` to your id (`claude-code`, `codex`, a name) once: every record you write
+names it. The ledger folder is `BIRDWATCH_LEDGER` (default `./ledger`). Sources come from the
+environment; `birdwatch sources` lists what this machine can run. A Reddit thread and a Facebook
 group post open through their own readers (`reddit`, `facebook`) before the page openers. Reddit
-reads signed out, then as the account `WEAVER_ACCOUNTS` names (`reddit=reddit@alt`); the person
+reads signed out, then as the account `BIRDWATCH_ACCOUNTS` names (`reddit=reddit@alt`); the person
 picks that account, never you. `google` searches Google's own page through the desk's browser:
 each result is a hit, and the AI Overview is one hit (channel "Google AI Overview") whose
 snippet holds its text. The Overview is a claim, never a proof: do not open it; keep and read
@@ -23,36 +24,36 @@ the pages it cites, which come as hits of their own.
 A judge (Jev) answers cheap typed questions on every hit, page and finding: probabilities, no
 text. It is a hint and a router, never a decision: you call, class and check; it ranks, guesses
 and sends doubted findings to the check. It runs when `TYPESAFE_API_KEY` is set (`--judge`,
-`WEAVER_JUDGE`; `--no-judge` for one command). `brief.judge` says what it cost and how often
+`BIRDWATCH_JUDGE`; `--no-judge` for one command). `brief.judge` says what it cost and how often
 you and the check agreed with it: a low agreement means read its hints less.
 
 ## One run
 
 ```sh
-weaver recall <terms> [--not <run>] [--also <ledger>...]   # what earlier runs found: quote, URL, source date, run, who wrote it
-weaver plan "<the ask>" [--kind web|video|site|channel|person] [--known "<fact> (<url>)"...] [--premise "<given>"...] [--site <host>]
-weaver brief <run>                                   # read it after every step
-weaver search <run> < tree.json                      # the round's query tree (below); or "<terms>" --why, or a JSON array
-weaver add call <run> <hit> keep|drop --why "<why>"  # triage, one per hit; the last call wins, a flip warns, a person's call stands over yours
-weaver open <run> [<hit>...] [--url <url>...] --why "<why>"   # then reads every kept hit without a document
-weaver open <run> --with <source>                    # an opener `sources` lists but the run lacks (a ladder that came later); it joins to open, never to search
-weaver show <run> <document> [--head N]              # the page's text: read it yourself
-weaver add finding <run> <document> --text "<sentence>" --quote "<quote on the page>"
-weaver add check <run> <finding> --ok|--fail --why "<why>"    # your own check; a fail drops it
-weaver extract <run>                                 # bulk only: a model behind the quote gate
-weaver check <run> [-n N] [--patterns]               # bulk only: a model's check; --patterns: every finding a pattern rests on
-weaver add gap <run> "<what is still missing>"
-weaver add class <run> <document|finding> <class> --why "<why>"   # primary_data, survey, practitioner, vendor, forum, news, other
-weaver accept <run> keep --over P | drop --under P | class --min P --why "<why>"   # the judge's hints in bulk, at your bar
-weaver add pattern <run> "<what several findings say together>" --on <finding> <finding>...
-weaver add edge <run> again|stop --why "<why>"       # your review of the round
-echo '[{"title":"..","body":"..","cites":["<pattern or finding>"]}]' | weaver add draft <run> --for "<a decision memo>"   # a rough draft, gated
-weaver plan --run <run>                              # after again: the next round
-weaver plan "<one niche>" --parent <run> --why "<why this child>"   # a child run: it reads what the tree found
-weaver add dead <run> <facet> --why "<why>"          # give up on a facet; later tries skip it
-weaver follow <run> [<url>] --as posts|similar|refs|citers [--from <document>] --why "<why>" [--with <source>...]   # a good page's author's posts, or pages like it
-weaver add person <run> "<name>" [--profile <url>...] [--aka <name>...] --why "<why>"   # one person across sites
-weaver learn <kind> [--sources ...] [--rounds N] [--age "..."]   # after a good run, on the person's yes
+birdwatch recall <terms> [--not <run>] [--also <ledger>...]   # what earlier runs found: quote, URL, source date, run, who wrote it
+birdwatch plan "<the ask>" [--kind web|video|site|channel|person] [--known "<fact> (<url>)"...] [--premise "<given>"...] [--site <host>]
+birdwatch brief <run>                                   # read it after every step
+birdwatch search <run> < tree.json                      # the round's query tree (below); or "<terms>" --why, or a JSON array
+birdwatch add call <run> <hit> keep|drop --why "<why>"  # triage, one per hit; the last call wins, a flip warns, a person's call stands over yours
+birdwatch open <run> [<hit>...] [--url <url>...] --why "<why>"   # then reads every kept hit without a document
+birdwatch open <run> --with <source>                    # an opener `sources` lists but the run lacks (a ladder that came later); it joins to open, never to search
+birdwatch show <run> <document> [--head N]              # the page's text: read it yourself
+birdwatch add finding <run> <document> --text "<sentence>" --quote "<quote on the page>"
+birdwatch add check <run> <finding> --ok|--fail --why "<why>"    # your own check; a fail drops it
+birdwatch extract <run>                                 # bulk only: a model behind the quote gate
+birdwatch check <run> [-n N] [--patterns]               # bulk only: a model's check; --patterns: every finding a pattern rests on
+birdwatch add gap <run> "<what is still missing>"
+birdwatch add class <run> <document|finding> <class> --why "<why>"   # primary_data, survey, practitioner, vendor, forum, news, other
+birdwatch accept <run> keep --over P | drop --under P | class --min P --why "<why>"   # the judge's hints in bulk, at your bar
+birdwatch add pattern <run> "<what several findings say together>" --on <finding> <finding>...
+birdwatch add edge <run> again|stop --why "<why>"       # your review of the round
+echo '[{"title":"..","body":"..","cites":["<pattern or finding>"]}]' | birdwatch add draft <run> --for "<a decision memo>"   # a rough draft, gated
+birdwatch plan --run <run>                              # after again: the next round
+birdwatch plan "<one niche>" --parent <run> --why "<why this child>"   # a child run: it reads what the tree found
+birdwatch add dead <run> <facet> --why "<why>"          # give up on a facet; later tries skip it
+birdwatch follow <run> [<url>] --as posts|similar|refs|citers [--from <document>] --why "<why>" [--with <source>...]   # a good page's author's posts, or pages like it
+birdwatch add person <run> "<name>" [--profile <url>...] [--aka <name>...] --why "<why>"   # one person across sites
+birdwatch learn <kind> [--sources ...] [--rounds N] [--age "..."]   # after a good run, on the person's yes
 ```
 
 Each step command prints `{run, round, step, ok, note, wrote}`; `wrote` is every record it
@@ -186,7 +187,7 @@ records show done.
    an SOP outline), write a rough draft with `add draft`: each item cites kept patterns or
    findings, and each number comes from a cited quote, or the gate drops the item. A draft is
    never final: the person writes the SOP or the decision.
-10. **Learn.** If the run was good and the person agrees, `weaver learn <kind>` with what it
+10. **Learn.** If the run was good and the person agrees, `birdwatch learn <kind>` with what it
    taught: a source order that yielded, a budget that fit, an age sentence, a `--thin` that
    fits the kind, a facet the guide should name (`--tree <file>`). The next run of that kind
    starts there. Never change a prompt without showing the person the diff.
@@ -196,7 +197,7 @@ Say so in the edge's why.
 
 ## The person
 
-Their words are theirs: `weaver add steer <run> "<their words>" --human <name>`. A steer is
+Their words are theirs: `birdwatch add steer <run> "<their words>" --human <name>`. A steer is
 rendered first in every later prompt and snapshot. Their keep or drop on a hit or finding:
 `add call ... --human <name>`; their gap, `add gap ... --human <name>`; a step they want rerun,
 `add edge <run> back --to <step> --why "<their why>" --human <name>`. Never put your words in a `--human` record.
@@ -207,10 +208,10 @@ they did not ask for.
 ## Records
 
 Every record carries `from` (ai, human, tool), `by` (your id, their name, a source or model
-id), its round, and on a decision, a why. `weaver trace <run>` prints them all; `weaver trace
-<run> --type finding` one type. `weaver run --resume <run>` hands a run to the runner (raven's
-prompts decide instead of you); `brief` reads a run the runner made the same way.
+id), its round, and on a decision, a why. `birdwatch trace <run>` prints them all;
+`birdwatch trace <run> --type finding` one type. `birdwatch run --resume <run>` hands a run to the
+runner (the planner's prompts decide instead of you); `brief` reads a run the runner made the same way.
 
-To let a person watch or check a run, start `weaver serve` (same `--ledger`) in the background
+To let a person watch or check a run, start `birdwatch serve` (same `--ledger`) in the background
 and tell them to open the portal's Research page on this Mac. It updates live as you write.
 Stop it when they are done.
