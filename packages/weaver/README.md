@@ -261,6 +261,13 @@ them with the person's steer, and the runner's triage sees the judge's odds on e
 and each test) as a hint. Their mean sorts `hits.uncalled` and `documents.toExtract`; `brief.judge.criteria` gives each one's AUC against
 "a finding on it was kept", on hits and on pages. A sort and a hint, never a gate.
 
+From 0.27.0 the extractor reads the body too (the reference list holds no finding). Each review
+sees every earlier round's new hits and kept findings, and decides when to stop. A paper's
+`follow --as refs` and `--as citers` list what it cites and what cites it. `--decider` runs plan,
+triage and review on Sonnet while Haiku does the bulk. A check (25 papers, Sonnet as reference):
+on the whole page, Jev's criteria odds rank Sonnet's yes over its no with AUC 0.94 to 1.00; on the
+abstract, 0.77 to 1.00.
+
 A follow is a query record with `follow: {url, as, document?}` and terms `<as> of <url>`. The
 fetch step sends it to the sources whose `follows` takes it, `follow` lists up to 30, and the
 hits go through triage, the read and the caps like a search's. Each query goes to the allow-list
