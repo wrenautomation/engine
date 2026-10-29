@@ -80,6 +80,21 @@ describe("readers", () => {
 });
 
 describe("claim extractor", () => {
+  it("reads the body: the reference list is cut, an appendix after it stays", async () => {
+    const prompts: string[] = [];
+    const model: Model = {
+      id: "m1",
+      ask: async (p, shape) => {
+        prompts.push(promptText(p) ?? "");
+        return { value: shape.parse({ findings: [], quality: "off" }), usage: { usd: 0 } };
+      },
+    };
+    const paper = `${doc.text}\n\n## References\n[1] Smith 2020. A cited paper.\n\nAppendix A Ablation\nThe ablation.`;
+    await claimExtractor.extract({ ...doc, text: paper }, { text: "x" }, model);
+    expect(prompts[0]).not.toContain("A cited paper");
+    expect(prompts[0]).toContain("The ablation.");
+  });
+
   it("puts the ask, what is known and the whole document in the prompt; caps nothing", () => {
     const p = claimPrompt(doc, { text: "repeat clients", known: ["referrals convert"] });
     expect(p).toContain("Ask: repeat clients");

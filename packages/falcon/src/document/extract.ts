@@ -15,6 +15,7 @@
 import { z } from "zod";
 import { fill } from "../study/claims.js";
 import { numbersQuoted, pageQuoted, words } from "../study/grounding.js";
+import { bodyOf } from "./body.js";
 import { addUsage, isCut, type Model, type Usage } from "./model.js";
 import { type Document, type Finding, Quality, type Verdict } from "./types.js";
 
@@ -208,7 +209,9 @@ function quoteEnd(text: string, quote: string, from: number): number {
  */
 export const claimExtractor: Extractor = {
   name: "claim",
-  async extract(doc, ask, model) {
+  async extract(whole, ask, model) {
+    // the reference list holds no finding: every part and quote comes from the body
+    const doc: Document = { ...whole, text: bodyOf(whole.text) };
     const findings: Finding[] = [];
     const dropped: Dropped[] = [];
     const known = [...(ask.known ?? [])];

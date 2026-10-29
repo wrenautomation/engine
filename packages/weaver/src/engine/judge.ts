@@ -5,7 +5,7 @@
  * check sends each finding the judge doubts to the model. A failed judge call writes its spend
  * and the step goes on; a refused key ends the pass.
  */
-import { contextOf } from "@wrenautomation/falcon/document";
+import { bodyOf, contextOf } from "@wrenautomation/falcon/document";
 import {
   choice,
   type EntryType,
@@ -104,24 +104,6 @@ export const RESERVED: ReadonlySet<string> = new Set([
 /** The ask's criteria as yes-or-no questions, by name. */
 export const criteriaQuestions = (criteria: readonly Criterion[] | undefined): Questions =>
   Object.fromEntries((criteria ?? []).map((c) => [c.name, noul(c.question)]));
-
-/** A heading line on its own: `## References`, `7 References`, `Appendix A More Results`. */
-const heading = (words: string, more = "") =>
-  new RegExp(`\\n(?:#+ *)?(?:\\d+\\.? +)?(?:${words})${more} *\\n`, "g");
-
-/**
- * The page without its reference list: from the last References or Bibliography heading to the
- * next Appendix heading, or to the end. A list of citations answers no criterion.
- */
-export function bodyOf(text: string): string {
-  const refs = [...text.matchAll(heading("References|Bibliography"))].at(-1);
-  if (refs?.index === undefined) return text;
-  const after = refs.index + refs[0].length;
-  const next = heading("Appendix", "\\b[^\\n]{0,80}");
-  next.lastIndex = after;
-  const app = next.exec(text);
-  return text.slice(0, refs.index) + (app ? text.slice(app.index) : "");
-}
 
 /** The body in judge-sized parts, each cut at a paragraph when one is near the limit. */
 export function chunksOf(text: string): string[] {
