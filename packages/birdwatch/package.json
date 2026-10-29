@@ -1,6 +1,6 @@
 {
   "name": "@wrenautomation/birdwatch",
-  "version": "0.29.0",
+  "version": "0.30.0",
   "description": "Research from the open web, driven by an agent one step per command: plan, search, triage, open, extract behind a quote gate, check, review, every record in a ledger. The agent decides; the engine runs the fixed steps. The ask and plan files, the document side (Document, Finding, Proof, the claim extractor), the sources (SearXNG, Exa, Google, arXiv, YouTube, Reddit, Facebook, the fetch ladder) and the ledger. One CLI, `birdwatch`, with the readers of @wrenautomation/read on it.",
   "license": "PolyForm-Strict-1.0.0",
   "repository": {

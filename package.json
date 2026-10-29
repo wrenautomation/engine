@@ -1,7 +1,7 @@
 {
   "name": "@wrenautomation/engine-workspace",
   "private": true,
-  "version": "0.29.0",
+  "version": "0.30.0",
   "type": "module",
   "description": "birdwatch, the research engine, on two primitives (models, read); and the map engine (orrery). One npm package each.",
   "license": "PolyForm-Strict-1.0.0",
