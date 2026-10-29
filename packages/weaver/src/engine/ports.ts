@@ -7,7 +7,7 @@
 import type { Document, Extractor } from "@wrenautomation/falcon/document";
 import type { Model } from "@wrenautomation/models";
 import type { Judge } from "@wrenautomation/models/judge";
-import type { HitViewIn, PlanFile, Proposal } from "@wrenautomation/raven";
+import type { Criterion, HitViewIn, PlanFile, Proposal } from "@wrenautomation/raven";
 import type { Ids } from "../ledger/ids.js";
 import type { Ledger } from "../ledger/ledger.js";
 import type { CostKind, FollowAs, From, HitRecord, QueryRecord } from "../ledger/records.js";
@@ -85,6 +85,8 @@ export interface RunOptions {
     known?: string[];
     /** What the ask takes as given; a known line with no source joins them. */
     premises?: string[];
+    /** The person's tests of a good source: the judge asks each on every hit and page. */
+    criteria?: Criterion[];
     /** What the person says at the start; `steer` records add to it between rounds. */
     steer?: string[];
     site?: string;

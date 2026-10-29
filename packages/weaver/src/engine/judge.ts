@@ -11,9 +11,11 @@ import {
   type EntryType,
   type Judged,
   noul,
+  type Probs,
   type Questions,
   top,
 } from "@wrenautomation/models/judge";
+import type { Criterion } from "@wrenautomation/raven";
 import {
   type DocumentRecord,
   type FindingRecord,
@@ -28,8 +30,14 @@ import type { StepContext } from "./steps.js";
 export const JUDGE_PARALLEL = 8;
 /** A finding the judge backs under this goes to the model's check. */
 export const DOUBT = 0.8;
-/** Characters of a page's start the judge reads for its class. */
-const HEAD = 4000;
+/**
+ * Characters per judge call on a page read whole. Jev takes about 32k tokens of state (a 30k
+ * paper went in, 43k came back `max_tokens_exceeded`); 64k characters stays under it at 2
+ * characters a token.
+ */
+export const CHUNK = 64_000;
+/** Calls per page at most: a longer page is judged on its first `CHUNK * CHUNKS` characters. */
+export const CHUNKS = 4;
 
 const CLASS = choice("What kind of source is this page?", {
   primary_data:
@@ -60,7 +68,8 @@ export const HIT_QUESTIONS = {
 
 /**
  * A trial (10-28): can Jev score a page's worth as a source before the extract reads it?
- * A hint only; `judgeStats.worth` measures it against what the extract kept.
+ * A hint only; `judgeStats.worth` measures it against what the extract kept. From 0.25.0 it
+ * reads the whole page, in chunks, not the first 4,000 characters.
  */
 export const DOCUMENT_QUESTIONS = {
   class: CLASS,
@@ -85,6 +94,68 @@ export const FINDING_QUESTIONS = {
   ),
 } satisfies Questions;
 
+/** The names the judge asks on its own: a criterion may not take one. */
+export const RESERVED: ReadonlySet<string> = new Set([
+  ...Object.keys(HIT_QUESTIONS),
+  ...Object.keys(DOCUMENT_QUESTIONS),
+  ...Object.keys(FINDING_QUESTIONS),
+]);
+
+/** The ask's criteria as yes-or-no questions, by name. */
+export const criteriaQuestions = (criteria: readonly Criterion[] | undefined): Questions =>
+  Object.fromEntries((criteria ?? []).map((c) => [c.name, noul(c.question)]));
+
+/** A heading line on its own: `## References`, `7 References`, `Appendix A More Results`. */
+const heading = (words: string, more = "") =>
+  new RegExp(`\\n(?:#+ *)?(?:\\d+\\.? +)?(?:${words})${more} *\\n`, "g");
+
+/**
+ * The page without its reference list: from the last References or Bibliography heading to the
+ * next Appendix heading, or to the end. A list of citations answers no criterion.
+ */
+export function bodyOf(text: string): string {
+  const refs = [...text.matchAll(heading("References|Bibliography"))].at(-1);
+  if (refs?.index === undefined) return text;
+  const after = refs.index + refs[0].length;
+  const next = heading("Appendix", "\\b[^\\n]{0,80}");
+  next.lastIndex = after;
+  const app = next.exec(text);
+  return text.slice(0, refs.index) + (app ? text.slice(app.index) : "");
+}
+
+/** The body in judge-sized parts, each cut at a paragraph when one is near the limit. */
+export function chunksOf(text: string): string[] {
+  const out: string[] = [];
+  let rest = bodyOf(text);
+  while (rest.trim() && out.length < CHUNKS) {
+    if (rest.length <= CHUNK) {
+      out.push(rest);
+      break;
+    }
+    const cut = rest.lastIndexOf("\n\n", CHUNK);
+    const at = cut > CHUNK * 0.8 ? cut : CHUNK;
+    out.push(rest.slice(0, at));
+    rest = rest.slice(at);
+  }
+  return out;
+}
+
+/**
+ * One record's answers from its parts: a yes-or-no question takes the part most sure of a yes
+ * (a result sits in one section); a pick takes the first part's (the page's start says its kind).
+ */
+export function mergeAnswers(parts: readonly Judged["answers"][]): Judged["answers"] {
+  const out: Record<string, Probs> = { ...parts[0] };
+  for (const part of parts.slice(1))
+    for (const [k, probs] of Object.entries(part)) {
+      const was = out[k];
+      if (!was) out[k] = probs;
+      else if (probs.yes !== undefined && was.yes !== undefined && probs.yes > was.yes)
+        out[k] = probs;
+    }
+  return out;
+}
+
 export interface Pass {
   judged: number;
   failed: number;
@@ -92,17 +163,32 @@ export interface Pass {
   stopped?: string;
 }
 
-/** One question set over many items, a few at a time; each answer a `judge` record. */
+/**
+ * One question set over many items, a few at a time; each item's answers one `judge` record.
+ * An item in parts (a long page) is asked part by part and written only when every part answered:
+ * a missing part would read as a no, so the next pass asks again.
+ */
 async function pass(
   ctx: StepContext,
-  items: readonly { on: string; about: string; state: EntryType }[],
+  items: readonly { on: string; about: string; states: readonly EntryType[] }[],
   questions: Questions,
 ): Promise<Pass> {
   const out: Pass = { judged: 0, failed: 0 };
   if (!ctx.deps.judge) return out;
+  const askAll = async (x: (typeof items)[number]) => {
+    const parts: Judged["answers"][] = [];
+    let model = "";
+    for (const state of x.states) {
+      const g = await ctx.judge(x.on, x.about, state, questions);
+      if ("failure" in g) return { failure: g.failure };
+      parts.push(g.answers as Judged["answers"]);
+      model = g.model;
+    }
+    return { answers: mergeAnswers(parts), model };
+  };
   for (let i = 0; i < items.length && !out.stopped; i += JUDGE_PARALLEL) {
     const batch = items.slice(i, i + JUDGE_PARALLEL);
-    const got = await Promise.all(batch.map((x) => ctx.judge(x.on, x.about, x.state, questions)));
+    const got = await Promise.all(batch.map(askAll));
     for (const [j, g] of got.entries()) {
       const item = batch[j] as (typeof batch)[number];
       if ("failure" in g) {
@@ -111,7 +197,7 @@ async function pass(
         continue;
       }
       await ctx.write(
-        { type: "judge", on: item.on, answers: g.answers as Judged["answers"] },
+        { type: "judge", on: item.on, answers: g.answers },
         { from: "ai", by: g.model },
       );
       out.judged++;
@@ -126,7 +212,7 @@ export const passNote = (p: Pass): string =>
     ? `; judge: ${p.judged} judged${p.failed ? `, ${p.failed} failed` : ""}${p.stopped ? ` (${p.stopped})` : ""}`
     : "";
 
-/** Uncalled hits with no answers yet: serves the ask, whose side, what class. */
+/** Uncalled hits with no answers yet: serves the ask, whose side, what class, each criterion. */
 export function judgeHits(ctx: StepContext, state: RunState): Promise<Pass> {
   const ask = state.snapshot?.ask.text ?? "";
   const whyOf = new Map(state.queries.map((q) => [q.id, q.why]));
@@ -135,26 +221,40 @@ export function judgeHits(ctx: StepContext, state: RunState): Promise<Pass> {
     .map((h) => ({
       on: h.id,
       about: h.url,
-      state: {
-        ask,
-        searched_for: [...new Set(h.queries.flatMap((q) => whyOf.get(q) ?? []))],
-        page: { url: h.url, title: h.title ?? "", snippet: h.snippet ?? "" },
-      },
+      states: [
+        {
+          ask,
+          searched_for: [...new Set(h.queries.flatMap((q) => whyOf.get(q) ?? []))],
+          page: { url: h.url, title: h.title ?? "", snippet: h.snippet ?? "" },
+        },
+      ],
     }));
-  return pass(ctx, items, HIT_QUESTIONS);
+  return pass(ctx, items, { ...HIT_QUESTIONS, ...criteriaQuestions(state.snapshot?.ask.criteria) });
 }
 
-/** Documents with no answers yet: their class and worth from the page's start. */
+/** Documents with no answers yet: class, worth and each criterion, read whole in parts. */
 export function judgeDocuments(ctx: StepContext, state: RunState): Promise<Pass> {
   const ask = state.snapshot?.ask.text ?? "";
   const items = state.documents
     .filter((d: DocumentRecord) => !state.judged.has(d.id) && d.text.trim())
-    .map((d) => ({
-      on: d.id,
-      about: d.url,
-      state: { ask, url: d.url, title: d.title ?? "", text: d.text.slice(0, HEAD) },
-    }));
-  return pass(ctx, items, DOCUMENT_QUESTIONS);
+    .map((d) => {
+      const parts = chunksOf(d.text);
+      return {
+        on: d.id,
+        about: d.url,
+        states: parts.map((text, i) => ({
+          ask,
+          url: d.url,
+          title: d.title ?? "",
+          ...(parts.length > 1 ? { part: `${i + 1} of ${parts.length}` } : {}),
+          text,
+        })),
+      };
+    });
+  return pass(ctx, items, {
+    ...DOCUMENT_QUESTIONS,
+    ...criteriaQuestions(state.snapshot?.ask.criteria),
+  });
 }
 
 /** Findings with a quote and no answers yet: does the quote back it, does it credit a source. */
@@ -172,7 +272,7 @@ export function judgeFindings(
       {
         on: f.id,
         about: f.text,
-        state: { sentence: f.text, quote, context: contextOf(d.text, quote) },
+        states: [{ sentence: f.text, quote, context: contextOf(d.text, quote) }],
       },
     ];
   });
@@ -250,7 +350,24 @@ export interface JudgeStats {
    * `under` is what a gate at a half would skip, and how many of those held a kept finding.
    */
   worth: { both: number; good: number; auc: number | null; under: number; underGood: number };
+  /**
+   * Each criterion against "a finding on the page was kept", on pages read for facts: asked on
+   * the hit (its snippet, an abstract) and on the page read whole. Which one ranks better says
+   * how far to trust it.
+   */
+  criteria: Record<string, { hits: Ranked; pages: Ranked }>;
 }
+
+/** A score's pairs and how well it ranks them. */
+export interface Ranked {
+  both: number;
+  auc: number | null;
+}
+
+const ranked = (pairs: readonly [number, boolean][]): Ranked => ({
+  both: pairs.length,
+  auc: aucOf(pairs),
+});
 
 /** What the judge did in a run and how often the deciders agreed with it. */
 export function judgeStats(state: RunState, judge: string | null): JudgeStats {
@@ -289,6 +406,22 @@ export function judgeStats(state: RunState, judge: string | null): JudgeStats {
     return yes === undefined ? [] : [[yes, keptOn.has(d)]];
   });
   const under = worth.filter(([p]) => p < 0.5);
+  const hitOf = new Map(state.documents.map((d) => [d.id, d.hit]));
+  const scored = (name: string, on: (d: string) => string | undefined) =>
+    [...extracted].flatMap((d): [number, boolean][] => {
+      const id = on(d);
+      const yes = id === undefined ? undefined : yesOf(state, id, name);
+      return yes === undefined ? [] : [[yes, keptOn.has(d)]];
+    });
+  const criteria = Object.fromEntries(
+    (state.snapshot?.ask.criteria ?? []).map((c) => [
+      c.name,
+      {
+        hits: ranked(scored(c.name, (d) => hitOf.get(d))),
+        pages: ranked(scored(c.name, (d) => d)),
+      },
+    ]),
+  );
   const doubted = [...lastCheck].filter(([on]) => (yesOf(state, on, "backs") ?? 1) < DOUBT);
   return {
     judge,
@@ -309,5 +442,6 @@ export function judgeStats(state: RunState, judge: string | null): JudgeStats {
       under: under.length,
       underGood: under.filter(([, y]) => y).length,
     },
+    criteria,
   };
 }

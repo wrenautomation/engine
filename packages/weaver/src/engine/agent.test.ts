@@ -3,6 +3,7 @@ import { fakeModel, type Model } from "@wrenautomation/models";
 import { fakeJudge } from "@wrenautomation/models/judge";
 import { defaultPlanFile } from "@wrenautomation/raven";
 import { describe, expect, it } from "vitest";
+import { criteriaOf } from "../app/engine-cli.js";
 import { countingIds } from "../ledger/ids.js";
 import { MemoryLedger } from "../ledger/memory.js";
 import {
@@ -936,6 +937,74 @@ describe("agent commands", () => {
       under: 2,
       underGood: 1,
     });
+  });
+
+  it("asks the criteria on hits and on a long page in parts; the brief ranks pages by them", async () => {
+    const long = `Method.\n\n${"words ".repeat(12_000)}\n\nWe report a 12% gain over the baseline.\n\nReferences\n[1] A cited paper.\n\nAppendix A Ablation\nThe ablation.`;
+    const both: Source = {
+      name: "both",
+      kind: "both",
+      cost: "free",
+      search: async () => [{ url: "https://c.example/long" }, { url: "https://a.example/one" }],
+      open: async (h) => ({
+        url: h.url,
+        media: "text",
+        text: h.url.endsWith("long") ? long : (pages[h.url] as string),
+      }),
+    };
+    const seen: { part?: string; text?: string; page?: unknown; asked: string[] }[] = [];
+    const judge = fakeJudge((state, questions) => {
+      const x = state as { part?: string; text?: string; page?: unknown };
+      seen.push({ ...x, asked: Object.keys(questions) });
+      return x.text?.includes("12% gain")
+        ? { gain: { yes: 0.9, no: 0.1 } }
+        : { gain: { yes: 0.2, no: 0.8 } };
+    });
+    const d = { ...deps(), judge, sources: registry(both) };
+    const { run: runId } = await planRound(d, {
+      ask: {
+        text: "what improves agent systems",
+        kind: "web",
+        criteria: [{ name: "gain", question: "Does it report a measured gain over a baseline?" }],
+      },
+      planFile: { ...planFile, sources: ["both"], budget: { ...planFile.budget, reads: 2 } },
+      model: "m",
+    });
+    await search(d, runId, [{ terms: "agents", why: "w" }], agent);
+    expect(seen.filter((s) => s.page).every((s) => s.asked.includes("gain"))).toBe(true);
+    await open(
+      d,
+      runId,
+      { urls: ["https://a.example/one", "https://c.example/long"], why: "w" },
+      agent,
+    );
+
+    // The long page: two parts, the reference list left out, the appendix kept; the best part's yes wins.
+    const parts = seen.filter((s) => s.part);
+    expect(parts.map((s) => s.part)).toEqual(["1 of 2", "2 of 2"]);
+    expect(parts.some((s) => s.text?.includes("A cited paper"))).toBe(false);
+    expect(parts.at(-1)?.text).toContain("The ablation.");
+    const b = await brief(d, runId);
+    expect(b.documents.toExtract.map((x) => [x.url, x.criteria?.gain])).toEqual([
+      ["https://c.example/long", 0.9],
+      ["https://a.example/one", 0.2],
+    ]);
+    const one = b.documents.toExtract[1]?.id as string;
+    await extract(d, runId, [one]);
+    expect((await brief(d, runId)).judge.criteria.gain).toEqual({
+      hits: { both: 1, auc: null },
+      pages: { both: 1, auc: null },
+    });
+  });
+
+  it("reads --criterion lines; a name the judge asks already, or twice, fails", () => {
+    expect(criteriaOf(["code = Is code released? Yes=public"])).toEqual([
+      { name: "code", question: "Is code released? Yes=public" },
+    ]);
+    expect(() => criteriaOf(["Code=x"])).toThrow("want name=question");
+    expect(() => criteriaOf(["no question"])).toThrow("want name=question");
+    expect(() => criteriaOf(["worth=x"])).toThrow("taken");
+    expect(() => criteriaOf(["a=x", "a=y"])).toThrow("taken");
   });
 
   it("an AUC: the share of good-over-bad pairs a score orders right, ties a half", () => {

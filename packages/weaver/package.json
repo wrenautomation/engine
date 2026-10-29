@@ -60,6 +60,7 @@
     "@wrenautomation/raven": "workspace:*",
     "commander": "15.0.0",
     "hono": "4.13.12",
+    "htmlparser2": "12.0.0",
     "minisearch": "7.2.0",
     "robots-parser": "3.0.1",
     "ulid": "3.0.2",

@@ -12,6 +12,7 @@ import { gateDrafts, type NumberedClaim } from "@wrenautomation/falcon/study";
 import { isTransient } from "@wrenautomation/models";
 import {
   type AskKind,
+  type Criterion,
   defaultPlanFile,
   type Edge,
   PlanFile,
@@ -152,6 +153,8 @@ export interface AskInput {
   known?: readonly string[];
   /** What the ask takes as given: the tree tests each in a `premise` facet. */
   premises?: readonly string[];
+  /** The person's tests of a good source: the judge asks each on every hit and page. */
+  criteria?: readonly Criterion[];
   site?: string;
 }
 
@@ -200,6 +203,7 @@ export async function planRound(deps: Deps, input: PlanInput): Promise<Did> {
     premises,
     steer: [...new Set([...(last?.steer ?? []), ...state.steers.map((s) => s.text)])],
     open,
+    criteria: [...(base.criteria ?? [])],
     ...(base.site ? { site: base.site } : {}),
   };
   const yieldRows = await deps.ledger.yield();
@@ -1083,7 +1087,7 @@ export type HitBrief = Omit<HitRecord, "type" | "run" | "step" | "at" | "from" |
    * The judge's hint: how likely it serves the ask, whose side wrote it, its class. The brief
    * lists hits by facets plus `serves`, most first. A hint: the agent calls each.
    */
-  judge?: { serves: number; side: string; class: string };
+  judge?: { serves: number; side: string; class: string; criteria?: Record<string, number> };
 };
 
 export interface Brief {
@@ -1161,8 +1165,11 @@ export interface Brief {
     total: number;
   };
   documents: {
-    /** `worth`: the judge's trial score, a hint only. */
-    toExtract: { id: string; url: string; worth?: number }[];
+    /**
+     * Best first by the judge: the mean of its criteria yeses when the ask has criteria, else
+     * `worth` (its trial score); pages it has not judged last. A hint only: the agent picks.
+     */
+    toExtract: { id: string; url: string; worth?: number; criteria?: Record<string, number> }[];
     /**
      * Documents with a kept finding and no class: class them before the patterns count. `guess`
      * is the judge's; `accept <run> class` takes every guess over a bar.
@@ -1177,6 +1184,21 @@ export interface Brief {
   judge: JudgeStats;
   cost: ReturnType<typeof costOf>;
 }
+
+const mean = (xs: readonly number[]) => xs.reduce((a, x) => a + x, 0) / xs.length;
+
+/** An uncalled hit's place in the brief: facets it serves, then the judge's serves and criteria. */
+const hitRank = (h: {
+  facets: string[];
+  judge?: { serves: number; criteria?: Record<string, number> };
+}) =>
+  h.facets.length +
+  (h.judge?.serves ?? 0) +
+  (h.judge?.criteria ? mean(Object.values(h.judge.criteria)) : 0);
+
+/** A page's place in the extract list: its criteria's mean, else worth; unjudged last. */
+const pageRank = (d: { worth?: number; criteria?: Record<string, number> }) =>
+  d.criteria ? mean(Object.values(d.criteria)) : (d.worth ?? -1);
 
 /** What raven's prompts see, as JSON: everything the agent needs to plan, triage, review and stop. */
 export async function brief(deps: Deps, run: string): Promise<Brief> {
@@ -1194,6 +1216,16 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
   const facetsOf = (hit: string) =>
     [...new Set([...(qOf.get(hit) ?? [])].flatMap((q) => facetOf.get(q) ?? []))].sort();
   const family = await runTree(deps, run);
+  const criteria = s?.ask.criteria ?? [];
+  const criteriaOf = (id: string): Record<string, number> | undefined => {
+    const out = Object.fromEntries(
+      criteria.flatMap((c) => {
+        const yes = yesOf(state, id, c.name);
+        return yes === undefined ? [] : [[c.name, yes]];
+      }),
+    );
+    return Object.keys(out).length ? out : undefined;
+  };
   const tree =
     s && state.queries.some((q) => q.round === round && q.facet)
       ? treeView(state, round, await guideOf(deps, s.ask))
@@ -1269,27 +1301,40 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
           const serves = yesOf(state, view.id, "serves");
           const side = pickOf(state, view.id, "side");
           const cls = pickOf(state, view.id, "class");
+          const met = criteriaOf(view.id);
           return {
             ...view,
             facets: facetsOf(view.id),
             ...(serves !== undefined
-              ? { judge: { serves, side: side?.pick ?? "", class: cls?.pick ?? "" } }
+              ? {
+                  judge: {
+                    serves,
+                    side: side?.pick ?? "",
+                    class: cls?.pick ?? "",
+                    ...(met ? { criteria: met } : {}),
+                  },
+                }
               : {}),
           };
         })
-        .sort(
-          (a, b) =>
-            b.facets.length + (b.judge?.serves ?? 0) - (a.facets.length + (a.judge?.serves ?? 0)),
-        ),
+        .sort((a, b) => hitRank(b) - hitRank(a)),
       toRead: unread(state).map(({ id, url }) => ({ id, url })),
       read: state.documents.length,
       total: state.hits.length,
     },
     documents: {
-      toExtract: unjudged(state).map(({ id, url }) => {
-        const worth = yesOf(state, id, "worth");
-        return { id, url, ...(worth !== undefined ? { worth } : {}) };
-      }),
+      toExtract: unjudged(state)
+        .map(({ id, url }) => {
+          const worth = yesOf(state, id, "worth");
+          const met = criteriaOf(id);
+          return {
+            id,
+            url,
+            ...(worth !== undefined ? { worth } : {}),
+            ...(met ? { criteria: met } : {}),
+          };
+        })
+        .sort((a, b) => pageRank(b) - pageRank(a)),
       unclassed: state.documents
         .filter(
           (d) =>

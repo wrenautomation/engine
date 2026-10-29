@@ -13,6 +13,16 @@ export type AskKind = z.infer<typeof AskKind>;
 export const From = z.enum(["ai", "human"]);
 export type From = z.infer<typeof From>;
 
+/**
+ * One yes-or-no test a good source passes, named: the judge answers it on every hit and every
+ * page read whole. A hint and a router, never a gate.
+ */
+export const Criterion = z.object({
+  name: z.string().regex(/^[a-z][a-z0-9_]*$/),
+  question: z.string().min(1),
+});
+export type Criterion = z.infer<typeof Criterion>;
+
 /** What someone wants to know, and what is known already. */
 export const Ask = z.object({
   text: z.string().min(1),
@@ -25,6 +35,8 @@ export const Ask = z.object({
   steer: z.array(z.string()).default([]),
   /** What the last round left open, one line each: its review's why, its gaps. The planner looks there first. */
   open: z.array(z.string()).default([]),
+  /** The person's tests of a good source; empty: none. */
+  criteria: z.array(Criterion).default([]),
   /** Only for kind `site`, or when a query must stay on one host. */
   site: z.string().optional(),
 });

@@ -22,6 +22,7 @@ import { type Judge, judgeFromSpec } from "@wrenautomation/models/judge";
 import { modelFromSpec } from "@wrenautomation/models/spec";
 import {
   type AskKind,
+  Criterion,
   defaultPlanFile,
   PLAN_KINDS,
   type PlanFile,
@@ -49,6 +50,7 @@ import {
   open,
   planRound,
   type QueryInput,
+  RESERVED,
   recall,
   registry,
   run,
@@ -73,6 +75,7 @@ import {
 } from "../ledger/index.js";
 import {
   accountsFrom,
+  arxivSource,
   exa,
   facebookSource,
   fetcherSource,
@@ -114,6 +117,24 @@ export function keys(printed: NodeJS.ProcessEnv, name: string): string[] {
     const k = printed[`${name}_${i}`];
     if (!k) break;
     out.push(k);
+  }
+  return out;
+}
+
+/** `name=question` lines as criteria; a name the judge already asks, or a repeat, fails. */
+export function criteriaOf(lines: readonly string[] | undefined): Criterion[] {
+  const out: Criterion[] = [];
+  for (const line of lines ?? []) {
+    const at = line.indexOf("=");
+    const c = Criterion.safeParse({
+      name: line.slice(0, at).trim(),
+      question: line.slice(at + 1).trim(),
+    });
+    if (at < 1 || !c.success)
+      throw new Error(`--criterion ${line}: want name=question, name in a-z0-9_`);
+    if (RESERVED.has(c.data.name) || out.some((x) => x.name === c.data.name))
+      throw new Error(`--criterion ${c.data.name}: the name is taken`);
+    out.push(c.data);
   }
   return out;
 }
@@ -165,9 +186,21 @@ export function sourcesHere(
       ...(geminiKeys.length ? { video: () => geminiVideo(geminiKeys) } : {}),
     }),
   );
-  if (printed.WEAVER_CONTACT)
+  if (printed.WEAVER_CONTACT) {
     out.push(fetcherSource({ fetcher: new PoliteFetcher(userAgent(printed.WEAVER_CONTACT)) }));
-  else warn("no WEAVER_CONTACT (an email address or URL for site operators): pages stay unopened");
+    const categories = (printed.WEAVER_ARXIV_CATEGORIES ?? "")
+      .split(",")
+      .map((c) => c.trim())
+      .filter(Boolean);
+    out.push(
+      arxivSource({
+        agent: userAgent(printed.WEAVER_CONTACT),
+        categories,
+        ...(printed.OPENALEX_API_KEY ? { openalexKey: printed.OPENALEX_API_KEY } : {}),
+      }),
+    );
+  } else
+    warn("no WEAVER_CONTACT (an email address or URL for site operators): pages stay unopened");
   const sites: LadderClient | null = printed.AUTOBROWSE_URL
     ? httpLadderClient({ url: printed.AUTOBROWSE_URL, token: printed.AUTOBROWSE_TOKEN ?? null })
     : printed.RESTATE_INGRESS_URL
@@ -352,6 +385,10 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       "--premise <line...>",
       "what the ask takes as given (a buyer, an offer, a price): the tree tests each",
     )
+    .option(
+      "--criterion <name=question...>",
+      'a yes-or-no test of a good source (code="Is code released?"): the judge asks it on every hit and every page read whole, a hint only',
+    )
     .option("--steer <line...>", "what you say to the model, first in every prompt")
     .option("--site <host>", "the site the ask is about")
     .option(
@@ -380,6 +417,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
           kind: string;
           known?: string[];
           premise?: string[];
+          criterion?: string[];
           steer?: string[];
           site?: string;
           sources?: string[];
@@ -432,6 +470,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
                   kind,
                   known: o.known ?? [],
                   premises: o.premise ?? [],
+                  criteria: criteriaOf(o.criterion),
                   steer: o.steer ?? [],
                   ...(o.site ? { site: o.site } : {}),
                 },
@@ -525,6 +564,10 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       "--premise <line...>",
       "what the ask takes as given (a buyer, an offer, a price): the tree tests each",
     )
+    .option(
+      "--criterion <name=question...>",
+      'a yes-or-no test of a good source (code="Is code released?"): the judge asks it on every hit and every page read whole, a hint only',
+    )
     .option("--site <host>", "the site the ask is about")
     .option(
       "--sources <name...>",
@@ -547,6 +590,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
             kind: string;
             known?: string[];
             premise?: string[];
+            criterion?: string[];
             site?: string;
             sources?: string[];
           },
@@ -567,6 +611,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
                     kind,
                     known: o.known ?? [],
                     premises: o.premise ?? [],
+                    criteria: criteriaOf(o.criterion),
                     ...(o.site ? { site: o.site } : {}),
                   },
                 }

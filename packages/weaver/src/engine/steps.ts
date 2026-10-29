@@ -212,7 +212,7 @@ export const planStep: StepFn = async (ctx, state) => {
   const { known, premises, open } = await planAsk(ctx.deps, state, ask, ctx.round, parent);
   const steer = [...new Set([...(ask.steer ?? []), ...state.steers.map((s) => s.text)])];
   const p = await plan({
-    ask: { ...ask, known, premises, steer, open },
+    ask: { ...ask, known, premises, steer, open, criteria: ask.criteria ?? [] },
     planFile,
     model: ctx.model,
     proposals: ctx.round === 1 ? (ctx.options.proposals ?? []) : [],

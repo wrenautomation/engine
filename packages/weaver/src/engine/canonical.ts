@@ -1,7 +1,8 @@
 /**
  * The canonical form of a URL: what dedupe compares. Host in lower case, no fragment, no
  * tracking parameters, no trailing slash, parameters sorted; a YouTube video in any of its forms
- * is `https://www.youtube.com/watch?v=<id>`.
+ * is `https://www.youtube.com/watch?v=<id>`; an arXiv paper's abstract, PDF or HTML page, any
+ * version, is `https://arxiv.org/abs/<id>`.
  */
 const TRACKING =
   /^(utm_\w+|fbclid|gclid|dclid|msclkid|mc_[ce]id|yclid|igshid|ref|ref_src|_hsenc|_hsmi|si|feature)$/i;
@@ -17,6 +18,18 @@ export function youtubeId(u: URL): string | null {
   return m?.[1] ?? null;
 }
 
+const ARXIV_HOSTS = new Set(["arxiv.org", "www.arxiv.org", "export.arxiv.org"]);
+
+/** An arXiv paper's id without its version (`2210.03629`, `cs/0112017`), or null. */
+export function arxivId(u: URL): string | null {
+  if (!ARXIV_HOSTS.has(u.hostname.toLowerCase())) return null;
+  const m =
+    /^\/(?:abs|pdf|html)\/((?:\d{4}\.\d{4,5})|(?:[a-z-]+(?:\.[A-Z]{2})?\/\d{7}))(?:v\d+)?(?:\.pdf)?\/?$/.exec(
+      u.pathname,
+    );
+  return m?.[1] ?? null;
+}
+
 export function canonical(url: string): string {
   let u: URL;
   try {
@@ -26,6 +39,8 @@ export function canonical(url: string): string {
   }
   const id = youtubeId(u);
   if (id) return `https://www.youtube.com/watch?v=${id}`;
+  const paper = arxivId(u);
+  if (paper) return `https://arxiv.org/abs/${paper}`;
   u.hash = "";
   u.hostname = u.hostname.toLowerCase();
   if ((u.protocol === "https:" && u.port === "443") || (u.protocol === "http:" && u.port === "80"))

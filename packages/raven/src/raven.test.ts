@@ -15,6 +15,7 @@ const ask: Ask = {
   premises: [],
   steer: [],
   open: [],
+  criteria: [],
 };
 
 describe("fill", () => {

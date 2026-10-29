@@ -1,9 +1,11 @@
 /**
- * The sources: one file each, registered by name. `searxng` and `exa` search the web, `youtube`
+ * The sources: one file each, registered by name. `searxng` and `exa` search the web, `arxiv`
+ * searches and reads papers, `youtube`
  * searches and reads videos, `fetcher` and `ladder` open pages, `reddit` and `facebook` read a
  * thread or a group post through the site's own route, `paste` is a person's list,
  * `ledger` is what earlier runs saw.
  */
+export * from "./arxiv.js";
 export * from "./exa.js";
 export * from "./fetcher.js";
 export * from "./google.js";

@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { canonical } from "../engine/canonical.js";
 import type { LadderClient } from "../fetch/ladder.js";
 import { MemoryLedger } from "../ledger/memory.js";
 import type { HitRecord, QueryRecord } from "../ledger/records.js";
 import {
+  arxivQuery,
+  arxivSource,
+  citedOf,
   entryHit,
   exa,
   fetcherSource,
@@ -230,6 +234,140 @@ describe("fetcher", () => {
     await expect(
       fetcherSource({ fetcher: opener(200, "x", "video/mp4") }).open?.(hit("https://d.example/v")),
     ).rejects.toThrow("fetcher: no reader for video");
+  });
+});
+
+describe("arxiv", () => {
+  it("matches an id inside a merged work, never a longer id", () => {
+    const rows = [
+      {
+        cited_by_count: 603,
+        ids: { doi: "https://doi.org/10.18653/v1/x" },
+        locations: [{ landing_page_url: "https://arxiv.org/abs/2210.03629v3" }],
+      },
+      { cited_by_count: 7, locations: [{ landing_page_url: "https://arxiv.org/abs/2210.036291" }] },
+      { ids: {}, locations: [{ landing_page_url: "https://arxiv.org/abs/2401.00001" }] },
+    ];
+    expect([...citedOf(rows, ["2210.03629", "2210.0362", "2401.00001"])]).toEqual([
+      ["2210.03629", 603],
+    ]);
+  });
+
+  const entry = (id: string, title: string, comment?: string) => `<entry>
+    <id>http://arxiv.org/abs/${id}v2</id>
+    <title>${title}
+      on two lines</title>
+    <summary>We report a 12% gain.</summary>
+    <published>2025-02-12T16:39:06Z</published>
+    ${comment ? `<arxiv:comment>${comment}</arxiv:comment>` : ""}
+    <author><name>Ann</name></author><author><name>Bo</name></author>
+    <author><name>Cy</name></author><author><name>Di</name></author>
+  </entry>`;
+  const feed = (total: number, entries: string[]) =>
+    `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/"><opensearch:totalResults>${total}</opensearch:totalResults>${entries.join("")}</feed>`;
+  const page = `<html><head><title>A paper</title></head><body><main><h1>A paper</h1><p>${"word ".repeat(80)}</p></main></body></html>`;
+
+  it("asks every word inside the categories, then tops up with any word", async () => {
+    expect(arxivQuery("How do multi-agent planners improve?", ["cs.AI", "cs.MA"])).toBe(
+      '(all:"multi-agent" AND all:"planners" AND all:"improve") AND (cat:cs.AI OR cat:cs.MA)',
+    );
+    expect(arxivQuery("agent planning", [], true)).toBe('all:"agent" OR all:"planning"');
+    expect(() => arxivQuery("how do")).toThrow("no words");
+    const asked: string[] = [];
+    const src = arxivSource({
+      agent: "weaver test",
+      categories: ["cs.AI"],
+      gapMs: 0,
+      fetchFn: async (input, init) => {
+        const url = String(input);
+        asked.push(
+          url.startsWith("https://export.arxiv.org")
+            ? (new URL(url).searchParams.get("search_query") ?? url)
+            : url,
+        );
+        if (url.includes("openalex"))
+          return json({
+            results: [
+              {
+                ids: { doi: "https://doi.org/10.18653/v1/2025.acl-main.1" },
+                cited_by_count: 120,
+                locations: [{ landing_page_url: "https://arxiv.org/abs/2502.08557v2" }],
+              },
+            ],
+          });
+        expect(new Headers(init?.headers).get("user-agent")).toBe("weaver test");
+        return new Response(
+          url.includes("+AND+all") || url.includes("%20AND%20all")
+            ? feed(0, [])
+            : feed(2, [
+                entry("2502.08557", "Agent planning", "ACL 2025. Code: https://github.com/x/y"),
+                entry("2503.01763", "Tool use"),
+              ]),
+        );
+      },
+    });
+    const hits = await src.search?.(query("agent planning"));
+    expect(asked.length).toBe(3);
+    expect(asked[1]).toBe('(all:"agent" OR all:"planning") AND (cat:cs.AI)');
+    expect(hits?.[0]).toEqual({
+      url: "https://arxiv.org/abs/2502.08557",
+      title: "Agent planning on two lines",
+      channel: "Ann, Bo, Cy et al.",
+      date: "2025-02-12",
+      snippet:
+        "Cited 120 times (OpenAlex). Comment: ACL 2025. Code: https://github.com/x/y Abstract: We report a 12% gain.",
+    });
+    expect(hits?.[1]?.snippet).toBe("Abstract: We report a 12% gain.");
+    expect(src.keeps?.("arxiv.org")).toBe(true);
+    expect(src.keeps?.("reddit.com")).toBe(false);
+  });
+
+  it("reads the HTML page, the PDF when there is none; every form of a paper's URL is one", async () => {
+    const asked: string[] = [];
+    const src = arxivSource({
+      agent: "weaver test",
+      gapMs: 0,
+      fetchFn: async (input) => {
+        const url = String(input);
+        asked.push(url);
+        if (url.includes("/html/2210.03629"))
+          return new Response(page, { headers: { "content-type": "text/html" } });
+        return new Response("no", { status: 404, headers: { "content-type": "text/html" } });
+      },
+    });
+    expect(src.opens?.("https://arxiv.org/pdf/2210.03629v3.pdf")).toBe(true);
+    expect(src.opens?.("https://arxiv.org/list/cs.AI")).toBe(false);
+    const doc = await src.open?.(hit("https://arxiv.org/pdf/2210.03629v3.pdf"));
+    expect(doc?.url).toBe("https://arxiv.org/html/2210.03629");
+    expect(doc?.text).toContain("word");
+    expect(asked).toEqual(["https://export.arxiv.org/html/2210.03629"]);
+    await expect(src.open?.(hit("https://arxiv.org/abs/1706.03762"))).rejects.toThrow(
+      "arxiv: HTTP 404",
+    );
+    expect(asked.slice(1)).toEqual([
+      "https://export.arxiv.org/html/1706.03762",
+      "https://export.arxiv.org/pdf/1706.03762",
+    ]);
+    expect(canonical("https://export.arxiv.org/html/2210.03629v2/")).toBe(
+      canonical("https://arxiv.org/pdf/2210.03629.pdf"),
+    );
+  });
+
+  it("keeps arXiv's 3 seconds between calls, one at a time", async () => {
+    const at: number[] = [];
+    const src = arxivSource({
+      agent: "weaver test",
+      gapMs: 50,
+      fetchFn: async () => {
+        at.push(Date.now());
+        return new Response(page, { headers: { "content-type": "text/html" } });
+      },
+    });
+    await Promise.all([
+      src.open?.(hit("https://arxiv.org/abs/2210.03629")),
+      src.open?.(hit("https://arxiv.org/abs/2210.03630")),
+    ]);
+    expect((at[1] as number) - (at[0] as number)).toBeGreaterThanOrEqual(45);
   });
 });
 

@@ -21,7 +21,7 @@ Three more doors run the research engine (wren's `designs/2026-10-26-research-en
 | Import | Does |
 |---|---|
 | `@wrenautomation/weaver/engine` | `Source` (a name, `search` and/or `open`, a cost), `registry` and the plan's allow-list; the agent's calls (`planRound`, `search`, `open`, `extract`, `check`, `add`, `accept`, `brief`), one step each; the judge's passes (`judgeHits`, `judgeDocuments`, `judgeFindings`, `judgeStats`); `run(deps, options)`: plan, fetch, triage, read, extract, check (a sample of findings against their documents), review, round after round until raven's edge says stop; `fold` rebuilds a run's state from its records, so a run resumes from the step it stopped on; `Transient`, the failure worth another try; raven's `Model`, `Ask`, `PlanFile` and record shapes re-exported, so a host pins weaver alone |
-| `@wrenautomation/weaver/sources` | `searxng`, `exa` (search), `youtube` (search and read, yt-dlp), `fetcher` (open, the polite fetcher), `ladder` (open, autobrowse's fetch ladder up to a browser), `reddit` and `facebook` (open a thread or a group post through autobrowse's site routes), `google` (Google's own page through the desk's browser: each result a hit, the AI Overview one hit with its text as the snippet, each page it cites a hit), `paste` (a person's URLs), `ledger` (hits earlier runs saw). A query with a `site` skips a searcher that cannot keep to it (`Source.keeps`: `youtube` keeps to YouTube only). A follow (`Source.follows`, `follow`) lists a page's author's posts (`youtube`: a channel's uploads, from a video or the channel, and a TikTok profile; `reddit`: a user's top posts and comments) or pages like it (`exa`: findSimilar) |
+| `@wrenautomation/weaver/sources` | `searxng`, `exa` (search), `youtube` (search and read, yt-dlp), `fetcher` (open, the polite fetcher), `ladder` (open, autobrowse's fetch ladder up to a browser), `reddit` and `facebook` (open a thread or a group post through autobrowse's site routes), `google` (Google's own page through the desk's browser: each result a hit, the AI Overview one hit with its text as the snippet, each page it cites a hit), `arxiv` (search and read: the API inside `WEAVER_ARXIV_CATEGORIES`, each hit led by its OpenAlex citation count and comment; the paper read whole from its HTML, else its PDF; one call per 3 s), `paste` (a person's URLs), `ledger` (hits earlier runs saw). A query with a `site` skips a searcher that cannot keep to it (`Source.keeps`: `youtube` keeps to YouTube only). A follow (`Source.follows`, `follow`) lists a page's author's posts (`youtube`: a channel's uploads, from a video or the channel, and a TikTok profile; `reddit`: a user's top posts and comments) or pages like it (`exa`: findSimilar) |
 | `@wrenautomation/weaver/ledger` | the records (`query`, `hit`, `document`, `finding`, `verdict`, `call`, `spend`, `snapshot`, `edge`, `done`, `steer`, `gap`, `check`, `pattern`, `found`, `judge`, `person`), `FilesLedger` (a folder: `runs/<run>/<writer>.jsonl`, `plans/<kind>.json`), `MemoryLedger`, yield rows per source, person, channel and kind |
 
 Every record carries `from` (ai, human or tool) and `by` (a model id, a source, a person). A
@@ -144,7 +144,7 @@ anthropic:sonnet|opus|id` for another), `--model gateway[:alias]` for Wren's LLM
 and prints the answer (`claude -p --output-format json` is Claude Code headless). Sources come
 from the environment: `SEARXNG_URL` (and `SEARXNG_TOKEN`, a bearer, for an instance behind a
 proxy), `EXA_API_KEY` (or `_1..n`), `GEMINI_API_KEY` for videos without captions,
-`WEAVER_CONTACT` for the fetcher (no contact, no page opens), and for the ladder either
+`WEAVER_CONTACT` for the fetcher and `arxiv` (no contact, no page opens; `OPENALEX_API_KEY`, free, gives `arxiv` its own citation budget; `--sources arxiv` names it, since no stock plan file does), and for the ladder either
 `AUTOBROWSE_URL` and `AUTOBROWSE_TOKEN` (a worker's HTTP face) or `RESTATE_INGRESS_URL` and
 `RESTATE_AUTH_TOKEN` (the Restate ingress a desk worker sits behind: `POST /desk/call`;
 `AUTOBROWSE_SERVICE` for another service name). The same worker gives the `reddit` and
@@ -249,6 +249,14 @@ check agreed with it. A trial (0.22.0): `open` also asks each page its `worth` (
 researcher cite it for the ask). `documents.toExtract[].worth` shows it; `brief.judge.worth`
 gives its AUC against "a finding on it was kept", and what a gate at a half would skip. Nothing
 gates on it yet.
+
+From 0.25.0 the judge reads a page whole: the body to its references (an appendix stays), in
+parts of 64,000 characters, 4 at most, each answer the most yes of any part. Jev's input is
+cheap (about $0.04 per million tokens), so a paper costs about a tenth of a cent. A run's
+criteria (`--criterion name="question"`, on `run` and `plan`) are the person's own yes-or-no
+tests of a good source: the judge asks each one on every hit and every page. Their mean sorts
+`hits.uncalled` and `documents.toExtract`; `brief.judge.criteria` gives each one's AUC against
+"a finding on it was kept", on hits and on pages. A sort and a hint, never a gate.
 
 A follow is a query record with `follow: {url, as, document?}` and terms `<as> of <url>`. The
 fetch step sends it to the sources whose `follows` takes it, `follow` lists up to 30, and the
