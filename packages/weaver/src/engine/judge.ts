@@ -348,8 +348,17 @@ export interface JudgeStats {
    * The worth trial: on documents read for facts (a verdict, a finding or a gap on it), its
    * worth score against "a finding on it was kept".
    * `under` is what a gate at a half would skip, and how many of those held a kept finding.
+   * `rich`: its AUC against the extract's verdict "rich", on pages with one (papers nearly all
+   * yield a finding, so the first label has no negatives there).
    */
-  worth: { both: number; good: number; auc: number | null; under: number; underGood: number };
+  worth: {
+    both: number;
+    good: number;
+    auc: number | null;
+    rich: number | null;
+    under: number;
+    underGood: number;
+  };
   /**
    * Each criterion against "a finding on the page was kept", on pages read for facts: asked on
    * the hit (its snippet, an abstract) and on the page read whole. Which one ranks better says
@@ -358,16 +367,12 @@ export interface JudgeStats {
   criteria: Record<string, { hits: Ranked; pages: Ranked }>;
 }
 
-/** A score's pairs and how well it ranks them. */
+/** A score's pairs and how well it ranks them: against a kept finding, and against a rich verdict. */
 export interface Ranked {
   both: number;
   auc: number | null;
+  rich: number | null;
 }
-
-const ranked = (pairs: readonly [number, boolean][]): Ranked => ({
-  both: pairs.length,
-  auc: aucOf(pairs),
-});
 
 /** What the judge did in a run and how often the deciders agreed with it. */
 export function judgeStats(state: RunState, judge: string | null): JudgeStats {
@@ -401,18 +406,25 @@ export function judgeStats(state: RunState, judge: string | null): JudgeStats {
     ...state.findings.map((f) => f.document),
     ...state.gaps.flatMap((g) => (g.on ? [g.on] : [])),
   ]);
-  const worth = [...extracted].flatMap((d): [number, boolean][] => {
-    const yes = yesOf(state, d, "worth");
-    return yes === undefined ? [] : [[yes, keptOn.has(d)]];
-  });
-  const under = worth.filter(([p]) => p < 0.5);
+  // the last verdict per page: a rerun extract replaces the first
+  const quality = new Map(state.verdicts.map((v) => [v.document, v.quality]));
   const hitOf = new Map(state.documents.map((d) => [d.id, d.hit]));
   const scored = (name: string, on: (d: string) => string | undefined) =>
-    [...extracted].flatMap((d): [number, boolean][] => {
+    [...extracted].flatMap((d): [number, string][] => {
       const id = on(d);
       const yes = id === undefined ? undefined : yesOf(state, id, name);
-      return yes === undefined ? [] : [[yes, keptOn.has(d)]];
+      return yes === undefined ? [] : [[yes, d]];
     });
+  const ranked = (pairs: readonly [number, string][]): Ranked => ({
+    both: pairs.length,
+    auc: aucOf(pairs.map(([p, d]) => [p, keptOn.has(d)])),
+    rich: aucOf(
+      pairs.flatMap(([p, d]) => (quality.has(d) ? [[p, quality.get(d) === "rich"]] : [])),
+    ),
+  });
+  const worthPairs = scored("worth", (d) => d);
+  const worth = worthPairs.map(([p, d]): [number, boolean] => [p, keptOn.has(d)]);
+  const under = worth.filter(([p]) => p < 0.5);
   const criteria = Object.fromEntries(
     (state.snapshot?.ask.criteria ?? []).map((c) => [
       c.name,
@@ -439,6 +451,7 @@ export function judgeStats(state: RunState, judge: string | null): JudgeStats {
       both: worth.length,
       good: worth.filter(([, y]) => y).length,
       auc: aucOf(worth),
+      rich: ranked(worthPairs).rich,
       under: under.length,
       underGood: under.filter(([, y]) => y).length,
     },

@@ -73,6 +73,13 @@ const model: Model = fakeModel((prompt) => {
         { text: "Half came from ads.", quote: "not on the page" },
       ],
     });
+  if (prompt.includes("12% gain"))
+    return JSON.stringify({
+      findings: [
+        { text: "The method gains 12% over the baseline.", quote: "We report a 12% gain" },
+      ],
+      quality: "rich",
+    });
   if (prompt.includes("weekly call"))
     return JSON.stringify({
       findings: [
@@ -922,7 +929,14 @@ describe("agent commands", () => {
 
     // The worth trial: both pages kept a finding; the low score on page four is a miss a gate would make.
     expect(b.documents.toExtract).toEqual([]);
-    expect(b.judge.worth).toEqual({ both: 2, good: 2, auc: null, under: 1, underGood: 1 });
+    expect(b.judge.worth).toEqual({
+      both: 2,
+      good: 2,
+      auc: null,
+      rich: null,
+      under: 1,
+      underGood: 1,
+    });
 
     // Read by hand with nothing to keep: a gap on the page labels it.
     await open(d, runId, { urls: ["https://a.example/two"], why: "w" }, agent);
@@ -934,6 +948,7 @@ describe("agent commands", () => {
       both: 3,
       good: 2,
       auc: 0.75,
+      rich: null,
       under: 2,
       underGood: 1,
     });
@@ -989,11 +1004,11 @@ describe("agent commands", () => {
       ["https://c.example/long", 0.9],
       ["https://a.example/one", 0.2],
     ]);
-    const one = b.documents.toExtract[1]?.id as string;
-    await extract(d, runId, [one]);
+    await extract(d, runId);
+    // Both pages kept a finding, so only the verdict ranks: the long page is rich, the other thin.
     expect((await brief(d, runId)).judge.criteria.gain).toEqual({
-      hits: { both: 1, auc: null },
-      pages: { both: 1, auc: null },
+      hits: { both: 2, auc: null, rich: 0.5 },
+      pages: { both: 2, auc: null, rich: 1 },
     });
   });
 
