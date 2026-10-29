@@ -130,6 +130,9 @@ const tokens = (u: Usage | undefined): Omit<Extract<Outcome, { ok: true }>, "ok"
     : {}),
 });
 
+/** The steps that decide what comes next: the decider's. The bulk (extract, check) is the model's. */
+const DECIDES = new Set<Step>(["plan", "triage", "review"]);
+
 /** The step context: `write` fills the envelope, `invoke` and `modelOn` write every spend. The agent commands build one per call. */
 export function context(
   deps: Deps,
@@ -222,7 +225,7 @@ export function context(
   };
   // Every call writes a spend, a repair's too: the wrap is on `complete`, and `ask` is built over it.
   const modelOn = (on?: string): Model | null => {
-    const m = deps.model;
+    const m = deps.model && ((DECIDES.has(step) && deps.decider) || deps.model);
     if (!m) return null;
     return modelOf({
       id: m.id,

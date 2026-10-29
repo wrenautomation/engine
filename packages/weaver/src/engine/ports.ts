@@ -66,6 +66,8 @@ export interface Deps {
   ledger: Ledger;
   /** null: no model. The plan is the proposals given; every hit is read; nothing is extracted. */
   model: Model | null;
+  /** The steps that decide what comes next (plan, triage, review) take it; absent: `model`. */
+  decider?: Model | null;
   extractor: Extractor;
   /** Cheap typed answers on every hit, page and finding: a hint and a router. Absent or null: none. */
   judge?: Judge | null;

@@ -593,7 +593,7 @@ describe("gaps, checks and age", () => {
       )[q.terms]?.map((url) => ({ url })) ?? [],
   };
   /** Answers by the prompt's kind, so parallel calls need no order. */
-  const routed = (prompts: string[], review: object = { next: "stop", why: "enough" }) =>
+  const routed = (prompts: string[], review: object = { next: "stop", why: "enough" }, id = "m") =>
     fakeModel((p) => {
       prompts.push(p);
       const a = p.startsWith("You plan")
@@ -632,7 +632,26 @@ describe("gaps, checks and age", () => {
                   ? { ok: false, why: "cheaper is not half" }
                   : review;
       return JSON.stringify(a);
-    }, "m");
+    }, id);
+
+  it("gives the decider plan, triage and review; the model extract and check", async () => {
+    const bulk: string[] = [];
+    const decided: string[] = [];
+    const d: Deps = {
+      ...deps(routed(bulk)),
+      decider: routed(decided, undefined, "sonnet"),
+      sources: registry(search, dated),
+    };
+    const out = await run(d, {
+      ask: { text: "repeat clients", kind: "web" },
+      planFile: { ...planFile, sources: ["fake", "dated"] },
+    });
+    const kinds = (ps: string[]) => [...new Set(ps.map((p) => p.split(" ").slice(0, 2).join(" ")))];
+    expect(kinds(decided).sort()).toEqual(["You decide", "You plan"]);
+    expect(kinds(bulk)).toEqual(["You pull"]);
+    const by = new Set(out.state.spends.filter((s) => s.op === "ask").map((s) => s.source));
+    expect([...by].sort()).toEqual(["m", "sonnet"]);
+  });
 
   it("shows the triage the person's tests and the judge's odds on each hit", async () => {
     const prompts: string[] = [];

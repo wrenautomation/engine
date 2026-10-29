@@ -255,6 +255,7 @@ const progress = (e: StepEvent) =>
 /** The options a command that runs sources or a model takes. */
 interface Machine {
   model: string | false;
+  decider?: string;
   judge: string | false;
   ytDlp: string;
 }
@@ -308,6 +309,11 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       )
       .option("--no-model", "no model: nothing extracted or checked")
       .option(
+        "--decider <spec>",
+        "the model for the steps that decide what comes next (plan, triage, review); default: anthropic:sonnet when --model is Haiku, else --model",
+        process.env.WEAVER_DECIDER,
+      )
+      .option(
         "--judge <spec>",
         "cheap typed answers on every hit, page and finding (a hint and a router): jev[:model], fake, off",
         process.env.WEAVER_JUDGE ?? (process.env.TYPESAFE_API_KEY ? "jev" : "off"),
@@ -322,16 +328,30 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
         "the record is the person's word, relayed: from human, by their name (default: the writer)",
       );
   /** The ledger, this machine's sources and the model, from the options. */
-  const setup = (o: Common & Machine) => {
+  const setup = (
+    o: Common & Machine,
+  ): {
+    ledger: ReturnType<typeof ledgerOf>;
+    sources: Sources;
+    model: Model | null;
+    judge: Judge | null;
+    decider?: Model;
+  } => {
     const ledger = ledgerOf(o);
     const sources = deps.sources
       ? deps.sources(o, ledger)
       : sourcesHere(process.env, ledger as FilesLedger, o.ytDlp);
     const model: Model | null =
       o.model === false ? null : (deps.model ?? modelFromSpec)(o.model, process.env);
+    // Haiku restates, Sonnet decides: a few cents a run.
+    const deciderSpec =
+      o.decider ??
+      (o.model === "anthropic" || o.model === "anthropic:haiku" ? "anthropic:sonnet" : null);
+    const decider: Model | null =
+      model && deciderSpec ? (deps.model ?? modelFromSpec)(deciderSpec, process.env) : null;
     const judge: Judge | null =
       o.judge === false ? null : (deps.judge ?? judgeFromSpec)(o.judge, process.env);
-    return { ledger, sources, model, judge };
+    return { ledger, sources, model, judge, ...(decider ? { decider } : {}) };
   };
   /**
    * The ledger's tuned plan file for the kind (the stock one when none), its sources the run's

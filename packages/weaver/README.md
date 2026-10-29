@@ -141,7 +141,9 @@ npx weaver serve --port 4747                                                   #
 The model is `anthropic` by default (Claude Haiku direct, `ANTHROPIC_API_KEY`; `--model
 anthropic:sonnet|opus|id` for another), `--model gateway[:alias]` for Wren's LLM gateway
 (`WREN_LLM_GATEWAY_URL`, `WREN_LLM_GATEWAY_TOKEN`), or any command that reads a prompt on stdin
-and prints the answer (`claude -p --output-format json` is Claude Code headless). Sources come
+and prints the answer (`claude -p --output-format json` is Claude Code headless). The model does
+the bulk (extract, check); `--decider <spec>` (`WEAVER_DECIDER`) takes the steps that decide what
+comes next (plan, triage, review): `anthropic:sonnet` when the model is Haiku, else the model. Sources come
 from the environment: `SEARXNG_URL` (and `SEARXNG_TOKEN`, a bearer, for an instance behind a
 proxy), `EXA_API_KEY` (or `_1..n`), `GEMINI_API_KEY` for videos without captions,
 `WEAVER_CONTACT` for the fetcher and `arxiv` (no contact, no page opens; `OPENALEX_API_KEY`, free, gives `arxiv` its own citation budget, and `SEMANTIC_SCHOLAR_API_KEY`, free, its own rate for `--as refs`; `--sources arxiv` names it, since no stock plan file does), and for the ladder either
