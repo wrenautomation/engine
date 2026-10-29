@@ -1,6 +1,6 @@
 {
   "name": "@wrenautomation/falcon",
-  "version": "0.25.0",
+  "version": "0.26.0",
   "description": "Files, markup and media in; text and quoted facts out. HTML and PDF to text, a page to title, text and links, video watching with ffmpeg and a vision model, captions and audio to markdown, a study's synthesis reader whose every claim quotes a page, and the research engine's document side: Document, Finding, Proof and Verdict, readers by media, the claim extractor with its verdict on each document. Fetching is weaver's.",
   "repository": {
     "type": "git",
