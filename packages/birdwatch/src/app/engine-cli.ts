@@ -50,15 +50,6 @@ import {
   type Who,
 } from "../engine/index.js";
 import {
-  FilesLedger,
-  FollowAs,
-  type Ledger,
-  type Problem,
-  SOURCE_CLASSES,
-  SourceClass,
-  ulids,
-} from "../ledger/index.js";
-import {
   type AskKind,
   Criterion,
   defaultPlanFile,
@@ -69,6 +60,15 @@ import {
   treeOf,
 } from "../engine/plan.js";
 import { Step as PlanStep } from "../engine/types.js";
+import {
+  FilesLedger,
+  FollowAs,
+  type Ledger,
+  type Problem,
+  SOURCE_CLASSES,
+  SourceClass,
+  ulids,
+} from "../ledger/index.js";
 import {
   accountsFrom,
   arxivSource,
@@ -87,6 +87,7 @@ import {
 import { SERVE_ORIGINS, SERVE_PORT, serveApp, watchRuns } from "./serve.js";
 
 const DEFAULT_MODEL = "anthropic";
+
 export { costOf };
 
 /** `NAME`, then `NAME_1`, `NAME_2`, ... in order: a fleet of keys for one vendor. */
@@ -786,7 +787,10 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     .option("--rounds <n>", "rounds a run should take: a guard rail", Number)
     .option("--checks <n>", "findings checked per round", Number)
     .option("--age <sentence>", "how much a source's age counts")
-    .option("--rule <line...>", "the rules the agent heeds for this kind, one line each: replaces them all")
+    .option(
+      "--rule <line...>",
+      "the rules the agent heeds for this kind, one line each: replaces them all",
+    )
     .option("--thin <n>", "new hits under which a tree's try is thin, so the next try runs", Number)
     .option("--tree <file>", "the query tree's guide, as JSON {facets: [{name, why}], thin}")
     .action(

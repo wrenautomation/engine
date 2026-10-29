@@ -21,26 +21,11 @@ import type {
   Step,
 } from "../ledger/records.js";
 import { canonical } from "./canonical.js";
-import { HitView, type HitViewIn } from "./types.js";
 import { DOUBT, judgeDocuments, judgeFindings, judgeHits, passNote, yesOf } from "./judge.js";
 import { type Deps, FOLLOW_N, pick, type Source, searchersFor } from "./ports.js";
-import {
-  fold,
-  found,
-  kept,
-  type RunState,
-  toExtract,
-  toRead,
-  uncalledHits,
-} from "./state.js";
-import {
-  fromChildren,
-  fromSiblings,
-  linkTo,
-  type Parent,
-  treeReadsOf,
-  treeRoom,
-} from "./tree.js";
+import { fold, found, kept, type RunState } from "./state.js";
+import { fromChildren, fromSiblings, type Parent, treeRoom } from "./tree.js";
+import { HitView, type HitViewIn } from "./types.js";
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 

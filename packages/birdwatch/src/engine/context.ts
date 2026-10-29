@@ -4,7 +4,14 @@
  * a `Transient` is tried again with a pause, three tries in all, every attempt on record. A model
  * answer the output cap cut (models' `Cut`) is a spend that worked, with its tokens.
  */
-import { isCut, isTransient, type Model, modelOf, promptText, type Usage } from "@wrenautomation/models";
+import {
+  isCut,
+  isTransient,
+  type Model,
+  modelOf,
+  promptText,
+  type Usage,
+} from "@wrenautomation/models";
 import { judgeFailure } from "@wrenautomation/models/judge";
 import { LedgerRecord, type Step } from "../ledger/records.js";
 import type { Deps, Source } from "./ports.js";
@@ -43,12 +50,7 @@ const tokens = (u: Usage | undefined): Omit<Extract<Outcome, { ok: true }>, "ok"
 });
 
 /** The step context: `write` fills the envelope, `invoke` and `modelOn` write every spend. */
-export function context(
-  deps: Deps,
-  run: string,
-  round: number,
-  step: Step,
-): StepContext {
+export function context(deps: Deps, run: string, round: number, step: Step): StepContext {
   const sleep = deps.sleep ?? defaultSleep;
   const write: StepContext["write"] = async (record, who) => {
     const id = deps.ids();

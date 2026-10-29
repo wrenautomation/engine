@@ -5,7 +5,6 @@ import { criteriaOf } from "../app/engine-cli.js";
 import { claimExtractor } from "../document/index.js";
 import { countingIds } from "../ledger/ids.js";
 import { MemoryLedger } from "../ledger/memory.js";
-import { defaultPlanFile } from "./plan.js";
 import {
   accept,
   add,
@@ -21,6 +20,7 @@ import {
   type Who,
 } from "./agent.js";
 import { aucOf } from "./judge.js";
+import { defaultPlanFile } from "./plan.js";
 import { type Deps, registry, type Source } from "./ports.js";
 import { recall } from "./recall.js";
 import { checkCount, classesOf, echoOf, fold, type RunState, sourcesOf } from "./state.js";

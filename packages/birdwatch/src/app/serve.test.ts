@@ -2,11 +2,11 @@ import { fakeModel } from "@wrenautomation/models";
 import { describe, expect, it } from "vitest";
 import { claimExtractor } from "../document/index.js";
 import { add, open, planRound, search, type Who } from "../engine/agent.js";
+import { defaultPlanFile } from "../engine/plan.js";
 import { type Deps, registry, type Source } from "../engine/ports.js";
 import type { RunRow, RunView } from "../engine/view.js";
 import { countingIds } from "../ledger/ids.js";
 import { MemoryLedger } from "../ledger/memory.js";
-import { defaultPlanFile } from "../engine/plan.js";
 import { type Changes, serveApp } from "./serve.js";
 
 const fake: Source = {

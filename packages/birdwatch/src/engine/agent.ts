@@ -22,20 +22,8 @@ import {
   type SourceClass,
   type Step,
 } from "../ledger/records.js";
-import {
-  ageOf,
-  type AskKind,
-  type Criterion,
-  defaultPlanFile,
-  type Edge,
-  PlanFile,
-  QueryTree,
-  type TreeGuide,
-  rulesOf,
-  treeOf,
-  type YieldRow,
-} from "./plan.js";
 import { canonical } from "./canonical.js";
+import { context } from "./context.js";
 import { costOf } from "./cost.js";
 import { classGuess, type JudgeStats, judgeStats, pickOf, yesOf } from "./judge.js";
 import {
@@ -45,8 +33,20 @@ import {
   type Unfollowed,
   unfollowedOf,
 } from "./people.js";
+import {
+  type AskKind,
+  ageOf,
+  type Criterion,
+  defaultPlanFile,
+  type Edge,
+  PlanFile,
+  QueryTree,
+  rulesOf,
+  type TreeGuide,
+  treeOf,
+  type YieldRow,
+} from "./plan.js";
 import type { Deps } from "./ports.js";
-import { context } from "./context.js";
 import {
   checkCount,
   classesOf,
