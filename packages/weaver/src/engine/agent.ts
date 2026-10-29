@@ -1151,7 +1151,7 @@ export interface Brief {
   dead: { facet: string; why: string }[];
   /** People across platforms, most kept findings first. */
   people: PersonView[];
-  /** Kept pages no follow started from and no person owns: `follow` their author's posts or pages like them. */
+  /** Kept pages no follow started from and no person owns: `follow` their author's posts or pages like them; a paper's refs or citers. */
   unfollowed: Unfollowed[];
   /** The latest rough draft, or null: never the final. */
   draft: { id: string; round: number; for: string; items: DraftRecord["items"] } | null;

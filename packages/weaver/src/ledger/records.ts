@@ -71,7 +71,7 @@ export const Envelope = z.object({
 export type Envelope = z.infer<typeof Envelope>;
 
 /** What a follow lists from a page: its channel's or author's own posts, or pages like it. */
-export const FOLLOW_AS = ["posts", "similar"] as const;
+export const FOLLOW_AS = ["posts", "similar", "refs", "citers"] as const;
 export const FollowAs = z.enum(FOLLOW_AS);
 export type FollowAs = z.infer<typeof FollowAs>;
 

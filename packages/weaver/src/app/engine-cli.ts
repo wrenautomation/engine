@@ -197,6 +197,7 @@ export function sourcesHere(
         agent: userAgent(printed.WEAVER_CONTACT),
         categories,
         ...(printed.OPENALEX_API_KEY ? { openalexKey: printed.OPENALEX_API_KEY } : {}),
+        ...(printed.SEMANTIC_SCHOLAR_API_KEY ? { s2Key: printed.SEMANTIC_SCHOLAR_API_KEY } : {}),
       }),
     );
   } else
@@ -716,9 +717,9 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
 
   agent(machine(common(program.command("follow <run> [url]"))))
     .description(
-      `what a person does after a good page: --as posts (its channel's or author's own posts: a YouTube channel or video, a TikTok profile, a Reddit user) or similar (pages like it); the hits go through the same calls and reads.`,
+      `what a person does after a good page: --as posts (its channel's or author's own posts: a YouTube channel or video, a TikTok profile, a Reddit user), similar (pages like it), refs (what a paper cites) or citers (what cites it, most cited first); the hits go through the same calls and reads.`,
     )
-    .requiredOption("--as <as>", "posts or similar")
+    .requiredOption("--as <as>", "posts, similar, refs or citers")
     .requiredOption("--why <why>", "why this page's neighbors may answer the ask")
     .option("--from <document>", "the read page that led here (its URL when no url is given)")
     .option("--with <source...>", "follow sources this machine has that the run's allow-list lacks")

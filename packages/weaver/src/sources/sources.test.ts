@@ -4,6 +4,7 @@ import type { LadderClient } from "../fetch/ladder.js";
 import { MemoryLedger } from "../ledger/memory.js";
 import type { HitRecord, QueryRecord } from "../ledger/records.js";
 import {
+  abstractOf,
   arxivQuery,
   arxivSource,
   citedOf,
@@ -251,6 +252,134 @@ describe("arxiv", () => {
     expect([...citedOf(rows, ["2210.03629", "2210.0362", "2401.00001"])]).toEqual([
       ["2210.03629", 603],
     ]);
+  });
+
+  it("follows what a paper cites (Semantic Scholar) and what cites it (OpenAlex)", async () => {
+    expect(abstractOf({ gain: [2], We: [0], report: [1] })).toBe("We report gain");
+    const asked: string[] = [];
+    const src = arxivSource({
+      agent: "weaver test",
+      gapMs: 0,
+      s2Key: "k2",
+      fetchFn: async (input, init) => {
+        const url = String(input);
+        asked.push(url);
+        if (url.startsWith("https://api.semanticscholar.org")) {
+          expect(new Headers(init?.headers).get("x-api-key")).toBe("k2");
+          return json({
+            data: [
+              { citedPaper: { title: "Rare", citationCount: 3, externalIds: { DOI: "10.1/r" } } },
+              {
+                isInfluential: true,
+                citedPaper: {
+                  paperId: "abc",
+                  title: "WebShop",
+                  citationCount: 40,
+                  externalIds: {},
+                },
+              },
+              {
+                citedPaper: {
+                  title: "Chain of thought",
+                  citationCount: 900,
+                  externalIds: { ArXiv: "2201.11903" },
+                  year: 2022,
+                  authors: [{ name: "Jason Wei" }],
+                  abstract: "Prompting with steps.",
+                },
+              },
+              { citedPaper: { title: null } },
+            ],
+          });
+        }
+        const filter = new URL(url).searchParams.get("filter");
+        if (filter?.startsWith("doi:"))
+          return json({
+            results: [
+              { id: "https://openalex.org/W9", locations: [{ landing_page_url: "x/2210.036291" }] },
+              {
+                id: "https://openalex.org/W1",
+                ids: { doi: "https://doi.org/10.48550/arxiv.2210.03629" },
+              },
+            ],
+          });
+        return json({
+          results: [
+            {
+              display_name: "Agents survey",
+              cited_by_count: 965,
+              publication_date: "2025-01-17",
+              ids: { doi: "https://doi.org/10.1007/s1" },
+              locations: [
+                { landing_page_url: "https://doi.org/10.1007/s1" },
+                { landing_page_url: "http://arxiv.org/abs/2309.07864" },
+              ],
+              authorships: [{ author: { display_name: "Zhiheng Xi" } }],
+              abstract_inverted_index: { Agents: [0], act: [1] },
+            },
+            { display_name: "No arXiv copy", ids: { doi: "https://doi.org/10.1038/n1" } },
+          ],
+        });
+      },
+    });
+    const paper = "https://arxiv.org/html/2210.03629";
+    expect(src.follows?.("refs", paper)).toBe(true);
+    expect(src.follows?.("citers", "https://arxiv.org/abs/2210.03629v3")).toBe(true);
+    expect(src.follows?.("posts", paper)).toBe(false);
+    expect(src.follows?.("refs", "https://example.com/a")).toBe(false);
+
+    // What the paper leans on first, then most cited; the arXiv page when it has one, else the DOI.
+    const refs = await src.follow?.("refs", paper, 5);
+    expect(refs?.[0]).toEqual({
+      url: "https://www.semanticscholar.org/paper/abc",
+      title: "WebShop",
+      snippet: "The paper leans on it. Cited 40 times (Semantic Scholar).",
+    });
+    expect(refs?.slice(1)).toEqual([
+      {
+        url: "https://arxiv.org/abs/2201.11903",
+        title: "Chain of thought",
+        channel: "Jason Wei",
+        date: "2022",
+        snippet: "Cited 900 times (Semantic Scholar). Abstract: Prompting with steps.",
+      },
+      {
+        url: "https://doi.org/10.1/r",
+        title: "Rare",
+        snippet: "Cited 3 times (Semantic Scholar).",
+      },
+    ]);
+    expect(asked[0]).toContain("/paper/arXiv:2210.03629/references?");
+
+    expect(await src.follow?.("citers", paper, 5)).toEqual([
+      {
+        url: "https://arxiv.org/abs/2309.07864",
+        title: "Agents survey",
+        channel: "Zhiheng Xi",
+        date: "2025-01-17",
+        snippet: "Cited 965 times (OpenAlex). Abstract: Agents act",
+      },
+      { url: "https://doi.org/10.1038/n1", title: "No arXiv copy" },
+    ]);
+    // The work is the row naming the id, never a longer one.
+    const cites = new URL(asked.at(-1) as string).searchParams;
+    expect(cites.get("filter")).toBe("cites:W1");
+    expect(cites.get("sort")).toBe("cited_by_count:desc");
+    expect(cites.get("per_page")).toBe("5");
+  });
+
+  it("throws on a refused follow: a spent budget is a gap, not an empty list", async () => {
+    const src = arxivSource({
+      agent: "weaver test",
+      gapMs: 0,
+      fetchFn: async () => new Response("slow down", { status: 429 }),
+    });
+    await expect(src.follow?.("refs", "https://arxiv.org/abs/2210.03629", 5)).rejects.toThrow(
+      "semanticscholar: HTTP 429",
+    );
+    await expect(src.follow?.("citers", "https://arxiv.org/abs/2210.03629", 5)).rejects.toThrow(
+      "openalex: HTTP 429",
+    );
   });
 
   const entry = (id: string, title: string, comment?: string) => `<entry>

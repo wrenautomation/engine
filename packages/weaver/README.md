@@ -78,7 +78,7 @@ weaver add edge 01M5YS... again --why "thin on the UK"                          
 weaver plan --run 01M5YS...                         # round 2: known, steer and what round 1 left open, in its snapshot
 weaver plan "coaches: who pays for setters" --parent 01M5YS... --why "the best niche of round 1"   # a child run
 weaver add dead 01M5YT... spend --why "found consumers, not buyers"   # later tries skip the facet
-weaver follow 01M5YS... --from 01M5YV... --as posts --why "the speaker's other talks"   # the author's own posts; --as similar: pages like it
+weaver follow 01M5YS... --from 01M5YV... --as posts --why "the speaker's other talks"   # the author's own posts; --as similar: pages like it; a paper: --as refs (what it cites) or citers (what cites it)
 weaver add person 01M5YS... "Bee Speaker" --profile https://www.youtube.com/@bee --aka Bee --why "one speaker"   # one person across sites
 weaver learn web --sources searxng exa --rounds 4   # the plan file's next version, after a good run
 weaver learn web --thin 2                           # the tree's guide: a try under 2 new hits falls through
@@ -144,7 +144,7 @@ anthropic:sonnet|opus|id` for another), `--model gateway[:alias]` for Wren's LLM
 and prints the answer (`claude -p --output-format json` is Claude Code headless). Sources come
 from the environment: `SEARXNG_URL` (and `SEARXNG_TOKEN`, a bearer, for an instance behind a
 proxy), `EXA_API_KEY` (or `_1..n`), `GEMINI_API_KEY` for videos without captions,
-`WEAVER_CONTACT` for the fetcher and `arxiv` (no contact, no page opens; `OPENALEX_API_KEY`, free, gives `arxiv` its own citation budget; `--sources arxiv` names it, since no stock plan file does), and for the ladder either
+`WEAVER_CONTACT` for the fetcher and `arxiv` (no contact, no page opens; `OPENALEX_API_KEY`, free, gives `arxiv` its own citation budget, and `SEMANTIC_SCHOLAR_API_KEY`, free, its own rate for `--as refs`; `--sources arxiv` names it, since no stock plan file does), and for the ladder either
 `AUTOBROWSE_URL` and `AUTOBROWSE_TOKEN` (a worker's HTTP face) or `RESTATE_INGRESS_URL` and
 `RESTATE_AUTH_TOKEN` (the Restate ingress a desk worker sits behind: `POST /desk/call`;
 `AUTOBROWSE_SERVICE` for another service name). The same worker gives the `reddit` and

@@ -50,7 +50,7 @@ echo '[{"title":"..","body":"..","cites":["<pattern or finding>"]}]' | weaver ad
 weaver plan --run <run>                              # after again: the next round
 weaver plan "<one niche>" --parent <run> --why "<why this child>"   # a child run: it reads what the tree found
 weaver add dead <run> <facet> --why "<why>"          # give up on a facet; later tries skip it
-weaver follow <run> [<url>] --as posts|similar [--from <document>] --why "<why>" [--with <source>...]   # a good page's author's posts, or pages like it
+weaver follow <run> [<url>] --as posts|similar|refs|citers [--from <document>] --why "<why>" [--with <source>...]   # a good page's author's posts, or pages like it
 weaver add person <run> "<name>" [--profile <url>...] [--aka <name>...] --why "<why>"   # one person across sites
 weaver learn <kind> [--sources ...] [--rounds N] [--age "..."]   # after a good run, on the person's yes
 ```
@@ -133,7 +133,9 @@ records show done.
    **Follow.** Signals cluster in people. After a page that gave kept findings, do what a person
    does: `follow --from <document> --as posts` lists its author's own posts (a YouTube channel's
    uploads from a video or a channel, a TikTok profile, a Reddit user's top posts and comments);
-   `--as similar` lists pages like it (Exa, off the page's own site). The hits come back to
+   `--as similar` lists pages like it (Exa, off the page's own site). After a good paper,
+   `--as refs` lists what it cites and `--as citers` what cites it, most cited first (arxiv:
+   Semantic Scholar and OpenAlex; a hit is the arXiv page when there is one). The hits come back to
    triage like a search's, under the same caps. `brief.unfollowed` lists the kept pages no
    follow started from and no person owns, most kept findings first. When one author is good,
    find their other places (the channel's about links, a Substack, an X account, a blog): search

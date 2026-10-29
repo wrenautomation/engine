@@ -3,7 +3,9 @@
  * none). Both go to export.arxiv.org, the host arXiv names for programs, one call at a time and
  * 3 seconds apart (arxiv.org's robots ask 15). Each hit's snippet leads with what triage
  * weighs first: OpenAlex's citation count (one call per search, open data; a failed call leaves
- * it out), the paper's comment (venue, code), then its abstract. Free.
+ * it out), the paper's comment (venue, code), then its abstract. A follow lists what a paper
+ * cites (`refs`, Semantic Scholar: OpenAlex holds no reference list for arXiv) or what cites it
+ * (`citers`, OpenAlex, most cited first). Free.
  */
 import { defaultReaders, type Media, type Reader } from "@wrenautomation/falcon/document";
 import { httpError, transientStatus, transport } from "@wrenautomation/models";
@@ -15,6 +17,7 @@ import { readResponse } from "./fetcher.js";
 
 export const ARXIV = "https://export.arxiv.org";
 export const OPENALEX = "https://api.openalex.org/works";
+export const S2 = "https://api.semanticscholar.org/graph/v1/paper";
 /** arXiv's rule for programs: one call every 3 seconds at most. */
 export const ARXIV_GAP_MS = 3_000;
 
@@ -79,24 +82,131 @@ export function feedPapers(xml: string): { total: number; papers: Paper[] } {
 }
 
 /**
- * Each id's citation count from OpenAlex's rows. A row may be the published version merged with
- * the preprint (an ACL DOI, not arXiv's), so an id matches the row that names it anywhere.
+ * Whether an OpenAlex row is the paper. A row may be the published version merged with the
+ * preprint (an ACL DOI, not arXiv's), so it is when it names the id anywhere, never a longer id.
  */
+const names = (row: unknown, id: string): boolean =>
+  new RegExp(`(^|[^\\d])${id.toLowerCase().replace(".", "\\.")}([^\\d]|$)`).test(
+    JSON.stringify(row).toLowerCase(),
+  );
+
+/** Each id's citation count from OpenAlex's rows. */
 export function citedOf(rows: readonly unknown[], ids: readonly string[]): Map<string, number> {
   const out = new Map<string, number>();
   for (const row of rows) {
     const count = (row as { cited_by_count?: unknown }).cited_by_count;
     if (typeof count !== "number") continue;
-    const text = JSON.stringify(row).toLowerCase();
-    for (const id of ids)
-      if (
-        !out.has(id) &&
-        new RegExp(`(^|[^\\d])${id.toLowerCase().replace(".", "\\.")}([^\\d]|$)`).test(text)
-      )
-        out.set(id, count);
+    for (const id of ids) if (!out.has(id) && names(row, id)) out.set(id, count);
   }
   return out;
 }
+
+/** OpenAlex keeps an abstract as each word's positions; the words back in order. */
+export function abstractOf(index: unknown): string {
+  if (!index || typeof index !== "object") return "";
+  const at: string[] = [];
+  for (const [word, spots] of Object.entries(index as Record<string, unknown>))
+    if (Array.isArray(spots)) for (const i of spots) if (typeof i === "number") at[i] = word;
+  return at.filter(Boolean).join(" ");
+}
+
+const authorLine = (names: readonly string[]): string =>
+  names.length > 3 ? `${names.slice(0, 3).join(", ")} et al.` : names.join(", ");
+
+/** A cited or citing work: its arXiv page when it has one, else its DOI, else its landing page. */
+export interface Work {
+  links: readonly string[];
+  doi?: string;
+  title?: string;
+  authors: readonly string[];
+  date?: string;
+  cited?: number;
+  /** Who counted the citations. */
+  by: string;
+  /** What triage weighs before the count: why this work is in the list. */
+  lead?: string;
+  abstract?: string;
+}
+
+export function workHit(w: Work): HitViewIn | null {
+  let url: string | undefined;
+  for (const l of w.links) {
+    try {
+      const id = arxivId(new URL(l));
+      if (id) url = `https://arxiv.org/abs/${id}`;
+    } catch {}
+    if (url) break;
+  }
+  url ??= w.doi ? `https://doi.org/${w.doi.replace(/^https?:\/\/doi\.org\//, "")}` : w.links[0];
+  if (!url) return null;
+  const snippet = [
+    w.lead ?? "",
+    w.cited !== undefined ? `Cited ${w.cited} times (${w.by}).` : "",
+    w.abstract ? `Abstract: ${w.abstract}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const authors = authorLine(w.authors);
+  return {
+    url,
+    ...(w.title ? { title: w.title } : {}),
+    ...(authors ? { channel: authors } : {}),
+    ...(w.date ? { date: w.date } : {}),
+    ...(snippet ? { snippet } : {}),
+  };
+}
+
+interface OpenAlexRow {
+  display_name?: string;
+  cited_by_count?: number;
+  publication_date?: string;
+  ids?: { doi?: string };
+  locations?: { landing_page_url?: string | null }[];
+  authorships?: { author?: { display_name?: string } }[];
+  abstract_inverted_index?: unknown;
+}
+
+export const openAlexWork = (r: OpenAlexRow): Work => {
+  const abstract = abstractOf(r.abstract_inverted_index);
+  return {
+    links: (r.locations ?? []).flatMap((l) => (l.landing_page_url ? [l.landing_page_url] : [])),
+    ...(r.ids?.doi ? { doi: r.ids.doi } : {}),
+    ...(r.display_name ? { title: r.display_name } : {}),
+    authors: (r.authorships ?? []).flatMap((a) => a.author?.display_name ?? []),
+    ...(r.publication_date ? { date: r.publication_date } : {}),
+    ...(typeof r.cited_by_count === "number" ? { cited: r.cited_by_count } : {}),
+    by: "OpenAlex",
+    ...(abstract ? { abstract } : {}),
+  };
+};
+
+interface S2Paper {
+  paperId?: string;
+  title?: string;
+  externalIds?: { ArXiv?: string; DOI?: string } | null;
+  citationCount?: number;
+  publicationDate?: string | null;
+  year?: number | null;
+  authors?: { name?: string }[];
+  abstract?: string | null;
+}
+
+export const s2Work = (p: S2Paper): Work => {
+  const date = p.publicationDate ?? (p.year ? String(p.year) : undefined);
+  return {
+    links: [
+      ...(p.externalIds?.ArXiv ? [`https://arxiv.org/abs/${p.externalIds.ArXiv}`] : []),
+      ...(p.paperId ? [`https://www.semanticscholar.org/paper/${p.paperId}`] : []),
+    ],
+    ...(p.externalIds?.DOI ? { doi: p.externalIds.DOI } : {}),
+    ...(p.title ? { title: p.title } : {}),
+    authors: (p.authors ?? []).flatMap((a) => a.name ?? []),
+    ...(date ? { date } : {}),
+    ...(typeof p.citationCount === "number" ? { cited: p.citationCount } : {}),
+    by: "Semantic Scholar",
+    ...(p.abstract ? { abstract: p.abstract } : {}),
+  };
+};
 
 /** A paper as a hit: citations and the comment first, so a clipped snippet keeps them. */
 export function paperHit(p: Paper, cited?: number): HitViewIn {
@@ -104,8 +214,7 @@ export function paperHit(p: Paper, cited?: number): HitViewIn {
     cited !== undefined ? `Cited ${cited} times (OpenAlex).` : "",
     p.comment ? `Comment: ${p.comment}` : "",
   ].filter(Boolean);
-  const authors =
-    p.authors.length > 3 ? `${p.authors.slice(0, 3).join(", ")} et al.` : p.authors.join(", ");
+  const authors = authorLine(p.authors);
   return {
     url: `https://arxiv.org/abs/${p.id}`,
     ...(p.title ? { title: p.title } : {}),
@@ -115,6 +224,14 @@ export function paperHit(p: Paper, cited?: number): HitViewIn {
   };
 }
 
+const paperId = (url: string): string | null => {
+  try {
+    return arxivId(new URL(url));
+  } catch {
+    return null;
+  }
+};
+
 export function arxivSource(o: {
   /** The User-Agent with a contact, as arXiv asks. */
   agent: string;
@@ -123,6 +240,8 @@ export function arxivSource(o: {
   n?: number;
   /** OpenAlex's free key: its own daily budget, not the one shared by every keyless caller. */
   openalexKey?: string;
+  /** Semantic Scholar's free key: its own rate, not the pool shared by every keyless caller. */
+  s2Key?: string;
   fetchFn?: typeof fetch;
   readers?: Map<Media, Reader>;
   gapMs?: number;
@@ -164,25 +283,78 @@ export function arxivSource(o: {
     return feedPapers(await res.text());
   };
 
-  const cited = async (ids: readonly string[]): Promise<Map<string, number>> => {
-    if (!ids.length) return new Map();
-    const params = new URLSearchParams({
-      filter: `doi:${ids.map((id) => `10.48550/arxiv.${id}`).join("|")}`,
-      select: "ids,cited_by_count,locations",
-      per_page: "50",
-      ...(o.openalexKey ? { api_key: o.openalexKey } : {}),
+  // OpenAlex and Semantic Scholar: other hosts, no 3 second rule.
+  const api = async (name: string, url: string, headers: Record<string, string> = {}) => {
+    const res = await fetchFn(url, {
+      headers: { "user-agent": o.agent, ...headers },
+      signal: AbortSignal.timeout(15_000),
+    }).catch((err) => {
+      throw transport(name, err);
     });
-    try {
-      const res = await fetchFn(`${OPENALEX}?${params}`, {
-        headers: { "user-agent": o.agent },
-        signal: AbortSignal.timeout(15_000),
-      });
-      if (!res.ok) return new Map();
-      return citedOf(((await res.json()) as { results?: unknown[] }).results ?? [], ids);
-    } catch {
-      return new Map();
-    }
+    if (!res.ok) throw httpError(name, res);
+    return (await res.json()) as Record<string, unknown>;
   };
+  const alex = (params: Record<string, string>) =>
+    api(
+      "openalex",
+      `${OPENALEX}?${new URLSearchParams({ ...params, ...(o.openalexKey ? { api_key: o.openalexKey } : {}) })}`,
+    );
+
+  const refs = async (id: string, n: number): Promise<HitViewIn[]> => {
+    const fields =
+      "isInfluential,title,externalIds,citationCount,publicationDate,year,authors,abstract";
+    const body = await api(
+      "semanticscholar",
+      `${S2}/arXiv:${id}/references?fields=${fields}&limit=1000`,
+      o.s2Key ? { "x-api-key": o.s2Key } : {},
+    );
+    // A publisher may hide the list: `data` comes back empty, and the fetch step writes a gap.
+    const rows = (
+      (body.data as { citedPaper?: S2Paper; isInfluential?: boolean }[] | null) ?? []
+    ).filter((r) => r.citedPaper?.title);
+    // The works the paper leans on (Semantic Scholar's influence flag) first: the most cited
+    // refs are often background (GPT-3), not what the paper builds on.
+    rows.sort(
+      (a, b) =>
+        Number(b.isInfluential ?? false) - Number(a.isInfluential ?? false) ||
+        (b.citedPaper?.citationCount ?? 0) - (a.citedPaper?.citationCount ?? 0),
+    );
+    return rows
+      .flatMap((r) => {
+        const w = s2Work(r.citedPaper as S2Paper);
+        return workHit(r.isInfluential ? { ...w, lead: "The paper leans on it." } : w) ?? [];
+      })
+      .slice(0, n);
+  };
+
+  const citers = async (id: string, n: number): Promise<HitViewIn[]> => {
+    const found = await alex({ filter: `doi:10.48550/arxiv.${id}`, select: "id,ids,locations" });
+    const work = ((found.results as { id?: string }[] | undefined) ?? []).find((r) => names(r, id));
+    const w = work?.id?.split("/").pop();
+    if (!w) return [];
+    const body = await alex({
+      filter: `cites:${w}`,
+      sort: "cited_by_count:desc",
+      per_page: String(Math.min(n, 200)),
+      select:
+        "id,ids,display_name,cited_by_count,publication_date,locations,authorships,abstract_inverted_index",
+    });
+    return ((body.results as OpenAlexRow[] | undefined) ?? []).flatMap(
+      (r) => workHit(openAlexWork(r)) ?? [],
+    );
+  };
+
+  // A count is a hint: a failed call leaves it out.
+  const cited = async (ids: readonly string[]): Promise<Map<string, number>> =>
+    ids.length
+      ? alex({
+          filter: `doi:${ids.map((id) => `10.48550/arxiv.${id}`).join("|")}`,
+          select: "ids,cited_by_count,locations",
+          per_page: "50",
+        })
+          .then((body) => citedOf((body.results as unknown[] | undefined) ?? [], ids))
+          .catch(() => new Map())
+      : new Map();
 
   return {
     name: "arxiv",
@@ -202,18 +374,17 @@ export function arxivSource(o: {
       const counts = await cited(papers.map((p) => p.id));
       return papers.map((p) => paperHit(p, counts.get(p.id)));
     },
-    opens: (url) => {
-      try {
-        return arxivId(new URL(url)) !== null;
-      } catch {
-        return false;
-      }
+    follows: (as, url) => (as === "refs" || as === "citers") && paperId(url) !== null,
+    async follow(as, url, n) {
+      const id = paperId(url);
+      if (!id) throw new Error(`arxiv: not a paper: ${url}`);
+      if (as === "refs") return refs(id, n);
+      if (as === "citers") return citers(id, n);
+      throw new Error(`arxiv follows refs or citers, not ${as}`);
     },
+    opens: (url) => paperId(url) !== null,
     async open(h) {
-      let id: string | null = null;
-      try {
-        id = arxivId(new URL(h.url));
-      } catch {}
+      const id = paperId(h.url);
       if (!id) throw new Error(`arxiv: not a paper: ${h.url}`);
       // The HTML keeps tables and sections; older papers have only the PDF.
       let res = await paced(`${ARXIV}/html/${id}`);
