@@ -196,6 +196,58 @@ describe("site readers", () => {
     ).rejects.toThrow(/reddit signed out: .*403; reddit: no such thing/);
   });
 
+  it("signs in on a wall, never on a spent cap or a broken site", async () => {
+    const coded = (code: string, status: number) => () => {
+      throw new LadderCallError(`reddit-public GET /comments/1abc2d: ${status} no`, status, code);
+    };
+    const tried = async (by: () => never) => {
+      const w = worker({ "reddit-public": by, reddit: thread });
+      await redditSource({ sites: w.sites, account: "reddit@alt" })
+        .open?.(hit("https://redd.it/1abc2d"))
+        .catch(() => null);
+      return w.calls.map((c) => c.site);
+    };
+    expect(await tried(coded("need_login", 401))).toEqual(["reddit-public", "reddit"]);
+    expect(await tried(coded("platform_blocked", 403))).toEqual(["reddit-public", "reddit"]);
+    expect(await tried(coded("rate_limited", 429))).toEqual(["reddit-public"]);
+    expect(await tried(coded("upstream_broken", 502))).toEqual(["reddit-public"]);
+    // The code is in the reason the agent reads.
+    await expect(
+      redditSource({
+        sites: worker({ "reddit-public": coded("upstream_broken", 502) }).sites,
+      }).open?.(hit("https://redd.it/1abc2d")),
+    ).rejects.toThrow("reddit signed out: upstream_broken: reddit-public GET");
+  });
+
+  it("reads the access code off both wires", async () => {
+    const answer = (body: unknown, status: number) => async () =>
+      new Response(JSON.stringify(body), { status });
+    const http = httpLadderClient({
+      url: "http://desk.local",
+      fetchFn: answer({ error: "signed out", code: "need_login" }, 401),
+    });
+    await expect(http.call("reddit", "GET", "/comments/1")).rejects.toMatchObject({
+      status: 401,
+      code: "need_login",
+    });
+    const ingress = ingressLadderClient({
+      url: "https://ingress.local",
+      fetchFn: answer(
+        { code: 403, message: "captcha", metadata: { code: "platform_blocked" } },
+        403,
+      ),
+    });
+    await expect(ingress.call("reddit", "GET", "/comments/1")).rejects.toMatchObject({
+      status: 403,
+      code: "platform_blocked",
+    });
+    const old = ingressLadderClient({
+      url: "https://ingress.local",
+      fetchFn: answer({ code: 404, message: "no site" }, 404),
+    });
+    await expect(old.call("x", "GET", "/y")).rejects.toMatchObject({ status: 404, code: null });
+  });
+
   it("sorts a worker's no: a spent cap and a 404 miss; a busy profile and no answer retry", async () => {
     const throws = (e: unknown) => () => {
       throw e;

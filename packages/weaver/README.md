@@ -163,6 +163,8 @@ whatever the allow-list's order: it answers the thread as data, where a fetched 
 `reddit` reads signed out first (`reddit-public`, the thread's feed); only when that misses and
 `WEAVER_ACCOUNTS` names an account does it ask again signed in as it. `facebook` is always
 signed out. A spent cap or a refused read is a miss; a busy profile (503) or no answer retries.
+A refusal carries the worker's access code in its reason: `need_login`, `platform_blocked`,
+`rate_limited` or `upstream_broken`. The last two never read signed in: that fixes neither.
 The read step asks before a call, so a source that was never
 going to open a hit writes no spend. A page that was fetched with nothing usable (a 403, a block
 the ladder's last rung still hit, a media no reader takes, a ladder answer that is not HTML such

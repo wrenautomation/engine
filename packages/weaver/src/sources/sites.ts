@@ -11,8 +11,10 @@
  * read (`/user/{name}/overview`), signed out. `facebook`: one public group post through `fb-public`, always signed out (Wren's Meta
  * login runs the ads). Design: autobrowse `designs/2026-10-28-signed-in-reads.md`.
  *
- * A route that answered no (a 404, a spent cap, a refusal) is a miss with its reason; a worker
- * that did not answer, or a busy profile (503), is a Transient.
+ * A route that answered no (a 404, a spent cap, a refusal) is a miss with its reason and the
+ * worker's access code; a worker that did not answer, or a busy profile (503), is a Transient.
+ * A signed-out miss reads signed in, except a spent cap or a broken site (`rate_limited`,
+ * `upstream_broken`): signing in fixes neither.
  */
 import type { Document } from "@wrenautomation/falcon/document";
 import { Transient } from "@wrenautomation/models";
@@ -108,6 +110,19 @@ const things = (listing: unknown): Obj[] => {
 /** Reddit says the thread is not there (404): no account would read it either. */
 class Gone extends Error {}
 
+/** The worker refused the call; `code` is its access code when it sent one. */
+class Refused extends Error {
+  constructor(
+    message: string,
+    readonly code: string | null,
+  ) {
+    super(message);
+  }
+}
+
+/** Codes a signed-in read would not fix: a spent cap (it would spend the account instead) or a broken site. */
+const NOT_FOR_SIGN_IN = new Set(["rate_limited", "upstream_broken"]);
+
 /** A thread (`[post listing, comments listing]`) as text: the post, then each comment. */
 export function threadDocument(url: string, body: unknown): Document {
   if (isObj(body) && "error" in body) {
@@ -189,10 +204,11 @@ export async function routeCall(
     return await sites.call(site, "GET", path, input, account ? { account } : undefined);
   } catch (err) {
     if (err instanceof LadderCallError) {
-      if (err.status === 429) throw new Error(`${who}: ${site}'s cap is spent for today`);
+      if (err.status === 429)
+        throw new Refused(`${who}: ${site}'s cap is spent for today`, err.code ?? "rate_limited");
       // The profile stayed busy past the worker's wait: the read was never sent.
       if (err.status === 503) throw new Transient(`${who}: ${err.message}`);
-      throw new Error(`${who}: ${err.message}`);
+      throw new Refused(`${who}: ${err.code ? `${err.code}: ` : ""}${err.message}`, err.code);
     }
     throw new Transient(`${who}: the worker did not answer (${(err as Error).message})`);
   }
@@ -249,6 +265,7 @@ export function redditSource(o: { sites: LadderClient; account?: string }): Sour
         return await read(h.url, false);
       } catch (err) {
         if (err instanceof Transient || err instanceof Gone) throw err;
+        if (err instanceof Refused && err.code && NOT_FOR_SIGN_IN.has(err.code)) throw err;
         // Say it: a signed-in read spends the account's standing, and the agent counts it.
         console.warn(`${h.url}: ${(err as Error).message}; reading as ${o.account}`);
         try {

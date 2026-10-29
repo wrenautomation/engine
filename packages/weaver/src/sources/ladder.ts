@@ -60,6 +60,8 @@ export class LadderCallError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /** The worker's access code (`need_login`, `platform_blocked`, `rate_limited`, `upstream_broken`), when it sent one. */
+    readonly code: string | null = null,
   ) {
     super(message);
     this.name = "LadderCallError";
@@ -102,11 +104,14 @@ export function httpLadderClient(o: {
       });
       const text = await res.text();
       const body = text ? (JSON.parse(text) as unknown) : null;
-      if (!res.ok)
+      if (!res.ok) {
+        const b = body as { error?: string; code?: string } | null;
         throw new LadderCallError(
-          `${site} ${method} ${path}: ${res.status} ${(body as { error?: string } | null)?.error ?? res.statusText}`,
+          `${site} ${method} ${path}: ${res.status} ${b?.error ?? res.statusText}`,
           res.status,
+          b?.code ?? null,
         );
+      }
       return body as T;
     },
   };
@@ -117,6 +122,7 @@ export function httpLadderClient(o: {
  * call as its body, the way wren's CLI reaches the desk. `service` is `desk` (the Mac) or
  * `sites` (a box); `caller` names who asks, for the worker's per-caller usage. Restate answers a
  * refused call as `{"code":429,"message":"…"}` under that status: a 429 is the ladder's "cap".
+ * A coded refusal adds `"metadata":{"code":"need_login"}`.
  */
 export function ingressLadderClient(o: {
   url: string;
@@ -166,7 +172,13 @@ export function ingressLadderClient(o: {
           body && typeof body === "object" && "message" in body
             ? String((body as { message: unknown }).message)
             : text || res.statusText;
-        throw new LadderCallError(`${site} ${method} ${path}: ${res.status} ${said}`, res.status);
+        // A coded refusal: autobrowse puts the access code in the terminal error's metadata.
+        const code = (body as { metadata?: { code?: unknown } } | null)?.metadata?.code;
+        throw new LadderCallError(
+          `${site} ${method} ${path}: ${res.status} ${said}`,
+          res.status,
+          typeof code === "string" ? code : null,
+        );
       }
       return body as T;
     },
