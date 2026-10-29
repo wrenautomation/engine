@@ -1,6 +1,6 @@
 {
   "name": "@wrenautomation/read",
-  "version": "0.28.0",
+  "version": "0.29.0",
   "description": "The web and files in, text out. Polite HTTP fetching with robots and a fetch ladder up to a browser; HTML and PDF to text, a page to title, text and links; a video or podcast from a URL or a file (captions, ffmpeg and a vision model, audio to markdown, what a channel or search holds); a study's synthesis reader whose every claim quotes a page.",
   "repository": {
     "type": "git",
