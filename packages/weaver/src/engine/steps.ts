@@ -379,7 +379,14 @@ export const triageStep: StepFn = async (ctx, state) => {
       key: _k,
       queries: _q,
       ...view
-    }) => view,
+    }) => {
+      // Jev's yes on serves and each criterion: a hint the model sees, never the call
+      const odds = ["serves", ...(p.ask.criteria ?? []).map((c) => c.name)].flatMap((q) => {
+        const yes = yesOf(state, _i, q);
+        return yes === undefined ? [] : [[q, yes] as const];
+      });
+      return odds.length ? { ...view, odds: Object.fromEntries(odds) } : view;
+    },
   );
   const calls = await triage(views, p, ctx.model, {
     planFile,

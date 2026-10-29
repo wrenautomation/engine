@@ -20,7 +20,7 @@ const verdictLine = (v: Verdict): string => `${v.url}: ${v.quality}${v.gap ? `. 
 export function reviewPrompt(round: Round, planFile: PlanFile): string {
   return fill(planFile.review, {
     ask: round.ask.text,
-    steer: renderSteer(round.ask.steer),
+    steer: renderSteer(round.ask),
     round: String(round.round),
     rounds: String(round.budget.rounds),
     hits: String(round.hits),

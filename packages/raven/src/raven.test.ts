@@ -179,6 +179,22 @@ describe("merge", () => {
       "The person says:\n- numbers only\n- skip vendor pages\nRound 1",
     );
     expect(Ask.parse({ text: "x", kind: "web" }).steer).toEqual([]);
+
+    // The person's tests ride the steer slot; a hit shows the judge's odds as a hint.
+    const tested: Plan = {
+      ...p,
+      ask: { ...steered, criteria: [{ name: "code", question: "Is the code released?" }] },
+    };
+    const text = triagePrompt(
+      [{ url: "https://a.example", sources: [], odds: { serves: 0.08, code: 0.912 } }],
+      tested,
+      defaultPlanFile("web"),
+      [],
+    );
+    expect(text).toContain(
+      "- skip vendor pages\nThe person's tests of a good source:\n- code: Is the code released?\nKnown already",
+    );
+    expect(text).toContain("judge (a cheap model's yes odds, a hint): serves 0.08, code 0.91");
   });
 });
 

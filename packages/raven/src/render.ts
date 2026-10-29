@@ -33,9 +33,19 @@ export const renderKnown = (ask: {
     ? `\nTaken as given, with no source (test each one: it may be wrong):\n${lines(ask.premises)}`
     : "");
 
-/** "The person says:" and their lines, or nothing: a prompt pays for the heading only when there is one. */
-export const renderSteer = (steer: readonly string[] | undefined): string =>
-  steer?.length ? `The person says:\n${lines(steer)}\n` : "";
+/**
+ * "The person says:" and their lines, then their tests of a good source, or nothing: a prompt
+ * pays for a heading only when there is one. The tests ride the steer slot, so a stored plan file
+ * shows them with no new mark.
+ */
+export const renderSteer = (ask: {
+  steer?: readonly string[];
+  criteria?: readonly { name: string; question: string }[];
+}): string =>
+  (ask.steer?.length ? `The person says:\n${lines(ask.steer)}\n` : "") +
+  (ask.criteria?.length
+    ? `The person's tests of a good source:\n${lines(ask.criteria.map((c) => `${c.name}: ${c.question}`))}\n`
+    : "");
 
 /** What the last round left open, under its heading, or nothing. */
 export const renderOpen = (open: readonly string[] | undefined): string =>
@@ -73,6 +83,11 @@ export function renderHits(hits: readonly HitView[]): string {
       if (h.date) parts.push(`date: ${h.date}`);
       if (h.sources.length) parts.push(`sources: ${h.sources.join(",")}`);
       if (h.snippet) parts.push(`snippet: ${oneLine(h.snippet, 240)}`);
+      const odds = Object.entries(h.odds ?? {});
+      if (odds.length)
+        parts.push(
+          `judge (a cheap model's yes odds, a hint): ${odds.map(([k, v]) => `${k} ${v.toFixed(2)}`).join(", ")}`,
+        );
       return `${i + 1}. ${parts.join(" | ")}`;
     })
     .join("\n");

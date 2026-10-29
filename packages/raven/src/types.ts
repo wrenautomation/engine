@@ -197,6 +197,8 @@ export const HitView = z.object({
   date: z.string().optional(),
   snippet: z.string().optional(),
   sources: z.array(z.string()).default([]),
+  /** The judge's yes odds by question (serves, each criterion): a hint the triage prompt shows. */
+  odds: z.record(z.string(), z.number()).optional(),
 });
 export type HitView = z.infer<typeof HitView>;
 /** A hit as a caller may pass it: `sources` optional. */

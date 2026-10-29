@@ -62,7 +62,7 @@ export function triagePrompt(
     n: String(plan.budget.reads),
     ask: plan.ask.text,
     site: plan.ask.site ?? "",
-    steer: renderSteer(plan.ask.steer),
+    steer: renderSteer(plan.ask),
     open: renderOpen(plan.ask.open),
     age: renderAge(ageOf(planFile)),
     known: renderKnown(plan.ask),

@@ -1,5 +1,6 @@
 import { Cut, claimExtractor } from "@wrenautomation/falcon/document";
 import { fakeModel, type Model, scriptedModel, Transient } from "@wrenautomation/models";
+import { fakeJudge } from "@wrenautomation/models/judge";
 import { defaultPlanFile } from "@wrenautomation/raven";
 import { describe, expect, it } from "vitest";
 import { countingIds } from "../ledger/ids.js";
@@ -632,6 +633,29 @@ describe("gaps, checks and age", () => {
                   : review;
       return JSON.stringify(a);
     }, "m");
+
+  it("shows the triage the person's tests and the judge's odds on each hit", async () => {
+    const prompts: string[] = [];
+    const judge = fakeJudge((state) =>
+      (state as { text?: unknown }).text
+        ? {}
+        : { serves: { yes: 0.7, no: 0.3 }, code: { yes: 0.25, no: 0.75 } },
+    );
+    const d: Deps = { ...deps(routed(prompts)), judge, sources: registry(search, dated) };
+    await run(d, {
+      ask: {
+        text: "repeat clients",
+        kind: "web",
+        criteria: [{ name: "code", question: "Is the code released?" }],
+      },
+      planFile: { ...planFile, sources: ["fake", "dated"] },
+    });
+    const triage = prompts.find((p) => p.startsWith("You decide which search hits")) ?? "";
+    expect(triage).toContain("The person's tests of a good source:\n- code: Is the code released?");
+    expect(triage).toContain(
+      "https://a.example/one | sources: fake | judge (a cheap model's yes odds, a hint): serves 0.70, code 0.25",
+    );
+  });
 
   it("writes gaps, checks a sample, drops what fails, and shows it all to the review", async () => {
     const prompts: string[] = [];

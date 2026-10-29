@@ -254,8 +254,9 @@ From 0.25.0 the judge reads a page whole: the body to its references (an appendi
 parts of 64,000 characters, 4 at most, each answer the most yes of any part. Jev's input is
 cheap (about $0.04 per million tokens), so a paper costs about a tenth of a cent. A run's
 criteria (`--criterion name="question"`, on `run` and `plan`) are the person's own yes-or-no
-tests of a good source: the judge asks each one on every hit and every page. Their mean sorts
-`hits.uncalled` and `documents.toExtract`; `brief.judge.criteria` gives each one's AUC against
+tests of a good source: the judge asks each one on every hit and every page. Every prompt shows
+them with the person's steer, and the runner's triage sees the judge's odds on each hit (serves
+and each test) as a hint. Their mean sorts `hits.uncalled` and `documents.toExtract`; `brief.judge.criteria` gives each one's AUC against
 "a finding on it was kept", on hits and on pages. A sort and a hint, never a gate.
 
 A follow is a query record with `follow: {url, as, document?}` and terms `<as> of <url>`. The

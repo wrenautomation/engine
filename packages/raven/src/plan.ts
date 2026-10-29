@@ -32,7 +32,7 @@ export function proposePrompt(
     year: String(now.getUTCFullYear()),
     ask: ask.text,
     site: ask.site ?? "",
-    steer: renderSteer(ask.steer),
+    steer: renderSteer(ask),
     open: renderOpen(ask.open),
     known: renderKnown(ask),
     yield: renderYield(yieldRows),
