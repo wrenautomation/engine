@@ -9,7 +9,7 @@
  */
 
 import { checkFinding, type Document, gateFindings } from "@wrenautomation/falcon/document";
-import { isTransient, type Model, type Transient } from "@wrenautomation/models";
+import { isTransient, type Model, Transient } from "@wrenautomation/models";
 import type { EntryType, Judged, JudgeFailure, Questions } from "@wrenautomation/models/judge";
 import {
   dedupeHits,
@@ -491,6 +491,14 @@ export async function readHits(
 export const extractStep: StepFn = (ctx, state) =>
   extractDocuments(ctx, state, toExtract(state, ctx.round));
 
+/** A transient stop that says what the step finished first: the next try does only the rest. */
+const stopped = (t: Transient, finished: string) =>
+  new Transient(`${t.message} (${finished} before it stopped; run the step again for the rest)`, {
+    retryAfter: t.retryAfter,
+    ...(t.status === undefined ? {} : { status: t.status }),
+    cause: t,
+  });
+
 /** Extracts `docs` with the extractor on the run's model; the agent's `extract` passes its own list. */
 export async function extractDocuments(
   ctx: StepContext,
@@ -546,7 +554,8 @@ export async function extractDocuments(
     continued += g.out.continued ?? 0;
     done++;
   });
-  if (got.transient) throw got.transient;
+  if (got.transient)
+    throw stopped(got.transient, `${proposed} findings from ${done} of ${docs.length} documents`);
   return {
     ok: true,
     note: `${proposed} findings from ${done} documents, ${dropped} dropped at the gate${continued ? `, ${continued} cut answers continued` : ""}`,
@@ -629,7 +638,7 @@ export async function checkSample(
       if (g.out.fix) await repair(f, g.out.fix, g.model);
     }
   });
-  if (got.transient) throw got.transient;
+  if (got.transient) throw stopped(got.transient, `${ok + failed} of ${sample.length} checks done`);
   const why = doubted.length
     ? ` (${sample.length} sampled, ${doubted.length} the judge doubted)`
     : "";

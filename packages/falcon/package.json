@@ -48,7 +48,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "rm -rf dist && tsc && chmod +x dist/app/cli.js"
+    "build": "sh ../../scripts/build.sh app/cli.js"
   },
   "dependencies": {
     "@wrenautomation/models": "workspace:*",

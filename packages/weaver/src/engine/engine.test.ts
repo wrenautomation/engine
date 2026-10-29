@@ -380,6 +380,29 @@ describe("runner", () => {
     expect(second.state.findings).toHaveLength(1);
   });
 
+  it("says what an extract finished when the model drops out mid-batch", async () => {
+    const a = answers;
+    const flaky: typeof claimExtractor = {
+      ...claimExtractor,
+      extract: (doc, ...rest) => {
+        if (doc.url.endsWith("/three")) throw new Transient("Connect Timeout Error");
+        return claimExtractor.extract(doc, ...rest);
+      },
+    };
+    const d = {
+      ...deps(scriptedModel([a.plan1, a.triage1, a.extractOne], "m")),
+      extractor: flaky,
+      sleep: async () => {},
+    };
+    const err = await run(d, { ask: { text: "repeat clients", kind: "web" }, planFile }).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(Transient);
+    expect((err as Error).message).toBe(
+      "Connect Timeout Error (1 findings from 1 of 2 documents before it stopped; run the step again for the rest)",
+    );
+  });
+
   it("lets a Transient through when a step got nothing, with no done, so a resume runs the step again", async () => {
     const a = answers;
     let calls = 0;
