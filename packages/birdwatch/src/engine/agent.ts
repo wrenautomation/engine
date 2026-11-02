@@ -78,6 +78,7 @@ import {
   runTree,
   treeReadsOf,
   treeRoom,
+  treeStateOf,
 } from "./tree.js";
 
 /** Who a record is from: the agent (`ai`, its id) or the person through it (`human`, their name). */
@@ -693,16 +694,20 @@ export async function extract(
   deps: Deps,
   run: string,
   documents?: readonly string[],
+  limit?: number,
 ): Promise<Did> {
-  return stepRun(deps, run, "extract", (c, s) => {
-    const docs = documents
+  return stepRun(deps, run, "extract", async (c, s) => {
+    const all = documents
       ? documents.map((id) => {
           const d = s.documents.find((x) => x.id === id);
           if (!d) throw new Error(`no document ${id}`);
           return d;
         })
       : unjudged(s);
-    return extractDocuments(c, s, docs);
+    const docs = limit && limit > 0 ? all.slice(0, limit) : all;
+    const out = await extractDocuments(c, s, docs);
+    const left = all.length - docs.length;
+    return left ? { ...out, note: `${out.note ?? ""}; ${left} left: run extract again` } : out;
   });
 }
 
@@ -761,7 +766,8 @@ export type Addition =
   | { type: "draft"; for: string; items: DraftInput[] }
   | { type: "class"; on: string; class: SourceClass; why: string }
   | { type: "dead"; facet: string; why: string }
-  | { type: "person"; name: string; profiles: string[]; aka: string[]; why: string };
+  | { type: "person"; name: string; profiles: string[]; aka: string[]; why: string }
+  | { type: "cap"; reads: number; why: string };
 
 /** One item of a draft as the agent writes it: cites are finding or pattern ids. */
 export interface DraftInput {
@@ -793,7 +799,8 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
     a.type === "draft" ||
     a.type === "class" ||
     a.type === "dead" ||
-    a.type === "person"
+    a.type === "person" ||
+    a.type === "cap"
       ? state.round
       : personRound(state);
   const warnings: string[] = [];
@@ -916,25 +923,37 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
         warnings,
       };
     case "pattern": {
-      const byId = new Map(state.findings.map((f) => [f.id, f]));
+      // a parent may rest a pattern on its children's findings
+      const tree = await treeStateOf(deps, run);
+      const byId = new Map(tree.findings.map((f) => [f.id, f]));
       const on = [...new Set(a.findings)].map((id) => {
         const f = byId.get(id);
         if (!f) throw new Error(`no finding ${id}`);
-        if (!kept(state, f))
+        if (!kept(tree, f))
           throw new Error(`finding ${id} is dropped: a pattern rests on kept findings`);
         return f;
       });
       const pattern = patternOf(a.text, on);
-      const classes = classesOf(state, pattern.findings);
+      const classes = classesOf(tree, pattern.findings);
       if (sourcesOf(classes) < 2) warnings.push("one source: a claim, not a pattern yet");
-      const cites = citesOf(state, pattern.findings);
+      const cites = citesOf(tree, pattern.findings);
       if (echoOf(classes))
         warnings.push(
           `vendor echo: every classed source is a vendor; vendors cite each other${cites.length ? `; the judge says ${cites.join(" ")} credit another source: read that source` : ""}`,
         );
-      const unchecked = uncheckedOf(state, pattern.findings);
-      if (unchecked.length)
-        warnings.push(`unchecked: ${unchecked.join(" ")}; run check --patterns`);
+      const unchecked = uncheckedOf(tree, pattern.findings);
+      // a check runs in the run that holds the finding's document
+      const home = new Map<string, string[]>();
+      for (const id of unchecked) {
+        const r = byId.get(id)?.run ?? run;
+        home.set(r, [...(home.get(r) ?? []), id]);
+      }
+      for (const [r, ids] of home)
+        warnings.push(
+          r === run
+            ? `unchecked: ${ids.join(" ")}; run check --patterns`
+            : `unchecked in child run ${r}: ${ids.join(" ")}; run check ${r} ${ids.join(" ")}`,
+        );
       return { record: await write({ type: "pattern", ...pattern }), warnings };
     }
     case "dead": {
@@ -943,6 +962,27 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
       if (state.dead.some((d) => d.facet === facet))
         throw new Error(`facet "${facet}" is dead already`);
       return { record: await write({ type: "dead", facet, why: why(a.why, "dead") }), warnings };
+    }
+    case "cap": {
+      // the tree's one hard stop: only a person moves it
+      if (who.from !== "human")
+        throw new Error("cap: the tree's read cap is the person's call: --human");
+      const snap = state.snapshot;
+      if (!snap) throw new Error(`run ${run}: no snapshot`);
+      if (snap.parent)
+        throw new Error(
+          `cap: ${run} is a child; set the cap on its root ${(await lineageOf(deps, run))[0]?.run ?? snap.parent.run}`,
+        );
+      if (!Number.isInteger(a.reads) || a.reads <= 0)
+        throw new Error("cap: a whole number of pages");
+      const was = snap.treeReads;
+      const { id: _id, at: _at, from: _from, by: _by, ...rest } = snap;
+      const record = await write({ ...rest, treeReads: a.reads });
+      await write({
+        type: "steer",
+        text: `tree read cap ${was ?? "none"} -> ${a.reads}: ${why(a.why, "cap")}`,
+      });
+      return { record, warnings };
     }
     case "person": {
       const name = a.name.trim();
@@ -974,7 +1014,8 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
     case "draft": {
       if (!a.for.trim()) throw new Error("draft: say what it is for");
       // The quote gate numbers its claims: each kept finding is one, a pattern stands for its findings.
-      const keptOnes = state.findings.filter((f) => kept(state, f));
+      const tree = await treeStateOf(deps, run);
+      const keptOnes = tree.findings.filter((f) => kept(tree, f));
       const claims: NumberedClaim[] = keptOnes.map((f, i) => ({
         n: i + 1,
         angle: 0,
@@ -983,7 +1024,7 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
         source_url: f.proof.url,
       }));
       const nOf = new Map(keptOnes.map((f, i) => [f.id, i + 1]));
-      const onPattern = new Map(state.patterns.map((p) => [p.id, p.findings]));
+      const onPattern = new Map(tree.patterns.map((p) => [p.id, p.findings]));
       const ns = (id: string) => (onPattern.get(id) ?? [id]).map((f) => nOf.get(f) ?? 0);
       const spec = { key: "draft", ask: a.for };
       const items: DraftRecord["items"] = [];

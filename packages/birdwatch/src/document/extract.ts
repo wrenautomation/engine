@@ -211,7 +211,35 @@ export const claimExtractor: Extractor = {
   name: "claim",
   async extract(whole, ask, model) {
     // the reference list holds no finding: every part and quote comes from the body
-    const doc: Document = { ...whole, text: bodyOf(whole.text) };
+    return claimsOf({ ...whole, text: bodyOf(whole.text) }, ask, model, true);
+  },
+};
+
+/** Past this, a cut answer with nothing placeable goes on in windows (a long forum thread). */
+export const EXTRACT_WINDOW = 24_000;
+
+/** The text in windows of about `size`, each ended at a line break where one is near. */
+export function windowsOf(text: string, size = EXTRACT_WINDOW): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < text.length; ) {
+    let end = Math.min(text.length, i + size);
+    if (end < text.length) {
+      const nl = text.lastIndexOf("\n", end);
+      if (nl > i + size / 2) end = nl;
+    }
+    out.push(text.slice(i, end));
+    i = end;
+  }
+  return out;
+}
+
+async function claimsOf(
+  doc: Document,
+  ask: Parameters<Extractor["extract"]>[1],
+  model: Model,
+  windows: boolean,
+): ReturnType<Extractor["extract"]> {
+  {
     const findings: Finding[] = [];
     const dropped: Dropped[] = [];
     const known = [...(ask.known ?? [])];
@@ -256,13 +284,39 @@ export const claimExtractor: Extractor = {
         (end, f) => Math.max(end, quoteEnd(doc.text, f.proof.quote ?? "", from)),
         -1,
       );
-      if (next <= from)
-        throw new Error(
-          `the answer was cut and ${fresh.length ? "no kept quote places the cut" : "nothing before the cut passed the gate"} (${doc.url}, from ${from})`,
-        );
+      if (next <= from) {
+        const rest = doc.text.slice(from);
+        if (!windows || rest.length <= EXTRACT_WINDOW)
+          throw new Error(
+            `the answer was cut and ${fresh.length ? "no kept quote places the cut" : "nothing before the cut passed the gate"} (${doc.url}, from ${from})`,
+          );
+        for (const w of windowsOf(rest)) {
+          const sub = await claimsOf({ ...doc, text: w }, { ...ask, known }, model, false).catch(
+            () => null,
+          );
+          if (!sub) continue;
+          const more = sub.findings.filter(
+            (f) => !findings.some((k) => k.proof.quote === f.proof.quote),
+          );
+          findings.push(...more);
+          dropped.push(...sub.dropped);
+          for (const f of more) known.push(f.text);
+          usage = sub.usage ? addUsage(usage, sub.usage) : usage;
+          if (sub.verdict.quality && (!best || RANK[sub.verdict.quality] > RANK[best]))
+            best = sub.verdict.quality;
+          continued++;
+        }
+        return {
+          findings,
+          dropped,
+          verdict: verdictOf({ quality: best, gap: answer.gap }, doc, findings.length),
+          ...(usage ? { usage } : {}),
+          ...(continued ? { continued } : {}),
+        };
+      }
       for (const f of fresh) known.push(f.text);
       from = next;
       continued++;
     }
-  },
-};
+  }
+}

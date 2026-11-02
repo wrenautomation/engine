@@ -7,7 +7,7 @@
  * nothing a sibling would not, so only the total is worth a wall.
  */
 
-import type { SnapshotRecord, SpendRecord } from "../ledger/records.js";
+import { byTime, type SnapshotRecord, type SpendRecord } from "../ledger/records.js";
 import { costOf } from "./cost.js";
 import type { Budget, PlanFile } from "./plan.js";
 import type { Deps } from "./ports.js";
@@ -30,6 +30,20 @@ export async function childrenOf(deps: Reads, run: string): Promise<SnapshotReco
   for (const r of await deps.ledger.scan({ type: ["snapshot"] }))
     if (r.type === "snapshot" && r.parent?.run === run && !out.has(r.run)) out.set(r.run, r);
   return [...out.values()];
+}
+
+/**
+ * The run and every run under it as one fold, for lookups only (findings, calls, classes,
+ * patterns): a parent's pattern or draft may rest on its children's findings. Its pointer and
+ * snapshot are meaningless; take those from the run's own fold.
+ */
+export async function treeStateOf(deps: Reads, run: string): Promise<RunState> {
+  const runs = [run];
+  for (let i = 0; i < runs.length; i++)
+    for (const c of await childrenOf(deps, runs[i] as string)) runs.push(c.run);
+  if (runs.length === 1) return stateOf(deps, run);
+  const records = (await Promise.all(runs.map((r) => deps.ledger.trace(r)))).flat().sort(byTime);
+  return fold(run, records);
 }
 
 /** The pages a tree may read, for a root's snapshot: the plan file's, else from the root's budget. */

@@ -45,8 +45,11 @@ export function exa(o: { keys: readonly string[]; fetchFn?: typeof fetch; n?: nu
       throw transport("exa", err);
     });
     if (!res.ok) throw httpError("exa", res);
-    const out = (await res.json()) as { results?: ExaResult[] };
-    return (out.results ?? []).map(hitOf);
+    const out = (await res.json()) as { results?: ExaResult[]; costDollars?: { total?: number } };
+    const hits = (out.results ?? []).map(hitOf);
+    // the spend reads it: Exa prices each call itself
+    const usd = out.costDollars?.total;
+    return typeof usd === "number" ? Object.assign(hits, { usd }) : hits;
   };
   return {
     name: "exa",

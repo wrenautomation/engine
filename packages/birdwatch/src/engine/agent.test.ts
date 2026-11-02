@@ -1204,6 +1204,52 @@ describe("agent commands", () => {
     expect(more.note).toContain("read 2 pages, its cap 2");
   });
 
+  it("a person raises the tree's cap on its root; a parent's pattern rests on a child's findings; extract takes a limit", async () => {
+    const d = deps();
+    const runs = { depth: 2, children: 6, reads: 2 };
+    const pf = { ...planFile, budget: { ...planFile.budget, reads: 5 }, runs };
+    const { run: root } = await planRound(d, {
+      ask: { text: "which niche buys repeat work", kind: "web" },
+      planFile: pf,
+      model: "m",
+    });
+    const { run: kid } = await planRound(d, {
+      ask: { text: "a niche", kind: "web" },
+      planFile: pf,
+      model: "m",
+      parent: { run: root, why: "w" },
+    });
+    await open(
+      d,
+      kid,
+      { urls: ["https://a.example/one", "https://b.example/four"], why: "w" },
+      agent,
+    );
+    await expect(add(d, root, { type: "cap", reads: 9, why: "more" }, agent)).rejects.toThrow(
+      "the person's call",
+    );
+    await expect(add(d, kid, { type: "cap", reads: 9, why: "more" }, will)).rejects.toThrow(
+      `set the cap on its root ${root}`,
+    );
+    await add(d, root, { type: "cap", reads: 9, why: "the agency threads" }, will);
+    const more = await open(d, root, { urls: ["https://a.example/two"], why: "w" }, agent);
+    expect(more.note).toContain("1 of 1 hits read");
+
+    const first = await extract(d, kid, undefined, 1);
+    expect(first.note).toContain("1 left: run extract again");
+    await extract(d, kid);
+    const f = fold(kid, await d.ledger.trace(kid)).findings.map((x) => x.id);
+    expect(f.length).toBe(2);
+    const p = await add(
+      d,
+      root,
+      { type: "pattern", text: "Repeat work holds.", findings: f },
+      agent,
+    );
+    expect(p.record.type).toBe("pattern");
+    expect(p.warnings.join(" ")).toContain(`unchecked in child run ${kid}`);
+  });
+
   it("recalls what earlier runs found: quote, date and run, dropped ones left out", async () => {
     const d = deps();
     const runOf = async (text: string) => {

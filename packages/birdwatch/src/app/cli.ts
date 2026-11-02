@@ -26,7 +26,11 @@ import {
 } from "@wrenautomation/read/video";
 import { Command } from "commander";
 import { AskKind, defaultPlanFile, PLAN_KINDS } from "../engine/plan.js";
+import { loadConfig } from "./config.js";
 import { addEngineCommands, keys } from "./engine-cli.js";
+
+// before any command reads its env defaults
+loadConfig();
 
 const program = new Command()
   .name("birdwatch")

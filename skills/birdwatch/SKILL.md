@@ -12,8 +12,10 @@ own head, and you write each decision as a record with a why. The person steers 
 their words reach the ledger through you as `--human` records.
 
 Set `BIRDWATCH_AGENT` to your id (`claude-code`, `codex`, a name) once: every record you write
-names it. The ledger folder is `BIRDWATCH_LEDGER` (default `./ledger`). Sources come from the
-environment; `birdwatch sources` lists what this machine can run. A Reddit thread and a Facebook
+names it. The ledger folder is `--ledger` (before or after the command) or `BIRDWATCH_LEDGER`
+(default `./ledger`). Sources come from the environment. `~/.config/birdwatch/config.json`
+names the env files to read keys from, so no wrapper is needed; a set variable wins.
+`birdwatch sources` lists what this machine can run. A Reddit thread and a Facebook
 group post open through their own readers (`reddit`, `facebook`) before the page openers. Reddit
 reads signed out, then as the account `BIRDWATCH_ACCOUNTS` names (`reddit=reddit@alt`); the person
 picks that account, never you. `google` searches Google's own page through the desk's browser:
@@ -40,17 +42,18 @@ birdwatch open <run> --with <source>                    # an opener `sources` li
 birdwatch show <run> <document> [--head N]              # the page's text: read it yourself
 birdwatch add finding <run> <document> --text "<sentence>" --quote "<quote on the page>"
 birdwatch add check <run> <finding> --ok|--fail --why "<why>"    # your own check; a fail drops it
-birdwatch extract <run>                                 # bulk only: a model behind the quote gate
+birdwatch extract <run> [--limit N]                     # bulk only: a model behind the quote gate; --limit: N pages a call
 birdwatch check <run> [-n N] [--patterns]               # bulk only: a model's check; --patterns: every finding a pattern rests on
 birdwatch add gap <run> "<what is still missing>"
 birdwatch add class <run> <document|finding> <class> --why "<why>"   # primary_data, survey, practitioner, vendor, forum, news, other
 birdwatch accept <run> keep --over P | drop --under P | class --min P --why "<why>"   # the judge's hints in bulk, at your bar
-birdwatch add pattern <run> "<what several findings say together>" --on <finding> <finding>...
+birdwatch add pattern <run> "<what several findings say together>" --on <finding> <finding>...   # findings of this run or its children
 birdwatch add edge <run> again|stop --why "<why>"       # your review of the round
 echo '[{"title":"..","body":"..","cites":["<pattern or finding>"]}]' | birdwatch add draft <run> --for "<a decision memo>"   # a rough draft, gated
 birdwatch plan --run <run>                              # after again: the next round
 birdwatch plan "<one niche>" --parent <run> --why "<why this child>"   # a child run: it reads what the tree found
 birdwatch add dead <run> <facet> --why "<why>"          # give up on a facet; later tries skip it
+birdwatch add cap <root> <reads> --why "<why>" --human  # the person raises the tree's read cap; never you alone
 birdwatch follow <run> [<url>] --as posts|similar|refs|citers [--from <document>] --why "<why>" [--with <source>...]   # a good page's author's posts, or pages like it
 birdwatch add person <run> "<name>" [--profile <url>...] [--aka <name>...] --why "<why>"   # one person across sites
 birdwatch learn <kind> [--sources ...] [--rounds N] [--age "..."]   # after a good run, on the person's yes
@@ -155,7 +158,7 @@ records show done.
    backs it. Put a finding back with `add call <finding> keep --why` only if you read the page
    and the check is wrong.
 6. **Patterns.** When kept findings from different sites say one thing, write it once:
-   `add pattern` with the finding ids. The engine counts the distinct sites; one site is a
+   `add pattern` with the finding ids, from this run or its children. The engine counts the distinct sites; one site is a
    claim, not a pattern, and it warns. A pattern is your sentence; the findings are its proof.
    `brief.patterns[].classes` counts its sources per class: a site, but each forum thread on
    its own. Three vendor pages are weaker than one survey: weigh the classes, not the total.
@@ -177,7 +180,8 @@ records show done.
    round, and the whole tree's reads (`runs.reads` on the root's plan file; by default the
    root's reads times its rounds times children plus one). `open` stops or cuts its hits at the
    tree's cap. `brief.lineage` lists the ancestors, root first, with their asks and whys;
-   `brief.treeRoom` says the cap, what the tree read and what is left. Drive each child to its
+   `brief.treeRoom` says the cap, what the tree read and what is left. Out of room: ask the
+   person; on their yes, `add cap <root> <reads> --why --human`. Drive each child to its
    stop. Then `add edge again` on the parent: its next plan reads each stopped
    child's stop, patterns (with sites per class) and dead ends, and lists a child still going
    as open. The parent decides: drop an option, add one, or stop. `brief.children` shows the

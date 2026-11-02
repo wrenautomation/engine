@@ -49,6 +49,12 @@ const tokens = (u: Usage | undefined): Omit<Extract<Outcome, { ok: true }>, "ok"
     : {}),
 });
 
+/** A source's answer may carry what the call cost, as `usd` on the value (Exa's `costDollars`). */
+const usdOf = (out: unknown): Usage | undefined => {
+  const usd = (out as { usd?: unknown } | null)?.usd;
+  return typeof usd === "number" ? { usd } : undefined;
+};
+
 /** The step context: `write` fills the envelope, `invoke` and `modelOn` write every spend. */
 export function context(deps: Deps, run: string, round: number, step: Step): StepContext {
   const sleep = deps.sleep ?? defaultSleep;
@@ -127,7 +133,7 @@ export function context(deps: Deps, run: string, round: number, step: Step): Ste
   };
   const invoke: StepContext["invoke"] = async (source, op, about, on, call) => {
     try {
-      return await tried(() => once(source, op, about, on, call));
+      return await tried(() => once(source, op, about, on, call, usdOf));
     } catch (err) {
       if (isTransient(err)) throw err;
       return null;

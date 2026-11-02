@@ -140,14 +140,18 @@ describe("exa", () => {
       keys: ["k"],
       fetchFn: async (u, init) => {
         calls.push({ url: String(u), body: JSON.parse(String(init?.body)) });
-        return json({ results: [{ url: "https://d.example", title: "D" }] });
+        return json({
+          results: [{ url: "https://d.example", title: "D" }],
+          costDollars: { total: 0.006 },
+        });
       },
     });
     expect(src.follows?.("similar", "https://c.example")).toBe(true);
     expect(src.follows?.("posts", "https://c.example")).toBe(false);
-    expect(await src.follow?.("similar", "https://c.example", 5)).toEqual([
-      { url: "https://d.example", title: "D" },
-    ]);
+    const similar = await src.follow?.("similar", "https://c.example", 5);
+    expect([...(similar ?? [])]).toEqual([{ url: "https://d.example", title: "D" }]);
+    // Exa's own price rides on the answer for the spend
+    expect(similar).toHaveProperty("usd", 0.006);
     expect(calls).toEqual([
       {
         url: "https://api.exa.ai/findSimilar",

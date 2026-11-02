@@ -4,9 +4,11 @@ import { checkFinding, checkPrompt, contextOf, WINDOW } from "./check.js";
 import {
   claimExtractor,
   claimPrompt,
+  EXTRACT_WINDOW,
   gateFindings,
   salvageFindings,
   verdictOf,
+  windowsOf,
 } from "./extract.js";
 import { Cut, type Model } from "./model.js";
 import { defaultReaders, mediaOf } from "./readers.js";
@@ -174,6 +176,30 @@ describe("claim extractor", () => {
     await expect(claimExtractor.extract(doc, { text: "x" }, model)).rejects.toThrow(
       /nothing before the cut passed the gate/,
     );
+  });
+
+  it("a long thread whose cut answer kept nothing goes on in windows", async () => {
+    const line = "A poster wrote that referrals dried up in 2025.\n";
+    const long = { ...doc, text: `${"filler words here\n".repeat(2000)}${line}` };
+    expect(long.text.length).toBeGreaterThan(EXTRACT_WINDOW);
+    const model: Model = {
+      id: "m1",
+      ask: async (p) => {
+        const prompt = promptText(p) ?? "";
+        if (prompt.length > EXTRACT_WINDOW) throw new Cut("cut", '{"findings": [{"te');
+        const hit = prompt.includes("referrals dried up");
+        return {
+          value: {
+            findings: hit
+              ? [{ text: "Referrals dried up in 2025.", quote: "referrals dried up in 2025" }]
+              : [],
+          },
+        } as never;
+      },
+    };
+    const out = await claimExtractor.extract(long, { text: "x" }, model);
+    expect(out.findings.map((f) => f.text)).toEqual(["Referrals dried up in 2025."]);
+    expect(windowsOf(long.text).every((w) => w.length <= EXTRACT_WINDOW)).toBe(true);
   });
 
   it("keeps a finding whose quote is on the document, drops the rest with why", async () => {

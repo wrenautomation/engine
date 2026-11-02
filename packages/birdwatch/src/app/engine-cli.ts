@@ -267,14 +267,28 @@ async function stdinText(): Promise<string> {
 
 export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): void {
   const ledgerOf = deps.ledger ?? filesLedger;
+  // defaults resolve in preAction: a root `--ledger` before the command name must win over env
   const common = (c: Command) =>
     c
-      .option("--ledger <dir>", "the ledger folder", process.env.BIRDWATCH_LEDGER ?? "./ledger")
+      .option("--ledger <dir>", "the ledger folder (default: BIRDWATCH_LEDGER, else ./ledger)")
       .option(
         "--writer <name>",
-        "this terminal's file in the ledger",
-        process.env.BIRDWATCH_WRITER ?? userInfo().username,
+        "this terminal's file in the ledger (default: BIRDWATCH_WRITER, else the user)",
       );
+  if (!program.options.some((x) => x.long === "--ledger")) common(program);
+  program.hook("preAction", (root, cmd) => {
+    if (cmd === root || !cmd.options.some((x) => x.long === "--ledger")) return;
+    const own = cmd.opts();
+    const top = root.opts();
+    cmd.setOptionValue(
+      "ledger",
+      own.ledger ?? top.ledger ?? process.env.BIRDWATCH_LEDGER ?? "./ledger",
+    );
+    cmd.setOptionValue(
+      "writer",
+      own.writer ?? top.writer ?? process.env.BIRDWATCH_WRITER ?? userInfo().username,
+    );
+  });
   const machine = (c: Command) =>
     c
       .option(
@@ -558,12 +572,28 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     .description(
       "the extractor (a model behind the quote gate) over the documents named, else every one without a verdict; findings as JSON",
     )
-    .action(async (runId: string, documents: string[], o: Common & Machine & Agent) => {
-      const s = setup(o);
-      printDid(
-        await extract(depsOf(s, agentOf(o)), runId, documents.length ? documents : undefined),
-      );
-    });
+    .option(
+      "--limit <n>",
+      "at most n documents this call (a shell with a time cap); run it again for the rest",
+      (v) => Number(v),
+    )
+    .action(
+      async (
+        runId: string,
+        documents: string[],
+        o: Common & Machine & Agent & { limit?: number },
+      ) => {
+        const s = setup(o);
+        printDid(
+          await extract(
+            depsOf(s, agentOf(o)),
+            runId,
+            documents.length ? documents : undefined,
+            o.limit,
+          ),
+        );
+      },
+    );
 
   agent(machine(common(program.command("check <run> [finding...]"))))
     .description(
@@ -680,12 +710,22 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       added(o, runId, { type: "gap", note: text, ...(o.on ? { on: o.on } : {}) }),
     );
   agent(common(adds.command("pattern <run> <text>")))
+    .usage("<run> <text> --on <finding...> [options]")
     .description(
-      "what several kept findings say together: one sentence; the count of distinct sites is computed",
+      "what several kept findings say together: one sentence; the count of distinct sites is computed. --on takes findings of this run or of any run under it",
     )
-    .requiredOption("--on <finding...>", "the findings it rests on")
+    .requiredOption("--on <finding...>", "the findings it rests on (this run's or its children's)")
     .action((runId: string, text: string, o: Common & Agent & { on: string[] }) =>
       added(o, runId, { type: "pattern", text, findings: o.on }),
+    );
+
+  agent(common(adds.command("cap <root> <reads>")))
+    .description(
+      "raise or lower the pages a whole tree may read, on its root: the person's call (--human), with why",
+    )
+    .requiredOption("--why <why>")
+    .action((runId: string, reads: string, o: Common & Agent & { why: string }) =>
+      added(o, runId, { type: "cap", reads: Number(reads), why: o.why }),
     );
 
   agent(common(adds.command("dead <run> <facet>")))
