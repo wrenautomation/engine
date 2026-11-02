@@ -59,6 +59,7 @@ import {
   TreeGuide,
   treeOf,
 } from "../engine/plan.js";
+import { RUNS } from "../engine/tree.js";
 import { Step as PlanStep } from "../engine/types.js";
 import {
   FilesLedger,
@@ -399,6 +400,11 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       "a new run's parent: this run is a child of it (one niche of a wide run)",
     )
     .option("--why <why>", "with --parent: why this child")
+    .option(
+      "--reads <n>",
+      "a new root: the whole tree's read cap (else the plan file's runs.reads, else from the budget)",
+      (v) => Number(v),
+    )
     .action(
       async (
         ask: string | undefined,
@@ -414,14 +420,25 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
             criterion?: string[];
             site?: string;
             sources?: string[];
+            reads?: number;
           },
       ) => {
         if (!ask && !o.run) throw new Error("plan needs an ask, or --run <run>");
+        if (o.reads !== undefined && (o.run || o.parent))
+          throw new Error(
+            "plan --reads: a new root only; to raise a tree's cap, add cap <root> --human",
+          );
+        if (o.reads !== undefined && !(Number.isInteger(o.reads) && o.reads > 0))
+          throw new Error(`plan --reads: a whole number above 0; got ${o.reads}`);
         const s = setup(o);
         const kind = o.run
           ? (fold(o.run, await s.ledger.trace(o.run)).snapshot?.ask.kind ?? kindOf(o.kind))
           : kindOf(o.kind);
-        const { planFile, opens } = await planFileOf(s.ledger, s.sources, kind, o.sources);
+        const { planFile: file, opens } = await planFileOf(s.ledger, s.sources, kind, o.sources);
+        const planFile =
+          o.reads === undefined
+            ? file
+            : { ...file, runs: { ...RUNS, ...file.runs, reads: o.reads } };
         printDid(
           await planRound(depsOf(s, agentOf(o)), {
             ...(o.run ? { run: o.run } : {}),
@@ -794,7 +811,9 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
               : take === "drop"
                 ? { take, under: bar(o.under, "--under"), why: o.why }
                 : (() => {
-                    throw new Error(`accept: class, keep or drop; got ${take}`);
+                    throw new Error(
+                      `accept <run> <take>: the run first, then class, keep or drop; got "${runId} ${take}"`,
+                    );
                   })();
         const s = { ledger: ledgerOf(o), sources: registry(), model: null, judge: null };
         const out = await accept(depsOf(s, agentOf(o)), runId, a, whoOf(o));

@@ -33,7 +33,7 @@ you and the check agreed with it: a low agreement means read its hints less.
 
 ```sh
 birdwatch recall <terms> [--not <run>] [--also <ledger>...]   # what earlier runs found: quote, URL, source date, run, who wrote it
-birdwatch plan "<the ask>" [--kind web|video|site|channel|person] [--known "<fact> (<url>)"...] [--premise "<given>"...] [--site <host>]
+birdwatch plan "<the ask>" [--kind web|video|site|channel|person] [--known "<fact> (<url>)"...] [--premise "<given>"...] [--site <host>] [--reads N]   # --reads: a wide root's whole-tree read cap
 birdwatch brief <run>                                   # read it after every step
 birdwatch search <run> < tree.json                      # the round's query tree (below); or "<terms>" --why, or a JSON array
 birdwatch add call <run> <hit> keep|drop --why "<why>"  # triage, one per hit; the last call wins, a flip warns, a person's call stands over yours
