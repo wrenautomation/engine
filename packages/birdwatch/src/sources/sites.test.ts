@@ -1,7 +1,9 @@
 import { Transient } from "@wrenautomation/models";
 import type { LadderClient } from "@wrenautomation/read/fetch";
 import { describe, expect, it } from "vitest";
-import type { HitRecord } from "../ledger/records.js";
+import type { Source } from "../engine/ports.js";
+import { searchersFor } from "../engine/ports.js";
+import type { HitRecord, QueryRecord } from "../ledger/records.js";
 import {
   accountsFrom,
   facebookPost,
@@ -406,3 +408,56 @@ describe("site readers", () => {
     expect(JSON.parse(seen[2]?.body ?? "{}")).not.toHaveProperty("account");
   });
 });
+
+describe("reddit search", () => {
+  it("searches signed out, only on a query pinned to reddit.com", async () => {
+    const w = worker({
+      "reddit-public": {
+        data: {
+          children: [
+            {
+              kind: "t3",
+              data: {
+                permalink: "/r/startups/comments/1ab/first_sales_hire/",
+                title: "First sales hire",
+                subreddit: "startups",
+                selftext: "It took 7 months.",
+                created_utc: 1767225600,
+              },
+            },
+          ],
+        },
+      },
+    });
+    const src = redditSource({ sites: w.sites });
+    const q = { terms: "first sales hire", site: "reddit.com" } as QueryRecord;
+    expect(await src.search?.(q)).toEqual([
+      {
+        url: "https://www.reddit.com/r/startups/comments/1ab/first_sales_hire/",
+        title: "First sales hire",
+        channel: "r/startups",
+        date: "2026-01-01",
+        snippet: "It took 7 months.",
+      },
+    ]);
+    expect(w.calls).toEqual([
+      {
+        site: "reddit-public",
+        path: "/search",
+        input: { q: "first sales hire", limit: 25, sort: "relevance" },
+      },
+    ]);
+    const names = (site?: string) =>
+      searchersFor([src, exaLike], site ? { site } : {}).map((s) => s.name);
+    expect(names("www.reddit.com")).toEqual(["reddit"]);
+    expect(names()).toEqual(["exa"]);
+  });
+});
+
+const exaLike = {
+  name: "exa",
+  kind: "search",
+  cost: "metered",
+  keeps: (site: string) => !/(^|\.)reddit\.com$/i.test(site),
+  search: async () => [],
+} as Source;

@@ -16,7 +16,7 @@ names it. The ledger folder is `--ledger` (before or after the command) or `BIRD
 (default `./ledger`). Sources come from the environment. `~/.config/birdwatch/config.json`
 names the env files to read keys from, so no wrapper is needed; a set variable wins.
 `birdwatch sources` lists what this machine can run. A Reddit thread and a Facebook
-group post open through their own readers (`reddit`, `facebook`) before the page openers. Reddit
+group post open through their own readers (`reddit`, `facebook`) before the page openers. A query pinned to `reddit.com` also searches Reddit itself, signed out (it shares a daily read cap; Exa has no Reddit index). Reddit
 reads signed out, then as the account `BIRDWATCH_ACCOUNTS` names (`reddit=reddit@alt`); the person
 picks that account, never you. `google` searches Google's own page through the desk's browser:
 each result is a hit, and the AI Overview is one hit (channel "Google AI Overview") whose

@@ -36,7 +36,16 @@ export function searxng(o: {
         throw transport("searxng", err);
       });
       if (!res.ok) throw httpError("searxng", res);
-      const body = (await res.json()) as { results?: SearxResult[] };
+      const body = (await res.json()) as {
+        results?: SearxResult[];
+        unresponsive_engines?: [string, string][];
+      };
+      const down = body.unresponsive_engines ?? [];
+      // empty because its engines refused (rate limit, CAPTCHA): a failed search, not "no results"
+      if (!body.results?.length && down.length)
+        throw new Error(
+          `searxng: no engine answered: ${down.map(([e, why]) => `${e} (${why})`).join(", ")}`,
+        );
       return (body.results ?? [])
         .filter((r): r is SearxResult & { url: string } => typeof r.url === "string")
         .slice(0, o.n ?? 10)

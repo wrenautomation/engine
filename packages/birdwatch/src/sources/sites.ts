@@ -89,6 +89,9 @@ export function userHits(body: unknown): HitViewIn[] {
   });
 }
 
+/** Posts per Reddit search: one read, one listing page. */
+const SEARCH_LIMIT = 25;
+
 /** A Facebook group post's group and post ids. */
 export function facebookPost(url: string): { group: string; post: string } | null {
   const u = hostOf(url);
@@ -242,9 +245,18 @@ export function redditSource(o: { sites: LadderClient; account?: string }): Sour
   };
   return {
     name: "reddit",
-    kind: "open",
+    kind: "both",
     cost: "browser",
     first: true,
+    // site-wide search, signed out; only on a query pinned to reddit.com (the route's daily cap)
+    keeps: (site) => /(^|\.)reddit\.com$/i.test(site),
+    pinnedOnly: true,
+    async search(q) {
+      const input = { q: q.terms, limit: SEARCH_LIMIT, sort: "relevance" };
+      return userHits(
+        await routeCall(o.sites, "reddit signed out", "reddit-public", "/search", input),
+      );
+    },
     opens: (url) => redditThread(url) !== null,
     follows: (as, url) => as === "posts" && redditUser(url) !== null,
     async follow(_as, url, n) {

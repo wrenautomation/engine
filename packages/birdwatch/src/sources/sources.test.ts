@@ -59,6 +59,16 @@ const json = (body: unknown, status = 200, headers: Record<string, string> = {})
   });
 
 describe("searxng", () => {
+  it("engines that refused, with no results: a failed search, not an empty one", async () => {
+    const src = searxng({
+      url: "http://searx.local/",
+      fetchFn: async () =>
+        json({ results: [], unresponsive_engines: [["brave", "Suspended: too many requests"]] }),
+    });
+    await expect(src.search?.(query("x"))).rejects.toThrow(
+      "searxng: no engine answered: brave (Suspended: too many requests)",
+    );
+  });
   it("asks for JSON, prefixes a site, maps the free fields", async () => {
     const seen: string[] = [];
     const src = searxng({

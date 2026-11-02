@@ -54,6 +54,8 @@ export function exa(o: { keys: readonly string[]; fetchFn?: typeof fetch; n?: nu
   return {
     name: "exa",
     kind: "search",
+    // Exa has no Reddit index: a reddit.com query answers empty
+    keeps: (site) => !/(^|\.)reddit\.com$/i.test(site),
     cost: "metered",
     search: (q) =>
       post(EXA_SEARCH, {

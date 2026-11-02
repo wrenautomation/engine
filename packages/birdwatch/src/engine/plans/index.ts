@@ -30,8 +30,9 @@ export const TREE: TreeGuide = {
 const web: PlanFile = {
   id: "birdwatch/web",
   kind: "web",
-  version: 6,
-  sources: ["searxng", "exa", "google"],
+  version: 7,
+  // reddit searches only a query pinned to reddit.com
+  sources: ["searxng", "exa", "google", "reddit"],
   budget: { queries: 3, reads: 6, rounds: 3, checks: 3 },
   tree: TREE,
   age: "Prices, tools and numbers that move: prefer the last two years. A principle or a method can be old.",
