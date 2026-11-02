@@ -1,3 +1,4 @@
+import type { Model } from "@wrenautomation/models";
 import type { LadderClient } from "@wrenautomation/read/fetch";
 import { describe, expect, it } from "vitest";
 import { canonical } from "../engine/canonical.js";
@@ -23,6 +24,7 @@ import {
   searxng,
   ytdlpSource,
 } from "./index.js";
+import { pricedOf } from "./ytdlp.js";
 
 const base = {
   id: "r-1",
@@ -766,5 +768,34 @@ describe("paste and ledger", () => {
     );
     const hits = await ledgerSource(ledger).search?.(query("Staffing MARGINS"));
     expect(hits).toEqual([{ url: "https://l.example/1", title: "Staffing margins fall" }]);
+  });
+});
+
+describe("pricedOf", () => {
+  const priceOf = (usd: number | undefined) => (usd === undefined ? {} : { usd });
+  const fake = (usd: (number | undefined)[]): Model => ({
+    id: "gemini",
+    provider: "google",
+    takes: new Set(),
+    complete: async () => ({
+      text: "",
+      usage: priceOf(usd.shift()),
+      model: "gemini",
+      stop: "STOP",
+      ms: 0,
+      raw: {},
+    }),
+    ask: async () => ({ value: null as never, usage: priceOf(usd.shift()) }),
+  });
+  it("sums the calls; an unpriced call leaves the open unpriced", async () => {
+    const a = pricedOf(fake([0.01, 0.02]));
+    await a.model.complete("x");
+    await a.model.complete("y");
+    expect(a.usd()).toBeCloseTo(0.03);
+    const b = pricedOf(fake([0.01, undefined]));
+    await b.model.complete("x");
+    await b.model.complete("y");
+    expect(b.usd()).toBeUndefined();
+    expect(pricedOf(fake([])).usd()).toBe(0);
   });
 });

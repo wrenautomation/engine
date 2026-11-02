@@ -11,6 +11,30 @@ import type { Document } from "../document/index.js";
 import { youtubeId } from "../engine/canonical.js";
 import type { Source } from "../engine/ports.js";
 
+/** The model, with the sum of what its calls cost; undefined once a call came back unpriced. */
+export function pricedOf(m: Model): { model: Model; usd: () => number | undefined } {
+  let sum: number | undefined = 0;
+  const add = (usd: number | undefined) => {
+    sum = sum === undefined || usd === undefined ? undefined : sum + usd;
+  };
+  const model: Model = {
+    id: m.id,
+    provider: m.provider,
+    takes: m.takes,
+    async complete(r) {
+      const reply = await m.complete(r);
+      add(reply.usage?.usd);
+      return reply;
+    },
+    async ask(prompt, shape, o) {
+      const a = await m.ask(prompt, shape, o);
+      add(a.usage?.usd);
+      return a;
+    },
+  };
+  return { model, usd: () => sum };
+}
+
 export const videoDocument = (r: VideoRead): Document => ({
   url: r.url,
   media: "video",
@@ -124,12 +148,16 @@ export function ytdlpSource(o: {
     opens: isYoutube,
     async open(h) {
       if (!isYoutube(h.url)) throw new Error(`youtube: not a YouTube page: ${h.url}`);
-      return videoDocument(
-        await read(h.url, {
-          ytDlp: o.ytDlp,
-          ...(o.video ? { video: await videoModel(o.video) } : {}),
-        }),
+      const model = o.video ? await videoModel(o.video) : null;
+      const priced = model ? pricedOf(model) : null;
+      const doc = videoDocument(
+        await read(h.url, { ytDlp: o.ytDlp, ...(priced ? { video: priced.model } : {}) }),
       );
+      // captions: free; heard: the model's priced calls; an unpriced call leaves it unpriced
+      const usd = priced ? priced.usd() : 0;
+      // hidden: the spend reads it, the stored document never carries it
+      if (usd !== undefined) Object.defineProperty(doc, "usd", { value: usd, enumerable: false });
+      return doc;
     },
   };
 }
