@@ -122,9 +122,10 @@ export async function linkTo(
     warnings.push(
       `level ${level}, past runs.depth ${caps.depth}: a guard rail; the why says why a deeper run beats a sibling`,
     );
-  const reads = (await runTree(deps, to.run)).reads;
+  // a tree with a cap answers to it (the throw above); the run's own budget only guards an uncapped tree
+  const reads = room ? 0 : (await runTree(deps, to.run)).reads;
   const cap = up.budget.reads * up.budget.rounds;
-  if (reads >= cap)
+  if (!room && reads >= cap)
     warnings.push(
       `the tree under ${to.run} read ${reads} pages, past its budget of ${cap}: a guard rail, not a stop`,
     );

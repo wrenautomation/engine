@@ -34,15 +34,16 @@ you and the check agreed with it: a low agreement means read its hints less.
 ```sh
 birdwatch recall <terms> [--not <run>] [--also <ledger>...]   # what earlier runs found: quote, URL, source date, run, who wrote it
 birdwatch plan "<the ask>" [--kind web|video|site|channel|person] [--known "<fact> (<url>)"...] [--premise "<given>"...] [--site <host>] [--reads N]   # --reads: a wide root's whole-tree read cap
-birdwatch brief <run>                                   # read it after every step
+birdwatch brief <run>                                   # read it after every step; a field with no value is left out (read it with .get)
 birdwatch search <run> < tree.json                      # the round's query tree (below); or "<terms>" --why, or a JSON array
 birdwatch add call <run> <hit> keep|drop --why "<why>"  # triage, one per hit; the last call wins, a flip warns, a person's call stands over yours
+echo '[{"on":"<hit>","verdict":"keep","why":".."}]' | birdwatch add call <run>   # many calls, one process
 birdwatch open <run> [<hit>...] [--url <url>...] --why "<why>"   # then reads every kept hit without a document
 birdwatch open <run> --with <source>                    # an opener `sources` lists but the run lacks (a ladder that came later); it joins to open, never to search
 birdwatch show <run> <document> [--head N]              # the page's text: read it yourself
 birdwatch add finding <run> <document> --text "<sentence>" --quote "<quote on the page>"
 birdwatch add check <run> <finding> --ok|--fail --why "<why>"    # your own check; a fail drops it
-birdwatch extract <run> [--limit N]                     # bulk only: a model behind the quote gate; --limit: N pages a call
+birdwatch extract <run> [--limit N]                     # bulk only: a model behind the quote gate; --limit: N pages a call; a line per page on stderr
 birdwatch check <run> [-n N] [--patterns]               # bulk only: a model's check; --patterns: every finding a pattern rests on
 birdwatch add gap <run> "<what is still missing>"
 birdwatch add class <run> <document|finding> <class> --why "<why>"   # primary_data, survey, practitioner, vendor, forum, news, other

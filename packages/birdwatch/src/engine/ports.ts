@@ -76,6 +76,8 @@ export interface Deps {
   writer: string;
   /** The pause between tries of a call that failed with a Transient; `setTimeout` by default. A test passes a stub. */
   sleep?: (ms: number) => Promise<void>;
+  /** One line per finished unit of a long step (a page extracted); the CLI puts it on stderr. */
+  progress?: (line: string) => void;
 }
 
 /**

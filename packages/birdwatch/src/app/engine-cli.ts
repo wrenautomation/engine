@@ -10,6 +10,7 @@
  * Postgres. A step that stops on a transient failure (a 429, a 5xx, a dropped connection) exits
  * with its note; the agent runs it again, and it skips what its records show done.
  */
+
 import { mkdir, readFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { serve } from "@hono/node-server";
@@ -20,6 +21,7 @@ import type { LadderClient } from "@wrenautomation/read/fetch";
 import { PoliteFetcher, userAgent } from "@wrenautomation/read/fetch";
 import { geminiVideo } from "@wrenautomation/read/video";
 import type { Command } from "commander";
+import { z } from "zod";
 import type { Extractor } from "../document/index.js";
 import { claimExtractor } from "../document/index.js";
 import {
@@ -360,6 +362,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     clock: () => new Date(),
     ids: ulids(),
     writer,
+    progress: (line: string) => console.error(line),
   });
   /** The agent's id: `--by` or BIRDWATCH_AGENT. Every record it writes names it. */
   const agentOf = (o: Agent): string => {
@@ -402,7 +405,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     .option("--why <why>", "with --parent: why this child")
     .option(
       "--reads <n>",
-      "a new root: the whole tree's read cap (else the plan file's runs.reads, else from the budget)",
+      "a new root only: the whole tree's read cap (else the plan file's runs.reads, else from the budget); a child takes its root's",
       (v) => Number(v),
     )
     .action(
@@ -694,13 +697,38 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       (runId: string, document: string, o: Common & Agent & { text: string; quote: string }) =>
         added(o, runId, { type: "finding", document, text: o.text, quote: o.quote }),
     );
-  agent(common(adds.command("call <run> <on> <verdict>")))
-    .description("keep or drop a hit (read it or not) or a finding, with why")
-    .requiredOption("--why <why>")
-    .action((runId: string, on: string, verdict: string, o: Common & Agent & { why: string }) => {
-      if (verdict !== "keep" && verdict !== "drop") throw new Error("verdict: keep or drop");
-      return added(o, runId, { type: "call", on, verdict, why: o.why });
-    });
+  agent(common(adds.command("call <run> [on] [verdict]")))
+    .description(
+      'keep or drop a hit (read it or not) or a finding, with why. No <on>: on stdin, a JSON array of {"on","verdict","why"}, one record each',
+    )
+    .option("--why <why>")
+    .action(
+      async (
+        runId: string,
+        on: string | undefined,
+        verdict: string | undefined,
+        o: Common & Agent & { why?: string },
+      ) => {
+        const calls = on
+          ? [{ on, verdict, why: o.why }]
+          : z
+              .array(z.object({ on: z.string(), verdict: z.string(), why: z.string() }))
+              .parse(JSON.parse(await stdinText()));
+        // verdicts and whys checked before any write; an unknown id stops at its line
+        for (const c of calls) {
+          if (c.verdict !== "keep" && c.verdict !== "drop")
+            throw new Error(`${c.on}: verdict keep or drop; got ${c.verdict}`);
+          if (!c.why?.trim()) throw new Error(`${c.on}: --why`);
+        }
+        for (const c of calls)
+          await added(o, runId, {
+            type: "call",
+            on: c.on,
+            verdict: c.verdict as "keep" | "drop",
+            why: c.why as string,
+          });
+      },
+    );
   agent(common(adds.command("edge <run> <next>")))
     .description("the round's edge: again (a new round), stop, or back --to <step>")
     .requiredOption("--why <why>")

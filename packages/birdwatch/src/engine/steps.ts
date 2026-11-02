@@ -474,6 +474,9 @@ export async function extractDocuments(
     dropped += g.out.dropped.length;
     continued += g.out.continued ?? 0;
     done++;
+    ctx.deps.progress?.(
+      `extract ${done}/${docs.length}: ${d.url} (${g.out.findings.length} findings)`,
+    );
   });
   if (got.transient)
     throw stopped(got.transient, `${proposed} findings from ${done} of ${docs.length} documents`);
