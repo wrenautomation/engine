@@ -1,7 +1,7 @@
 /**
  * The machine's config: which env files birdwatch reads its keys from, so an agent's shell
  * needs no wrapper. `~/.config/birdwatch/config.json` (or BIRDWATCH_CONFIG):
- * `{ "env": ["/path/llm.env"], "keys": ["EXA_API_KEY*", "RESTATE_INGRESS_URL=WREN_RESTATE_INGRESS_URL"], "vars": { "BIRDWATCH_CONTACT": "..." } }`.
+ * `{ "env": ["/path/llm.env"], "keys": ["EXA_API_KEY*", "RESTATE_AUTH_TOKEN"], "vars": { "RESTATE_INGRESS_URL": "https://restate.example.com" } }`.
  * `keys` limits what is taken (a trailing `*` takes a prefix; `A=B` takes B as A); absent, all.
  * A variable already set always wins. Values are never printed.
  */

@@ -30,7 +30,8 @@ export function searxng(o: {
       u.searchParams.set("q", q.site ? `site:${q.site} ${q.terms}` : q.terms);
       u.searchParams.set("format", "json");
       const res = await fetchFn(u, {
-        signal: AbortSignal.timeout(30_000),
+        // Wren's instance queues a burst up to 60 s (deploy/vps/search.nginx)
+        signal: AbortSignal.timeout(90_000),
         ...(o.token ? { headers: { authorization: `Bearer ${o.token}` } } : {}),
       }).catch((err) => {
         throw transport("searxng", err);
