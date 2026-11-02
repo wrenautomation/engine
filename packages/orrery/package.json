@@ -1,6 +1,6 @@
 {
   "name": "@wrenautomation/orrery",
-  "version": "0.30.5",
+  "version": "0.30.6",
   "description": "The logic of a map you fold: the fold tree, nested layout over any engine, and the glide between frames. No renderer, no framework.",
   "repository": {
     "type": "git",
