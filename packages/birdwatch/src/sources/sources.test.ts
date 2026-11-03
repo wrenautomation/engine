@@ -20,8 +20,8 @@ import {
   ledgerSource,
   overviewUrl,
   paste,
-  postsOf,
   perplexity,
+  postsOf,
   searxng,
   ytdlpSource,
 } from "./index.js";
