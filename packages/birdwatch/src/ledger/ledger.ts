@@ -4,7 +4,7 @@
  * channels and ask kinds yielded, as the yield rows. The yield is a fold over records, shared here
  * so the files backend and a database compute the same rows (a database may do it in SQL).
  */
-import type { AskKind, PlanFile, YieldRow } from "../engine/types.js";
+import type { AskKind, LiftRow, MetricKey, PlanFile, YieldRow } from "../engine/types.js";
 import {
   byTime,
   type From,
@@ -142,4 +142,74 @@ export function yieldRows(records: readonly LedgerRecord[], filter: YieldFilter 
     proposed: t.proposed.size,
     kept: t.kept.size,
   }));
+}
+
+export interface LiftFilter {
+  /** The count compared; `likes` unless asked (a YouTube listing carries `views` only). */
+  metric?: MetricKey;
+  channel?: string;
+  source?: string;
+  /** Posts an author needs before a baseline is read: fewer, and `lift` stays null. */
+  minN?: number;
+}
+
+/** Below it an author's median is noise: one hit would be its own baseline. */
+export const LIFT_MIN_N = 5;
+
+const median = (xs: number[]): number => {
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = s.length >> 1;
+  return s.length % 2 ? (s[mid] as number) : ((s[mid - 1] as number) + (s[mid] as number)) / 2;
+};
+
+/**
+ * Each hit's draw against its author's own: `lift` is the hit's count over the median of every
+ * hit of that channel that carries the count (the latest record per URL across runs, since a
+ * count moves). One author's baseline, so a big account and a small one compare by lift, not by
+ * size. `n` is the posts behind the median; under `minN` the lift is null, never 1.
+ */
+export function liftRows(records: readonly LedgerRecord[], filter: LiftFilter = {}): LiftRow[] {
+  const metric = filter.metric ?? "likes";
+  const minN = filter.minN ?? LIFT_MIN_N;
+  const latest = new Map<string, RecordOf<"hit">>();
+  for (const h of ofType([...records].sort(byTime), "hit")) {
+    if (h.metrics?.[metric] === undefined) continue;
+    if (filter.source && !h.sources.includes(filter.source)) continue;
+    latest.set(h.key, h);
+  }
+  const byChannel = new Map<string, RecordOf<"hit">[]>();
+  for (const h of latest.values()) {
+    const c = h.channel ?? "";
+    const list = byChannel.get(c) ?? [];
+    list.push(h);
+    byChannel.set(c, list);
+  }
+  const out: LiftRow[] = [];
+  for (const [channel, hits] of byChannel) {
+    if (filter.channel && channel !== filter.channel) continue;
+    const values = hits.map((h) => h.metrics?.[metric] as number);
+    const base = channel && hits.length >= minN ? median(values) : null;
+    for (const h of hits) {
+      const value = h.metrics?.[metric] as number;
+      out.push({
+        url: h.url,
+        ...(h.title ? { title: h.title } : {}),
+        ...(channel ? { channel } : {}),
+        ...(h.date ? { date: h.date } : {}),
+        sources: h.sources,
+        metric,
+        value,
+        n: channel ? hits.length : 1,
+        median: base,
+        lift: base === null ? null : base === 0 ? (value === 0 ? 1 : null) : value / base,
+      });
+    }
+  }
+  // the biggest lift first; a hit with no baseline last, by its raw count
+  return out.sort(
+    (a, b) =>
+      Number(b.lift !== null) - Number(a.lift !== null) ||
+      (b.lift ?? 0) - (a.lift ?? 0) ||
+      b.value - a.value,
+  );
 }

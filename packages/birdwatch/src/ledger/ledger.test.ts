@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { FilesLedger } from "./files.js";
 import { countingIds } from "./ids.js";
-import { yieldRows } from "./ledger.js";
+import { liftRows, yieldRows } from "./ledger.js";
 import { MemoryLedger } from "./memory.js";
 import { type Envelope, LedgerRecord } from "./records.js";
 
@@ -255,5 +255,55 @@ describe("memory ledger", () => {
     expect((await m.trace("run1"))[0]?.type).toBe("query");
     expect((await m.scan({ step: "extract" })).length).toBe(3);
     expect((await m.yield()).length).toBeGreaterThan(0);
+  });
+});
+
+describe("lift", () => {
+  const post = (i: number, channel: string | undefined, likes: number, at = 1): LedgerRecord => ({
+    ...base({ id: `h-${i}-${at}`, at: `2026-10-27T10:0${at}:00.000Z`, step: "fetch" }),
+    type: "hit",
+    url: `https://p/${i}`,
+    key: `https://p/${i}`,
+    sources: i % 2 ? ["linkedin"] : ["hn"],
+    queries: [],
+    ...(channel ? { channel } : {}),
+    metrics: { likes, ...(i === 1 ? { comments: 4 } : {}) },
+  });
+  const records = [
+    post(1, "in/jane", 10),
+    post(2, "in/jane", 20),
+    post(3, "in/jane", 30),
+    post(4, "in/jane", 40),
+    post(5, "in/jane", 150),
+    post(5, "in/jane", 300, 2), // the same post, read later: the later count stands
+    post(6, "in/bob", 7),
+    post(7, undefined, 99),
+    { ...post(8, "in/jane", 0), metrics: { views: 5 } },
+  ];
+  it("reads each hit against its author's median, the latest record per URL", () => {
+    const rows = liftRows(records);
+    expect(rows.map((r) => [r.url, r.value, r.median, r.lift, r.n])).toEqual([
+      ["https://p/5", 300, 30, 10, 5],
+      ["https://p/4", 40, 30, 4 / 3, 5],
+      ["https://p/3", 30, 30, 1, 5],
+      ["https://p/2", 20, 30, 2 / 3, 5],
+      ["https://p/1", 10, 30, 1 / 3, 5],
+      ["https://p/7", 99, null, null, 1],
+      ["https://p/6", 7, null, null, 1],
+    ]);
+    expect(rows[0]).toMatchObject({ channel: "in/jane", sources: ["linkedin"], metric: "likes" });
+  });
+  it("takes a metric, a channel, a source and a floor", () => {
+    expect(liftRows(records, { metric: "views" }).map((r) => r.url)).toEqual(["https://p/8"]);
+    expect(liftRows(records, { metric: "comments" })).toHaveLength(1);
+    expect(liftRows(records, { channel: "in/bob", minN: 1 })).toEqual([
+      expect.objectContaining({ url: "https://p/6", median: 7, lift: 1, n: 1 }),
+    ]);
+    // a source filter narrows the baseline to what that source listed
+    expect(liftRows(records, { source: "hn", minN: 2 }).map((r) => [r.url, r.n])).toEqual([
+      ["https://p/4", 2],
+      ["https://p/2", 2],
+      ["https://p/6", 1],
+    ]);
   });
 });

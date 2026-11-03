@@ -13,6 +13,7 @@ import {
   exa,
   fetcherSource,
   googleSource,
+  hn,
   httpLadderClient,
   ingressLadderClient,
   LadderCallError,
@@ -97,6 +98,108 @@ describe("searxng", () => {
     expect(hits).toEqual([
       { url: "https://a.example/x", title: "A", snippet: "about a", date: "2026-01-02" },
     ]);
+  });
+});
+
+describe("hn", () => {
+  it("searches stories, lists a user's, reads a thread as data, each with its draw", async () => {
+    const urls: string[] = [];
+    const src = hn({
+      n: 2,
+      fetchFn: async (u) => {
+        urls.push(String(u));
+        if (String(u).includes("/items/"))
+          return json({
+            id: 17926576,
+            type: "story",
+            title: "How to make your first sales hire",
+            url: "https://g.example/guide",
+            author: "jhchen",
+            points: 110,
+            created_at: "2018-09-06T14:33:58Z",
+            text: null,
+            children: [
+              {
+                author: "a",
+                text: "Hire two at once.<p>One fails.",
+                children: [{ author: "b", text: "Or &#x27;none&#x27; yet", children: [] }],
+              },
+              { author: null, text: null, children: [] },
+            ],
+          });
+        return json({
+          hits: [
+            {
+              objectID: "17926576",
+              title: "How to make your first sales hire",
+              url: "https://g.example/guide",
+              author: "jhchen",
+              points: 110,
+              num_comments: 23,
+              created_at: "2018-09-06T14:33:58Z",
+              story_text: null,
+            },
+            {
+              objectID: "39454046",
+              title: "Ask HN: first sales hire got more equity?",
+              url: null,
+              author: "elint",
+              points: 5,
+              num_comments: 7,
+              created_at: "2024-02-21T14:14:49Z",
+              story_text: "I&#x27;m joining as CTO.<p>Red flag?",
+            },
+          ],
+        });
+      },
+    });
+    const hits = await src.search?.(query("first sales hire"));
+    expect(urls[0]).toBe(
+      "https://hn.algolia.com/api/v1/search?query=first%20sales%20hire&tags=story&hitsPerPage=2",
+    );
+    expect(hits).toEqual([
+      {
+        url: "https://news.ycombinator.com/item?id=17926576",
+        title: "How to make your first sales hire",
+        channel: "hn/jhchen",
+        date: "2018-09-06",
+        snippet: "Link: https://g.example/guide",
+        metrics: { likes: 110, comments: 23 },
+      },
+      {
+        url: "https://news.ycombinator.com/item?id=39454046",
+        title: "Ask HN: first sales hire got more equity?",
+        channel: "hn/elint",
+        date: "2024-02-21",
+        snippet: "I'm joining as CTO.\n\nRed flag?",
+        metrics: { likes: 5, comments: 7 },
+      },
+    ]);
+    expect(src.keeps?.("news.ycombinator.com")).toBe(true);
+    expect(src.keeps?.("example.com")).toBe(false);
+    expect(src.follows?.("posts", "https://news.ycombinator.com/user?id=jhchen")).toBe(true);
+    expect(src.follows?.("posts", "https://news.ycombinator.com/item?id=1")).toBe(false);
+    await src.follow?.("posts", "https://news.ycombinator.com/user?id=jhchen", 30);
+    expect(urls[1]).toBe(
+      "https://hn.algolia.com/api/v1/search_by_date?tags=story,author_jhchen&hitsPerPage=30",
+    );
+    expect(src.opens?.("https://news.ycombinator.com/item?id=17926576")).toBe(true);
+    expect(src.opens?.("https://news.ycombinator.com/user?id=jhchen")).toBe(false);
+    const doc = await src.open?.(hit("https://news.ycombinator.com/item?id=17926576"));
+    expect(urls[2]).toBe("https://hn.algolia.com/api/v1/items/17926576");
+    expect(doc).toEqual({
+      url: "https://news.ycombinator.com/item?id=17926576",
+      media: "text",
+      title: "How to make your first sales hire",
+      channel: "hn/jhchen",
+      date: "2018-09-06",
+      text: [
+        "How to make your first sales hire",
+        "by jhchen · 110 points · 2 comments",
+        "Link: https://g.example/guide",
+        "Comments:\n\na: Hire two at once.\n\nOne fails.\n\n> b: Or 'none' yet",
+      ].join("\n\n"),
+    });
   });
 });
 
@@ -747,6 +850,11 @@ describe("youtube", () => {
     expect(src.opens?.("https://youtu.be/abc123def45")).toBe(true);
     await expect(src.open?.(hit("https://other.example/v"))).rejects.toThrow("not a YouTube page");
     expect(entryHit({})).toBeNull();
+    // a flat listing carries views; like and comment counts come only with a video's own page
+    expect(entryHit({ id: "abc123def45", view_count: 471 })).toEqual({
+      url: "https://www.youtube.com/watch?v=abc123def45",
+      metrics: { views: 471 },
+    });
   });
 
   it("follows a video to its channel's uploads; a TikTok profile to its posts", async () => {
@@ -769,12 +877,16 @@ describe("youtube", () => {
     const listed: unknown[] = [];
     const src = ytdlpSource({
       ytDlp: "yt-dlp",
-      info: async () => ({ channel_url: "https://www.youtube.com/channel/UC1" }),
-      list: async (_cmd, target, range) => {
+      // a listing names the channel on the page, not on each entry
+      info: async (_cmd, target, range) => {
+        if (!range) return { channel_url: "https://www.youtube.com/channel/UC1" };
         listed.push({ target, range });
         return target.includes("tiktok")
-          ? [{ url: "https://www.tiktok.com/@bee/video/2", title: "tt" }]
-          : [{ id: "xyz123def45", title: "next", channel: "Bee" }];
+          ? { entries: [{ url: "https://www.tiktok.com/@bee/video/2", title: "tt" }] }
+          : { channel: "Bee", entries: [{ id: "xyz123def45", title: "next", view_count: 25000 }] };
+      },
+      list: async () => {
+        throw new Error("unused");
       },
       read: async () => {
         throw new Error("unused");
@@ -783,7 +895,12 @@ describe("youtube", () => {
     expect(src.follows?.("posts", "https://youtu.be/abc123def45")).toBe(true);
     expect(src.follows?.("similar", "https://youtu.be/abc123def45")).toBe(false);
     expect(await src.follow?.("posts", "https://youtu.be/abc123def45", 3)).toEqual([
-      { url: "https://www.youtube.com/watch?v=xyz123def45", title: "next", channel: "Bee" },
+      {
+        url: "https://www.youtube.com/watch?v=xyz123def45",
+        title: "next",
+        channel: "Bee",
+        metrics: { views: 25000 },
+      },
     ]);
     expect(await src.follow?.("posts", "https://www.tiktok.com/@bee", 3)).toEqual([
       { url: "https://www.tiktok.com/@bee/video/2", title: "tt" },

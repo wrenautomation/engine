@@ -152,6 +152,24 @@ export const YieldRow = z.object({
 });
 export type YieldRow = z.infer<typeof YieldRow>;
 
+/** One hit's draw against its author's median: what `lift` lists. */
+export const LiftRow = z.object({
+  url: z.string(),
+  title: z.string().optional(),
+  channel: z.string().optional(),
+  date: z.string().optional(),
+  sources: z.array(z.string()),
+  metric: z.enum(["views", "likes", "comments", "shares", "saves"]),
+  value: z.number(),
+  /** Posts of the channel behind the median. */
+  n: z.number().int().nonnegative(),
+  /** Null: no channel, or fewer posts than the floor. */
+  median: z.number().nullable(),
+  /** `value` over `median`; null with no median, or a zero median and a count. */
+  lift: z.number().nullable(),
+});
+export type LiftRow = z.infer<typeof LiftRow>;
+
 /** What a round was planned from, kept with its snapshot. */
 export const Snapshot = z.object({
   at: z.string(),
@@ -161,6 +179,19 @@ export const Snapshot = z.object({
   yieldRows: z.number().int().nonnegative(),
 });
 export type Snapshot = z.infer<typeof Snapshot>;
+
+/** A whole count, as a site shows it. */
+const count = z.number().int().nonnegative();
+/**
+ * What a post drew, as its site counts it when the source lists it: the reach and engagement a
+ * source shows for free. `likes` is the site's one up-vote (reactions, points, score).
+ */
+export const Metrics = z
+  .object({ views: count, likes: count, comments: count, shares: count, saves: count })
+  .partial();
+export type Metrics = z.infer<typeof Metrics>;
+export const METRIC_KEYS = Metrics.keyof().options;
+export type MetricKey = (typeof METRIC_KEYS)[number];
 
 /** A hit as a source shows it for free: no read has happened. `sources` is every source that returned it. */
 export const HitView = z.object({
@@ -172,6 +203,8 @@ export const HitView = z.object({
   /** ISO date, when the source gives one. */
   date: z.string().optional(),
   snippet: z.string().optional(),
+  /** What the post drew, when the source lists it (a listing's view count, a post's reactions). */
+  metrics: Metrics.optional(),
   sources: z.array(z.string()).default([]),
   /** The judge's yes odds by question (serves, each criterion): a hint the brief shows. */
   odds: z.record(z.string(), z.number()).optional(),

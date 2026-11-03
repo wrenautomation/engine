@@ -53,11 +53,22 @@ describe("plan inputs", () => {
 
   it("dedupes hits by url and keeps every source", () => {
     const out = dedupeHits([
-      { url: "https://a.example", title: "A", sources: ["exa"] },
-      { url: "https://a.example", snippet: "s", sources: ["searxng", "exa"] },
+      { url: "https://a.example", title: "A", sources: ["exa"], metrics: { likes: 3 } },
+      {
+        url: "https://a.example",
+        snippet: "s",
+        sources: ["searxng", "exa"],
+        metrics: { likes: 9, comments: 2 },
+      },
       { url: "https://b.example", sources: [] },
     ]);
     expect(out).toHaveLength(2);
-    expect(out[0]).toMatchObject({ title: "A", snippet: "s", sources: ["exa", "searxng"] });
+    // each count from the first source that showed it
+    expect(out[0]).toMatchObject({
+      title: "A",
+      snippet: "s",
+      sources: ["exa", "searxng"],
+      metrics: { likes: 3, comments: 2 },
+    });
   });
 });

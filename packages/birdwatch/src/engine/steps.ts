@@ -186,6 +186,8 @@ export function dedupeHits(hits: readonly HitViewIn[]): HitView[] {
     for (const k of ["title", "channel", "length", "date", "snippet"] as const) {
       if (have[k] === undefined && h[k] !== undefined) (have as Record<string, unknown>)[k] = h[k];
     }
+    // each count from whichever source showed it; the first source's number stands
+    if (h.metrics) have.metrics = { ...h.metrics, ...have.metrics };
   }
   return [...byUrl.values()];
 }

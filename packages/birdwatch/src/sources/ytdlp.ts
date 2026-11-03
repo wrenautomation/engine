@@ -10,6 +10,7 @@ import { flatPlaylist, pageInfo, readYoutube, type YtDlpEntry } from "@wrenautom
 import type { Document } from "../document/index.js";
 import { youtubeId } from "../engine/canonical.js";
 import type { Source } from "../engine/ports.js";
+import { metricsOf } from "./metrics.js";
 
 /** The model, with the sum of what its calls cost; undefined once a call came back unpriced. */
 export function pricedOf(m: Model): { model: Model; usd: () => number | undefined } {
@@ -58,6 +59,7 @@ export const entryHit = (e: YtDlpEntry, site: "youtube" | "other" = "youtube") =
     ...(e.duration !== undefined ? { length: Math.round(e.duration) } : {}),
     ...(e.timestamp ? { date: new Date(e.timestamp * 1000).toISOString().slice(0, 10) } : {}),
     ...(e.description ? { snippet: e.description.slice(0, 300) } : {}),
+    ...metricsOf({ views: e.view_count, likes: e.like_count, comments: e.comment_count }),
   };
 };
 
@@ -140,9 +142,18 @@ export function ytdlpSource(o: {
       }
       if (!at) throw new Error(`youtube: no posts page for ${url}`);
       const site = at.site;
-      const entries = await list(o.ytDlp, at.target, { start: 1, end: n });
-      return entries
-        .map((e) => entryHit(e, site))
+      // one call: a channel listing names the channel on the page, not on each entry
+      const page = (await info(o.ytDlp, at.target, { start: 1, end: n })) as {
+        channel?: string;
+        uploader?: string;
+        entries?: YtDlpEntry[];
+      };
+      const owner = page.channel ?? page.uploader;
+      return (page.entries ?? [])
+        .filter((e) => e.id || e.url || e.webpage_url)
+        .map((e) =>
+          entryHit(owner && !e.channel && !e.uploader ? { ...e, channel: owner } : e, site),
+        )
         .filter((h): h is NonNullable<typeof h> => h !== null);
     },
     opens: isYoutube,

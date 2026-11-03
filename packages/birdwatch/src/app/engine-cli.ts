@@ -1,6 +1,6 @@
 /**
  * The engine from a shell, one step per command for the agent that drives it: `plan`, `search`,
- * `open`, `extract`, `check`, `add`, `brief`, `trace` a run, `yield` per source, `sources` on this
+ * `open`, `extract`, `check`, `add`, `brief`, `trace` a run, `yield` per source, `lift` per author, `sources` on this
  * machine. Every command prints JSON. The ledger is a folder (`--ledger`, BIRDWATCH_LEDGER, default `./ledger`); a
  * writer names this terminal's file in it (`--writer`, BIRDWATCH_WRITER, default the user name).
  * The model is a `@wrenautomation/models` spec: `anthropic` by default (Claude Haiku direct,
@@ -62,11 +62,13 @@ import {
   treeOf,
 } from "../engine/plan.js";
 import { RUNS } from "../engine/tree.js";
-import { Step as PlanStep } from "../engine/types.js";
+import { METRIC_KEYS, Step as PlanStep } from "../engine/types.js";
 import {
   FilesLedger,
   FollowAs,
   type Ledger,
+  LIFT_MIN_N,
+  liftRows,
   type Problem,
   SOURCE_CLASSES,
   SourceClass,
@@ -79,10 +81,12 @@ import {
   facebookSource,
   fetcherSource,
   googleSource,
+  hn,
   httpLadderClient,
   ingressLadderClient,
   ladderSource,
   ledgerSource,
+  linkedinSource,
   perplexity,
   redditSource,
   searxng,
@@ -165,6 +169,7 @@ export function sourcesHere(
   if (exaKeys.length) out.push(exa({ keys: exaKeys }));
   const pplxKeys = keys(printed, "PERPLEXITY_API_KEY");
   if (pplxKeys.length) out.push(perplexity({ keys: pplxKeys }));
+  out.push(hn());
   const geminiKeys = keys(printed, "GEMINI_API_KEY");
   out.push(
     ytdlpSource({
@@ -208,6 +213,9 @@ export function sourcesHere(
       facebookSource({ sites }),
       googleSource({ sites }),
     );
+    // LinkedIn reads only as a named account: the bare `linkedin` is a person's own profile.
+    const linkedin = accounts.get("linkedin");
+    if (linkedin) out.push(linkedinSource({ sites, account: linkedin }));
   }
   out.push(ledgerSource(ledger));
   return registry(...out);
@@ -1014,6 +1022,42 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
           ...(o.by ? { by: o.by } : {}),
           ...(o.channel ? { channel: o.channel } : {}),
           ...(o.kind ? { kind: defaultPlanFile(o.kind as never).kind } : {}),
+        });
+        console.log(JSON.stringify(rows, null, 2));
+      },
+    );
+
+  common(program.command("lift"))
+    .description(
+      "each hit's count over its author's median (the latest record per URL, every run): which posts drew more than their author usually does",
+    )
+    .option(
+      "--metric <name>",
+      "views|likes|comments|shares|saves (a YouTube listing carries views only)",
+      "likes",
+    )
+    .option("--channel <name>")
+    .option("--source <name>")
+    .option("--run <id>", "one run's hits only")
+    .option("--min-n <n>", "posts an author needs before a baseline is read", String(LIFT_MIN_N))
+    .action(
+      async (
+        o: Common & {
+          metric: string;
+          channel?: string;
+          source?: string;
+          run?: string;
+          minN: string;
+        },
+      ) => {
+        const metric = METRIC_KEYS.find((k) => k === o.metric);
+        if (!metric) throw new Error(`--metric: one of ${METRIC_KEYS.join(", ")}`);
+        const records = await ledgerOf(o).scan({ type: "hit", ...(o.run ? { run: o.run } : {}) });
+        const rows = liftRows(records, {
+          metric,
+          minN: Number(o.minN),
+          ...(o.channel ? { channel: o.channel } : {}),
+          ...(o.source ? { source: o.source } : {}),
         });
         console.log(JSON.stringify(rows, null, 2));
       },

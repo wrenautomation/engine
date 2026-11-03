@@ -11,6 +11,7 @@ import {
   httpLadderClient,
   ingressLadderClient,
   LadderCallError,
+  linkedinSource,
   redditSource,
   redditThread,
   redditUser,
@@ -423,6 +424,8 @@ describe("reddit search", () => {
                 subreddit: "startups",
                 selftext: "It took 7 months.",
                 created_utc: 1767225600,
+                score: 41,
+                num_comments: 12,
               },
             },
           ],
@@ -438,6 +441,7 @@ describe("reddit search", () => {
         channel: "r/startups",
         date: "2026-01-01",
         snippet: "It took 7 months.",
+        metrics: { likes: 41, comments: 12 },
       },
     ]);
     expect(w.calls).toEqual([
@@ -454,10 +458,113 @@ describe("reddit search", () => {
   });
 });
 
+describe("linkedin", () => {
+  const posts = {
+    posts: [
+      {
+        urn: "urn:li:activity:1",
+        author: "Jane Doe",
+        authorUrl: "https://www.linkedin.com/in/jane-doe/",
+        text: " We hired two reps at once. ",
+        at: "2026-10-20T08:00:00.000Z",
+        reactions: 120,
+        comments: 14,
+        url: "https://www.linkedin.com/feed/update/urn:li:activity:1/",
+      },
+      {
+        urn: "urn:li:activity:2",
+        author: "Acme",
+        authorUrl: null,
+        text: "",
+        reactions: 0,
+        comments: 0,
+        url: "https://www.linkedin.com/feed/update/urn:li:activity:2/",
+      },
+    ],
+    dropped: 1,
+  };
+  it("searches posts as the named account, only on a query pinned to linkedin.com", async () => {
+    const w = worker({ linkedin: posts });
+    const src = linkedinSource({ sites: w.sites, account: "linkedin@wren" });
+    const q = { terms: "first sales hire", site: "linkedin.com" } as QueryRecord;
+    expect(await src.search?.(q)).toEqual([
+      {
+        url: "https://www.linkedin.com/feed/update/urn:li:activity:1/",
+        channel: "in/jane-doe",
+        date: "2026-10-20",
+        snippet: "We hired two reps at once.",
+        metrics: { likes: 120, comments: 14 },
+      },
+      {
+        url: "https://www.linkedin.com/feed/update/urn:li:activity:2/",
+        channel: "Acme",
+        metrics: { likes: 0, comments: 0 },
+      },
+    ]);
+    expect(w.calls).toEqual([
+      {
+        site: "linkedin",
+        path: "/search/results/content",
+        input: { keywords: "first sales hire", max: 50, since: "past-month" },
+        account: "linkedin@wren",
+      },
+    ]);
+    const names = (site?: string) =>
+      searchersFor([src, exaLike], site ? { site } : {}).map((s) => s.name);
+    expect(names("www.linkedin.com")).toEqual(["linkedin"]);
+    expect(names()).toEqual(["exa"]);
+  });
+
+  it("follows a member to their own posts and a Page to its posts", async () => {
+    const w = worker({
+      linkedin: (c: Call) =>
+        c.path.endsWith("/activity")
+          ? {
+              activity: [
+                {
+                  kind: "post",
+                  urn: "u:1",
+                  text: "Mine",
+                  reactions: 9,
+                  comments: 1,
+                  url: "https://www.linkedin.com/feed/update/u:1/",
+                },
+                {
+                  kind: "repost",
+                  urn: "u:2",
+                  text: "Theirs",
+                  reactions: 900,
+                  comments: 50,
+                  url: "https://www.linkedin.com/feed/update/u:2/",
+                },
+              ],
+            }
+          : posts,
+    });
+    const src = linkedinSource({ sites: w.sites, account: "linkedin@wren" });
+    expect(src.follows?.("posts", "https://www.linkedin.com/in/Jane-Doe/")).toBe(true);
+    expect(src.follows?.("posts", "https://www.linkedin.com/feed/update/u:1/")).toBe(false);
+    expect(await src.follow?.("posts", "https://www.linkedin.com/in/Jane-Doe/", 30)).toEqual([
+      {
+        url: "https://www.linkedin.com/feed/update/u:1/",
+        channel: "in/jane-doe",
+        snippet: "Mine",
+        metrics: { likes: 9, comments: 1 },
+      },
+    ]);
+    const page = await src.follow?.("posts", "https://www.linkedin.com/company/acme/posts/", 80);
+    expect(page?.map((h) => h.channel)).toEqual(["company/acme", "company/acme"]);
+    expect(w.calls.map((c) => [c.path, c.input])).toEqual([
+      ["/in/jane-doe/activity", { vanity: "jane-doe", max: 30 }],
+      ["/company/acme/posts", { company: "acme", max: 50 }],
+    ]);
+  });
+});
+
 const exaLike = {
   name: "exa",
   kind: "search",
   cost: "metered",
-  keeps: (site: string) => !/(^|\.)reddit\.com$/i.test(site),
+  keeps: (site: string) => !/(^|\.)(reddit|linkedin)\.com$/i.test(site),
   search: async () => [],
 } as Source;

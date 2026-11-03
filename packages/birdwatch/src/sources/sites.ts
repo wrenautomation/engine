@@ -24,6 +24,7 @@ import type { Source } from "../engine/ports.js";
 import type { HitViewIn } from "../engine/types.js";
 import { junkReason } from "./junk.js";
 import { LadderCallError } from "./ladder.js";
+import { metricsOf } from "./metrics.js";
 
 /** `reddit=reddit@alt,linkedin=linkedin@wren`: the account each site reader signs in as. */
 export function accountsFrom(spec: string | undefined): Map<string, string> {
@@ -84,6 +85,7 @@ export function userHits(body: unknown): HitViewIn[] {
         ...(str(t.subreddit) ? { channel: `r/${str(t.subreddit)}` } : {}),
         ...(created ? { date: new Date(created * 1000).toISOString().slice(0, 10) } : {}),
         ...(words ? { snippet: words.slice(0, 300) } : {}),
+        ...metricsOf({ likes: num(t.score), comments: num(t.num_comments) }),
       },
     ];
   });
@@ -105,6 +107,7 @@ export function facebookPost(url: string): { group: string; post: string } | nul
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
+const num = (v: unknown): number | undefined => (typeof v === "number" ? v : undefined);
 const things = (listing: unknown): Obj[] => {
   const data = isObj(listing) && isObj(listing.data) ? listing.data : {};
   const children = Array.isArray(data.children) ? data.children : [];

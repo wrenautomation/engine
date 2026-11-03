@@ -16,7 +16,7 @@ names it. The ledger folder is `--ledger` (before or after the command) or `BIRD
 (default `./ledger`). Sources come from the environment. `~/.config/birdwatch/config.json`
 names the env files to read keys from, so no wrapper is needed; a set variable wins.
 `birdwatch sources` lists what this machine can run. A Reddit thread and a Facebook
-group post open through their own readers (`reddit`, `facebook`) before the page openers. A query pinned to `reddit.com` also searches Reddit itself, signed out (it shares a daily read cap; Exa has no Reddit index). Reddit
+group post open through their own readers (`reddit`, `facebook`) before the page openers. A query pinned to `reddit.com` also searches Reddit itself, signed out (it shares a daily read cap; Exa has no Reddit index). `hn` searches Hacker News (free) and reads a thread with every comment. A query pinned to `linkedin.com` searches LinkedIn posts through the desk, only as the account `BIRDWATCH_ACCOUNTS` names (`linkedin=linkedin@wren`; never the bare `linkedin`, a person's own profile). A hit's `metrics` (views, likes, comments) are what the listing showed: a post's draw, before any read; `follow --as posts` on an author then `lift` reads each post against that author's own median. Reddit
 reads signed out, then as the account `BIRDWATCH_ACCOUNTS` names (`reddit=reddit@alt`); the person
 picks that account, never you. `google` searches Google's own page through the desk's browser:
 each result is a hit, and the AI Overview is one hit (channel "Google AI Overview") whose
@@ -58,6 +58,7 @@ birdwatch add cap <root> <reads> --why "<why>" --human  # the person raises the 
 birdwatch follow <run> [<url>] --as posts|similar|refs|citers [--from <document>] --why "<why>" [--with <source>...]   # a good page's author's posts, or pages like it
 birdwatch add person <run> "<name>" [--profile <url>...] [--aka <name>...] --why "<why>"   # one person across sites
 birdwatch learn <kind> [--sources ...] [--rounds N] [--age "..."]   # after a good run, on the person's yes
+birdwatch lift [--metric views|likes|comments|shares|saves] [--channel <name>] [--source <name>] [--run <run>] [--min-n N]   # each post's count over its author's median (every run): what drew more than the author usually does; a YouTube listing carries views only; under N posts (5) the lift is null
 ```
 
 Each step command prints `{run, round, step, ok, note, wrote}`; `wrote` is every record it
