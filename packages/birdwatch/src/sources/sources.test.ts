@@ -21,6 +21,7 @@ import {
   overviewUrl,
   paste,
   postsOf,
+  perplexity,
   searxng,
   ytdlpSource,
 } from "./index.js";
@@ -96,6 +97,53 @@ describe("searxng", () => {
     expect(hits).toEqual([
       { url: "https://a.example/x", title: "A", snippet: "about a", date: "2026-01-02" },
     ]);
+  });
+});
+
+describe("perplexity", () => {
+  it("rotates keys, narrows to the site, prices the call", async () => {
+    const calls: { auth: string | null; body: unknown }[] = [];
+    const src = perplexity({
+      keys: ["p1", "p2"],
+      fetchFn: async (_u, init) => {
+        calls.push({
+          auth: new Headers(init?.headers).get("authorization"),
+          body: JSON.parse(String(init?.body)),
+        });
+        return json({
+          results: [
+            {
+              url: "https://c.example",
+              title: "C",
+              snippet: " Reps close at half the founder's rate. ",
+              date: "2026-01-02",
+              last_updated: null,
+            },
+          ],
+          id: "req-1",
+        });
+      },
+    });
+    const first = await src.search?.(query("first sales hire", "example.com"));
+    await src.search?.(query("more"));
+    await src.search?.(query("again"));
+    expect(calls.map((c) => c.auth)).toEqual(["Bearer p1", "Bearer p2", "Bearer p1"]);
+    expect(calls[0]?.body).toEqual({
+      query: "first sales hire",
+      max_results: 10,
+      search_type: "fast",
+      max_tokens_per_page: 256,
+      search_domain_filter: ["example.com"],
+    });
+    expect([...(first ?? [])]).toEqual([
+      {
+        url: "https://c.example",
+        title: "C",
+        date: "2026-01-02",
+        snippet: "Reps close at half the founder's rate.",
+      },
+    ]);
+    expect((first as unknown as { usd: number }).usd).toBe(0.001);
   });
 });
 

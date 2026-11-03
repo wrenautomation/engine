@@ -30,9 +30,9 @@ export const TREE: TreeGuide = {
 const web: PlanFile = {
   id: "birdwatch/web",
   kind: "web",
-  version: 7,
+  version: 8,
   // reddit searches only a query pinned to reddit.com
-  sources: ["searxng", "exa", "google", "reddit"],
+  sources: ["searxng", "perplexity", "exa", "google", "reddit"],
   budget: { queries: 3, reads: 6, rounds: 3, checks: 3 },
   tree: TREE,
   age: "Prices, tools and numbers that move: prefer the last two years. A principle or a method can be old.",
@@ -61,8 +61,8 @@ const video: PlanFile = {
 const channel: PlanFile = {
   id: "birdwatch/channel",
   kind: "channel",
-  version: 6,
-  sources: ["searxng", "youtube", "exa"],
+  version: 7,
+  sources: ["searxng", "perplexity", "youtube", "exa"],
   budget: { queries: 3, reads: 6, rounds: 2, checks: 3 },
   tree: TREE,
   age: "A channel that has not posted in the last year counts for little.",
@@ -75,8 +75,8 @@ const channel: PlanFile = {
 const person: PlanFile = {
   id: "birdwatch/person",
   kind: "person",
-  version: 6,
-  sources: ["searxng", "exa", "linkedin", "google"],
+  version: 7,
+  sources: ["searxng", "perplexity", "exa", "linkedin", "google"],
   budget: { queries: 4, reads: 6, rounds: 2, checks: 3 },
   tree: TREE,
   age: "What they do now: prefer the latest pages. Their history can be old.",
@@ -109,7 +109,7 @@ export function defaultPlanFile(kind: AskKind): PlanFile {
   return PlanFileShape.parse(structuredClone(DEFAULTS[kind]));
 }
 
-/** The plan file's word on age; a stored file from before version 4 takes its kind's default. Version 5: the review no longer says "at most". Version 6: `tree`, the query tree's guide. 0.30.0 dropped the prompts with no bump: the agent never read them. */
+/** The plan file's word on age; a stored file from before version 4 takes its kind's default. Version 5: the review no longer says "at most". Version 6: `tree`, the query tree's guide. 0.30.0 dropped the prompts with no bump: the agent never read them. 0.30.8: `perplexity` joins the web, channel and person sources. */
 export const ageOf = (planFile: PlanFile): string | undefined =>
   planFile.age ?? DEFAULTS[planFile.kind].age;
 

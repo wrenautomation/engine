@@ -76,6 +76,7 @@ import {
   accountsFrom,
   arxivSource,
   exa,
+  perplexity,
   facebookSource,
   fetcherSource,
   googleSource,
@@ -162,6 +163,8 @@ export function sourcesHere(
     );
   const exaKeys = keys(printed, "EXA_API_KEY");
   if (exaKeys.length) out.push(exa({ keys: exaKeys }));
+  const pplxKeys = keys(printed, "PERPLEXITY_API_KEY");
+  if (pplxKeys.length) out.push(perplexity({ keys: pplxKeys }));
   const geminiKeys = keys(printed, "GEMINI_API_KEY");
   out.push(
     ytdlpSource({
