@@ -1,6 +1,6 @@
 /**
  * The engine from a shell, one step per command for the agent that drives it: `plan`, `search`,
- * `open`, `extract`, `check`, `add`, `brief`, `trace` a run, `yield` per source, `lift` per author, `sources` on this
+ * `open`, `extract`, `check`, `add`, `brief`, `trace` a run, `sources` on this
  * machine. Every command prints JSON. The ledger is a folder (`--ledger`, BIRDWATCH_LEDGER, default `./ledger`); a
  * writer names this terminal's file in it (`--writer`, BIRDWATCH_WRITER, default the user name).
  * The model is a `@wrenautomation/models` spec: `anthropic` by default (Claude Haiku direct,
@@ -62,13 +62,11 @@ import {
   treeOf,
 } from "../engine/plan.js";
 import { RUNS } from "../engine/tree.js";
-import { METRIC_KEYS, Step as PlanStep } from "../engine/types.js";
+import { Step as PlanStep } from "../engine/types.js";
 import {
   FilesLedger,
   FollowAs,
   type Ledger,
-  LIFT_MIN_N,
-  liftRows,
   type Problem,
   SOURCE_CLASSES,
   SourceClass,
@@ -326,6 +324,16 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
         "the record is the person's word, relayed: from human, by their name (default: the writer)",
       );
   /** The ledger, this machine's sources and the model, from the options. */
+  /** The sources this machine runs: the test's, else the environment's. */
+  const sourcesOf = (o: Common & { ytDlp?: string }, ledger: ReturnType<typeof ledgerOf>) =>
+    deps.sources
+      ? deps.sources(o, ledger)
+      : sourcesHere(
+          process.env,
+          ledger as FilesLedger,
+          o.ytDlp ?? process.env.BIRDWATCH_YTDLP ?? "yt-dlp",
+          () => undefined,
+        );
   const setup = (
     o: Common & Machine,
   ): {
@@ -335,9 +343,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     judge: Judge | null;
   } => {
     const ledger = ledgerOf(o);
-    const sources = deps.sources
-      ? deps.sources(o, ledger)
-      : sourcesHere(process.env, ledger as FilesLedger, o.ytDlp);
+    const sources = sourcesOf(o, ledger);
     const model: Model | null =
       o.model === false ? null : (deps.model ?? modelFromSpec)(o.model, process.env);
     const judge: Judge | null =
@@ -941,10 +947,12 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
 
   common(program.command("brief <run>"))
     .description(
-      "the run as the agent needs it: the ask, what is known, what the last round left open, hits to call, documents to extract, findings, checks, edges, yield, cost",
+      "the run as the agent needs it: the ask, sources (and those missing here), what earlier runs found, what the last round left open, hits to call with their metrics and lift, authors' baselines, documents to extract, findings, checks, edges, yield, cost",
     )
     .action(async (runId: string, o: Common) => {
-      const s = { ledger: ledgerOf(o), sources: registry(), model: null, judge: null };
+      // this machine's sources, built not called: the brief names which the run lacks
+      const ledger = ledgerOf(o);
+      const s = { ledger, sources: sourcesOf(o, ledger), model: null, judge: null };
       console.log(JSON.stringify(await brief(depsOf(s, o.writer), runId), null, 2));
     });
 
@@ -1009,68 +1017,12 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       await new Promise(() => {});
     });
 
-  common(program.command("yield"))
-    .description("hits, reads, proposed and kept per source, by, channel and kind, over every run")
-    .option("--source <name>")
-    .option("--by <who>")
-    .option("--channel <name>")
-    .option("--kind <kind>")
-    .action(
-      async (o: Common & { source?: string; by?: string; channel?: string; kind?: string }) => {
-        const rows = await ledgerOf(o).yield({
-          ...(o.source ? { source: o.source } : {}),
-          ...(o.by ? { by: o.by } : {}),
-          ...(o.channel ? { channel: o.channel } : {}),
-          ...(o.kind ? { kind: defaultPlanFile(o.kind as never).kind } : {}),
-        });
-        console.log(JSON.stringify(rows, null, 2));
-      },
-    );
-
-  common(program.command("lift"))
-    .description(
-      "each hit's count over its author's median (the latest record per URL, every run): which posts drew more than their author usually does",
-    )
-    .option(
-      "--metric <name>",
-      "views|likes|comments|shares|saves (a YouTube listing carries views only)",
-      "likes",
-    )
-    .option("--channel <name>")
-    .option("--source <name>")
-    .option("--run <id>", "one run's hits only")
-    .option("--min-n <n>", "posts an author needs before a baseline is read", String(LIFT_MIN_N))
-    .action(
-      async (
-        o: Common & {
-          metric: string;
-          channel?: string;
-          source?: string;
-          run?: string;
-          minN: string;
-        },
-      ) => {
-        const metric = METRIC_KEYS.find((k) => k === o.metric);
-        if (!metric) throw new Error(`--metric: one of ${METRIC_KEYS.join(", ")}`);
-        const records = await ledgerOf(o).scan({ type: "hit", ...(o.run ? { run: o.run } : {}) });
-        const rows = liftRows(records, {
-          metric,
-          minN: Number(o.minN),
-          ...(o.channel ? { channel: o.channel } : {}),
-          ...(o.source ? { source: o.source } : {}),
-        });
-        console.log(JSON.stringify(rows, null, 2));
-      },
-    );
-
   common(program.command("sources"))
     .description("the sources this machine can run, from the environment")
     .option("--yt-dlp <cmd>", "the yt-dlp command", process.env.BIRDWATCH_YTDLP ?? "yt-dlp")
     .action(async (o: Common & { ytDlp: string }) => {
       const ledger = ledgerOf(o);
-      const sources = deps.sources
-        ? deps.sources(o, ledger)
-        : sourcesHere(process.env, ledger as FilesLedger, o.ytDlp);
+      const sources = sourcesOf(o, ledger);
       const rows = [...sources.values()].map(({ name, kind, cost, from }) => ({
         name,
         kind,

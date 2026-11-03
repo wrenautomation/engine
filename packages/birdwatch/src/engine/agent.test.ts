@@ -5,6 +5,7 @@ import { criteriaOf } from "../app/engine-cli.js";
 import { claimExtractor } from "../document/index.js";
 import { countingIds } from "../ledger/ids.js";
 import { MemoryLedger } from "../ledger/memory.js";
+import type { HitRecord } from "../ledger/records.js";
 import {
   accept,
   add,
@@ -1358,5 +1359,49 @@ describe("agent commands", () => {
         model: null,
       }),
     ).rejects.toThrow("no source named exa");
+  });
+});
+
+describe("brief carries the lean reads", () => {
+  it("lifts each hit against its author's baseline over every run, names the sources here the run did not list, and what earlier runs found", async () => {
+    const d = deps();
+    const earlier = await planRound(d, {
+      ask: { text: "which founder videos draw", kind: "channel" },
+      planFile,
+      model: "m",
+    });
+    const hitRec = (run: string, i: number, channel: string, views: number): HitRecord => ({
+      id: `h-${run}-${i}`,
+      run,
+      round: 1,
+      step: "fetch",
+      at: `2026-10-28T09:00:0${i}.000Z`,
+      from: "tool",
+      by: "youtube",
+      type: "hit",
+      url: `https://www.youtube.com/watch?v=${run}${i}`,
+      key: `https://www.youtube.com/watch?v=${run}${i}`,
+      sources: ["youtube"],
+      queries: [],
+      channel,
+      metrics: { views },
+    });
+    for (let i = 0; i < 5; i++) await d.ledger.append(hitRec(earlier.run, i, "YC", 100));
+    const planned = await planRound(d, {
+      ask: { text: "which founder videos draw most", kind: "channel" },
+      planFile: { ...planFile, sources: ["fake"] },
+      model: "m",
+    });
+    await d.ledger.append(hitRec(planned.run, 0, "YC", 450));
+    await d.ledger.append(hitRec(planned.run, 1, "New", 9));
+    const b = await brief(d, planned.run);
+    expect(b.sourcesMissing).toEqual([]);
+    expect(b.sourcesUnused).toEqual(["opener"]);
+    expect(b.authors).toEqual([{ channel: "YC", views: { median: 100, n: 6 } }]);
+    expect(b.hits.uncalled.map((h) => [h.channel, h.lift])).toEqual([
+      ["YC", { views: 4.5 }],
+      ["New", undefined],
+    ]);
+    expect(b.recalled).toEqual([]);
   });
 });

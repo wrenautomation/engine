@@ -10,6 +10,7 @@
 import { isTransient } from "@wrenautomation/models";
 import { gateDrafts, type NumberedClaim } from "@wrenautomation/read/study";
 import { type ClaimAnswer, gateFindings, patternOf } from "../document/index.js";
+import { type Baseline, baselines, liftOf } from "../ledger/ledger.js";
 import {
   type DocumentRecord,
   type DraftRecord,
@@ -47,6 +48,7 @@ import {
   type YieldRow,
 } from "./plan.js";
 import type { Deps } from "./ports.js";
+import { type Recalled, recall } from "./recall.js";
 import {
   checkCount,
   classesOf,
@@ -80,6 +82,7 @@ import {
   treeRoom,
   treeStateOf,
 } from "./tree.js";
+import type { MetricKey } from "./types.js";
 
 /** Who a record is from: the agent (`ai`, its id) or the person through it (`human`, their name). */
 export interface Who {
@@ -1148,6 +1151,11 @@ export type HitBrief = Omit<HitRecord, "type" | "run" | "step" | "at" | "from" |
    * lists hits by facets plus `serves`, most first. A hint: the agent calls each.
    */
   judge?: { serves: number; side: string; class: string; criteria?: Record<string, number> };
+  /**
+   * Its counts over its author's medians (`authors`), every run: 54.7 is 54.7 times the
+   * author's usual. What drew, not what is big.
+   */
+  lift?: Partial<Record<MetricKey, number>>;
 };
 
 export interface Brief {
@@ -1159,7 +1167,14 @@ export interface Brief {
   note: string | null;
   ask: NonNullable<RunState["snapshot"]>["ask"] | null;
   budget: NonNullable<RunState["snapshot"]>["budget"] | null;
+  /** The run's allow-list, as planned. */
   sources: string[];
+  /** Allow-listed sources this machine cannot run (no key, no account): they search nothing. */
+  sourcesMissing: string[];
+  /** Sources this machine runs that the run did not list: `open --with`, or the next plan. */
+  sourcesUnused: string[];
+  /** What earlier runs found on the ask's words, best match first, this run left out. */
+  recalled: Recalled[];
   planFile: NonNullable<RunState["snapshot"]>["planFile"] | null;
   /** The kind's word for the agent, from its plan file: how much a source's age counts, and the rules to heed when it plans and triages. */
   guide: { age: string | null; rules: string[] } | null;
@@ -1226,6 +1241,11 @@ export interface Brief {
     read: number;
     total: number;
   };
+  /**
+   * The usual draw of each author this run's hits came from, over every run: per count, the
+   * median and the posts behind it (from 5 up). The base each hit's `lift` reads against.
+   */
+  authors: ({ channel: string } & Baseline)[];
   documents: {
     /**
      * Best first by the judge: the mean of its criteria yeses when the ask has criteria, else
@@ -1272,6 +1292,8 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
   const yieldRows = (await deps.ledger.yield()).filter(
     (r) => r.source === undefined || sources.includes(r.source),
   );
+  // every run's hits: an author's baseline is theirs, not this run's sample of them
+  const base = baselines(await deps.ledger.scan({ type: "hit" }));
   const gapLine = (g: RunState["gaps"][number]) => `${g.step ?? g.by}: ${g.note}`;
   const facetOf = new Map(state.queries.flatMap((q) => (q.facet ? [[q.id, q.facet]] : [])));
   const qOf = queriesOf(state);
@@ -1303,6 +1325,9 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
     ask: s?.ask ?? null,
     budget: s?.budget ?? null,
     sources,
+    sourcesMissing: sources.filter((n) => !deps.sources.has(n)),
+    sourcesUnused: [...deps.sources.keys()].filter((n) => !sources.includes(n)),
+    recalled: s ? await recall(deps.ledger, s.ask.text, { not: run }) : [],
     planFile: s?.planFile ?? null,
     guide: kindFile ? { age: ageOf(kindFile) ?? null, rules: rulesOf(kindFile) } : null,
     steer: state.steers.map((x) => x.text),
@@ -1368,9 +1393,11 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
           const side = pickOf(state, view.id, "side");
           const cls = pickOf(state, view.id, "class");
           const met = criteriaOf(view.id);
+          const lift = liftOf(view, base);
           return {
             ...view,
             facets: facetsOf(view.id),
+            ...(lift ? { lift } : {}),
             ...(serves !== undefined
               ? {
                   judge: {
@@ -1388,6 +1415,12 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
       read: state.documents.length,
       total: state.hits.length,
     },
+    authors: [...new Set(state.hits.flatMap((h) => (h.channel ? [h.channel] : [])))]
+      .sort()
+      .flatMap((channel) => {
+        const b = base.get(channel);
+        return b ? [{ channel, ...b }] : [];
+      }),
     documents: {
       toExtract: unjudged(state)
         .map(({ id, url }) => {

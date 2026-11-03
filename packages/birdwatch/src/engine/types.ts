@@ -152,24 +152,6 @@ export const YieldRow = z.object({
 });
 export type YieldRow = z.infer<typeof YieldRow>;
 
-/** One hit's draw against its author's median: what `lift` lists. */
-export const LiftRow = z.object({
-  url: z.string(),
-  title: z.string().optional(),
-  channel: z.string().optional(),
-  date: z.string().optional(),
-  sources: z.array(z.string()),
-  metric: z.enum(["views", "likes", "comments", "shares", "saves"]),
-  value: z.number(),
-  /** Posts of the channel behind the median. */
-  n: z.number().int().nonnegative(),
-  /** Null: no channel, or fewer posts than the floor. */
-  median: z.number().nullable(),
-  /** `value` over `median`; null with no median, or a zero median and a count. */
-  lift: z.number().nullable(),
-});
-export type LiftRow = z.infer<typeof LiftRow>;
-
 /** What a round was planned from, kept with its snapshot. */
 export const Snapshot = z.object({
   at: z.string(),

@@ -4,7 +4,7 @@
  * channels and ask kinds yielded, as the yield rows. The yield is a fold over records, shared here
  * so the files backend and a database compute the same rows (a database may do it in SQL).
  */
-import type { AskKind, LiftRow, MetricKey, PlanFile, YieldRow } from "../engine/types.js";
+import type { AskKind, MetricKey, Metrics, PlanFile, YieldRow } from "../engine/types.js";
 import {
   byTime,
   type From,
@@ -144,17 +144,11 @@ export function yieldRows(records: readonly LedgerRecord[], filter: YieldFilter 
   }));
 }
 
-export interface LiftFilter {
-  /** The count compared; `likes` unless asked (a YouTube listing carries `views` only). */
-  metric?: MetricKey;
-  channel?: string;
-  source?: string;
-  /** Posts an author needs before a baseline is read: fewer, and `lift` stays null. */
-  minN?: number;
-}
+/** One author's usual draw: per count, the median over their posts and the posts behind it. */
+export type Baseline = Partial<Record<MetricKey, { median: number; n: number }>>;
 
-/** Below it an author's median is noise: one hit would be its own baseline. */
-export const LIFT_MIN_N = 5;
+/** Below it an author's median is noise: one post would be its own baseline. */
+export const BASELINE_MIN_N = 5;
 
 const median = (xs: number[]): number => {
   const s = [...xs].sort((a, b) => a - b);
@@ -163,53 +157,52 @@ const median = (xs: number[]): number => {
 };
 
 /**
- * Each hit's draw against its author's own: `lift` is the hit's count over the median of every
- * hit of that channel that carries the count (the latest record per URL across runs, since a
- * count moves). One author's baseline, so a big account and a small one compare by lift, not by
- * size. `n` is the posts behind the median; under `minN` the lift is null, never 1.
+ * Each author's (channel's) baseline over every run: per count, the median over the latest hit
+ * record per URL that carries it, kept only from `minN` posts up. One author's own numbers, so
+ * a big account and a small one compare by lift, not by size.
  */
-export function liftRows(records: readonly LedgerRecord[], filter: LiftFilter = {}): LiftRow[] {
-  const metric = filter.metric ?? "likes";
-  const minN = filter.minN ?? LIFT_MIN_N;
+export function baselines(
+  records: readonly LedgerRecord[],
+  minN = BASELINE_MIN_N,
+): Map<string, Baseline> {
   const latest = new Map<string, RecordOf<"hit">>();
-  for (const h of ofType([...records].sort(byTime), "hit")) {
-    if (h.metrics?.[metric] === undefined) continue;
-    if (filter.source && !h.sources.includes(filter.source)) continue;
-    latest.set(h.key, h);
-  }
-  const byChannel = new Map<string, RecordOf<"hit">[]>();
+  for (const h of ofType([...records].sort(byTime), "hit"))
+    if (h.channel && h.metrics) latest.set(h.key, h);
+  const values = new Map<string, Partial<Record<MetricKey, number[]>>>();
   for (const h of latest.values()) {
-    const c = h.channel ?? "";
-    const list = byChannel.get(c) ?? [];
-    list.push(h);
-    byChannel.set(c, list);
+    const channel = h.channel as string;
+    const by = values.get(channel) ?? {};
+    for (const [k, v] of Object.entries(h.metrics ?? {}) as [MetricKey, number][])
+      (by[k] ??= []).push(v);
+    values.set(channel, by);
   }
-  const out: LiftRow[] = [];
-  for (const [channel, hits] of byChannel) {
-    if (filter.channel && channel !== filter.channel) continue;
-    const values = hits.map((h) => h.metrics?.[metric] as number);
-    const base = channel && hits.length >= minN ? median(values) : null;
-    for (const h of hits) {
-      const value = h.metrics?.[metric] as number;
-      out.push({
-        url: h.url,
-        ...(h.title ? { title: h.title } : {}),
-        ...(channel ? { channel } : {}),
-        ...(h.date ? { date: h.date } : {}),
-        sources: h.sources,
-        metric,
-        value,
-        n: channel ? hits.length : 1,
-        median: base,
-        lift: base === null ? null : base === 0 ? (value === 0 ? 1 : null) : value / base,
-      });
-    }
+  const out = new Map<string, Baseline>();
+  for (const [channel, by] of values) {
+    const base: Baseline = {};
+    for (const [k, xs] of Object.entries(by) as [MetricKey, number[]][])
+      if (xs.length >= minN) base[k] = { median: median(xs), n: xs.length };
+    if (Object.keys(base).length) out.set(channel, base);
   }
-  // the biggest lift first; a hit with no baseline last, by its raw count
-  return out.sort(
-    (a, b) =>
-      Number(b.lift !== null) - Number(a.lift !== null) ||
-      (b.lift ?? 0) - (a.lift ?? 0) ||
-      b.value - a.value,
-  );
+  return out;
+}
+
+/**
+ * A hit's counts over its author's medians: 54.7 is 54.7 times what the author usually draws.
+ * Only counts with a baseline; a zero median leaves the count out (a count over nothing), except
+ * zero over zero, which is 1. Undefined when nothing compares.
+ */
+export function liftOf(
+  hit: { channel?: string | undefined; metrics?: Metrics | undefined },
+  base: ReadonlyMap<string, Baseline>,
+): Partial<Record<MetricKey, number>> | undefined {
+  const b = hit.channel ? base.get(hit.channel) : undefined;
+  if (!b || !hit.metrics) return undefined;
+  const out: Partial<Record<MetricKey, number>> = {};
+  for (const [k, v] of Object.entries(hit.metrics) as [MetricKey, number][]) {
+    const m = b[k];
+    if (!m) continue;
+    if (m.median > 0) out[k] = Math.round((v / m.median) * 100) / 100;
+    else if (v === 0) out[k] = 1;
+  }
+  return Object.keys(out).length ? out : undefined;
 }

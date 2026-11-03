@@ -16,7 +16,7 @@ names it. The ledger folder is `--ledger` (before or after the command) or `BIRD
 (default `./ledger`). Sources come from the environment. `~/.config/birdwatch/config.json`
 names the env files to read keys from, so no wrapper is needed; a set variable wins.
 `birdwatch sources` lists what this machine can run. A Reddit thread and a Facebook
-group post open through their own readers (`reddit`, `facebook`) before the page openers. A query pinned to `reddit.com` also searches Reddit itself, signed out (it shares a daily read cap; Exa has no Reddit index). `hn` searches Hacker News (free) and reads a thread with every comment. A query pinned to `linkedin.com` searches LinkedIn posts through the desk, only as the account `BIRDWATCH_ACCOUNTS` names (`linkedin=linkedin@wren`; never the bare `linkedin`, a person's own profile). A hit's `metrics` (views, likes, comments) are what the listing showed: a post's draw, before any read; `follow --as posts` on an author then `lift` reads each post against that author's own median. Reddit
+group post open through their own readers (`reddit`, `facebook`) before the page openers. A query pinned to `reddit.com` also searches Reddit itself, signed out (it shares a daily read cap; Exa has no Reddit index). `hn` searches Hacker News (free) and reads a thread with every comment. A query pinned to `linkedin.com` searches LinkedIn posts through the desk, only as the account `BIRDWATCH_ACCOUNTS` names (`linkedin=linkedin@wren`; never the bare `linkedin`, a person's own profile). A hit's `metrics` (views, likes, comments) are what the listing showed: a post's draw, before any read. The brief reads each hit's `lift` against its author's median over every run (`authors`): 54.7 is 54.7 times the author's usual, so a small account and a big one compare. `follow --as posts` on an author fills their baseline (five posts up). Reddit
 reads signed out, then as the account `BIRDWATCH_ACCOUNTS` names (`reddit=reddit@alt`); the person
 picks that account, never you. `google` searches Google's own page through the desk's browser:
 each result is a hit, and the AI Overview is one hit (channel "Google AI Overview") whose
@@ -58,7 +58,6 @@ birdwatch add cap <root> <reads> --why "<why>" --human  # the person raises the 
 birdwatch follow <run> [<url>] --as posts|similar|refs|citers [--from <document>] --why "<why>" [--with <source>...]   # a good page's author's posts, or pages like it
 birdwatch add person <run> "<name>" [--profile <url>...] [--aka <name>...] --why "<why>"   # one person across sites
 birdwatch learn <kind> [--sources ...] [--rounds N] [--age "..."]   # after a good run, on the person's yes
-birdwatch lift [--metric views|likes|comments|shares|saves] [--channel <name>] [--source <name>] [--run <run>] [--min-n N]   # each post's count over its author's median (every run): what drew more than the author usually does; a YouTube listing carries views only; under N posts (5) the lift is null
 ```
 
 Each step command prints `{run, round, step, ok, note, wrote}`; `wrote` is every record it
@@ -68,7 +67,8 @@ records show done.
 
 ## How to drive
 
-0. **Recall.** Before the plan, `recall` the ask's words. A recalled finding still fresh for the
+0. **Recall.** Before the plan, `recall` the ask's words (after it, `brief.recalled` carries the
+   same for the ask's text). A recalled finding still fresh for the
    ask (its `date`, else `found`) goes in `--known` with its URL; an old one names a query to
    read again. A quote short of 5 words fails the gate: take the line with its label.
 1. **Name the premises.** Before the plan, say what the ask takes as given: a buyer, an offer, a
@@ -77,7 +77,9 @@ records show done.
    would show it wrong. `tree.uncovered` lists it until a query serves it. A premise that fails
    changes the ask: tell the person.
 2. **Plan the tree.** Read the ask and `brief`. `brief.guide` holds the kind's age sentence and
-   rules: heed them when you plan and when you triage. Write the round's query tree: one facet per
+   rules: heed them when you plan and when you triage. `brief.sourcesMissing` names allow-listed
+   sources this machine cannot run (they search nothing); `brief.sourcesUnused` the ones it can
+   that the run did not list. Write the round's query tree: one facet per
    side of the ask the guide names (`birdwatch plans <kind>`: a number, a how, a who, a
    counter-view, a primary source; add a facet the ask needs), each with 2 or 3 tries in the
    order you expect to work: the plain words first, then a narrower angle (a site, a year, a
@@ -114,8 +116,10 @@ records show done.
      {"name": "spend", "why": "what the buyer pays", "needs": ["survey", "primary_data"], "tries": [[{"terms": "...", "why": "..."}]]}
    ]}
    ```
-3. **Triage.** `brief` lists `hits.uncalled` with title, snippet and `facets`: the facets whose
-   queries found it, most first, then the judge's `serves`. `judge` shows its answers: `serves`
+3. **Triage.** `brief` lists `hits.uncalled` with title, snippet, `metrics` (what the post
+   drew, as its site counts it), `lift` (each count over the author's median in `brief.authors`,
+   every run: 4.5 is 4.5 times their usual, the read for a format that worked) and `facets`: the
+   facets whose queries found it, most first, then the judge's `serves`. `judge` shows its answers: `serves`
    (yes), `side` (subject, seller, other) and `class`. A page two facets found is worth a look
    first. A `side` of seller on a buyer facet is the inverse the facet's why names. Call every
    one (the tree's next tier waits on it):
