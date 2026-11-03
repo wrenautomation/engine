@@ -24,8 +24,9 @@ snippet holds its text. The Overview is a claim, never a proof: do not open it; 
 the pages it cites, which come as hits of their own.
 
 A judge (Jev) answers cheap typed questions on every hit, page and finding: probabilities, no
-text. It is a hint and a router, never a decision: you call, class and check; it ranks, guesses
-and sends doubted findings to the check. It runs when `TYPESAFE_API_KEY` is set (`--judge`,
+text. It labels and routes, never judges quality (William, 11-03): it says what a page is
+(`format`, `side`, `class`, the ask's criteria) and sends doubted findings to the check. You
+read every hit and call each one; nothing is dropped on a judge's number. It runs when `TYPESAFE_API_KEY` is set (`--judge`,
 `BIRDWATCH_JUDGE`; `--no-judge` for one command). `brief.judge` says what it cost and how often
 you and the check agreed with it: a low agreement means read its hints less.
 
@@ -47,7 +48,7 @@ birdwatch extract <run> [--limit N]                     # bulk only: a model beh
 birdwatch check <run> [-n N] [--patterns]               # bulk only: a model's check; --patterns: every finding a pattern rests on
 birdwatch add gap <run> "<what is still missing>"
 birdwatch add class <run> <document|finding> <class> --why "<why>"   # primary_data, survey, practitioner, vendor, forum, news, other
-birdwatch accept <run> keep --over P | drop --under P | class --min P --why "<why>"   # the judge's hints in bulk, at your bar
+birdwatch accept <run> class --min P --why "<why>"   # the judge's class guesses in bulk, at your bar
 birdwatch add pattern <run> "<what several findings say together>" --on <finding> <finding>...   # findings of this run or its children
 birdwatch add edge <run> again|stop --why "<why>"       # your review of the round
 echo '[{"title":"..","body":"..","cites":["<pattern or finding>"]}]' | birdwatch add draft <run> --for "<a decision memo>"   # a rough draft, gated
@@ -119,16 +120,15 @@ records show done.
 3. **Triage.** `brief` lists `hits.uncalled` with title, snippet, `metrics` (what the post
    drew, as its site counts it), `lift` (each count over the author's median in `brief.authors`,
    every run: 4.5 is 4.5 times their usual, the read for a format that worked) and `facets`: the
-   facets whose queries found it, most first, then the judge's `serves`. `judge` shows its answers: `serves`
-   (yes), `side` (subject, seller, other) and `class`. A page two facets found is worth a look
+   facets whose queries found it, most first, then the ask's criteria. `judge` shows its labels:
+   `format` (video, post, thread, article, paper, list, sales_page, directory, docs, other),
+   `side` (subject, seller, other) and `class`. A page two facets found is worth a look
    first. A `side` of seller on a buyer facet is the inverse the facet's why names. Call every
    one (the tree's next tier waits on it):
    keep what can hold a fact that answers the ask, drop the rest (vendor pages, listicles, a
    page the ask does not need). One why per call, short. A page you know of yourself: `open --url`.
-   Tens of hits: read the top and the bottom of the judge's order, then set a bar from what you
-   saw: `accept drop --under 0.2 --why`, and keep only the tops you read. `serves` ranks
-   vendor pages high and buyer threads in the middle (0.3 to 0.5): a high keep bar keeps the
-   wrong side. Call the middle yourself. Your bar, your why: the records are yours.
+   Read every hit yourself, however many: the labels sort them, they never call one. There is
+   no bulk keep or drop. A drop on a rule (under 3 times the author's usual) names the rule.
 4. **Read.** `open`, then `show` each document and read it. Write each fact that answers the
    ask as `add finding` with its exact quote; a quote that is not on the page fails. Say what
    the page lacks as `add gap --on <document>`. For a run too big to read (tens of pages),
@@ -153,9 +153,8 @@ records show done.
    or read, then `add person "<name>" --profile <url>... --aka <channel name>... --why`, and
    follow each profile. `brief.people` counts the documents, kept findings and sites per person.
    A follow no source in the run can do fails and names one that can: add it with `--with`.
-   `documents.toExtract[].worth` is a trial: the judge's guess that a careful researcher would
-   cite the page. Never skip a page on it. `brief.judge.worth` measures it (AUC against "a
-   finding on it was kept", and what a gate at a half would skip).
+   `documents.toExtract[]` carries the judge's `format` and the criteria; the order is a sort,
+   never a skip.
 5. **Check.** Read a sample of the kept findings again against their documents (`show`), a
    different page each: `add check <finding> --ok|--fail --why`. A fail drops it. For a bulk
    run, `check` does the same with a model over the budget's `checks` or a tenth of the kept

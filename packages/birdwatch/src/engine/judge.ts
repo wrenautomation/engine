@@ -1,8 +1,9 @@
 /**
- * The judge's passes: cheap typed answers on every hit, document and finding, written as
- * `judge` records. A hint and a router, never a call: the brief ranks hits and shows class
- * guesses by them, the tree counts a facet's needed classes by them before a read, and the
- * check sends each finding the judge doubts to the model. A failed judge call writes its spend
+ * The judge's passes: cheap labels on every hit, document and finding, written as `judge`
+ * records. Labels and routing only, no quality call (William, 11-03): it says what a page is
+ * (class, format, side, the ask's criteria), never whether it is good. The agent reads and
+ * calls every hit. The check sends each finding the judge doubts to the model: more checks,
+ * never fewer. A failed judge call writes its spend
  * and the step goes on; a refused key ends the pass.
  */
 
@@ -51,14 +52,22 @@ const CLASS = choice("What kind of source is this page?", {
   other: "anything else",
 } satisfies Record<SourceClass, string>);
 
+const FORMAT = choice("What shape of content is this page?", {
+  video: "a video, or a video's page",
+  post: "a social post: LinkedIn, X, Instagram, TikTok, Threads, Facebook",
+  thread: "a forum thread or a Q&A page",
+  article: "an article, a blog post or a newsletter issue",
+  paper: "a paper, a report or a study",
+  list: "a list of tools, tips or links",
+  sales_page: "a product, service, pricing or landing page",
+  directory: "a directory, a search page or a profile page",
+  docs: "documentation or a help page",
+  other: "anything else",
+});
+
+/** Labels on a hit, from its title and snippet: no quality call. */
 export const HIT_QUESTIONS = {
-  serves: noul(
-    "Could this page hold a specific fact (a number, a practice, a stated cause) that answers the ask?",
-    {
-      true: "it likely holds such a fact",
-      false: "another topic, or nothing specific: a listicle, a directory, a sales page",
-    },
-  ),
+  format: FORMAT,
   side: choice("Who wrote this page, next to the people the ask is about?", {
     subject: "those people, or a neutral party reporting on them",
     seller: "a vendor, agency or coach selling to those people",
@@ -67,18 +76,10 @@ export const HIT_QUESTIONS = {
   class: CLASS,
 } satisfies Questions;
 
-/**
- * A trial (10-28): can Jev score a page's worth as a source before the extract reads it?
- * A hint only; `judgeStats.worth` measures it against what the extract kept. From 0.25.0 it
- * reads the whole page, in chunks, not the first 4,000 characters.
- */
+/** Labels on a page read whole, in parts. The `worth` trial (10-28) ended 11-03: no quality call. */
 export const DOCUMENT_QUESTIONS = {
   class: CLASS,
-  worth: noul("Would a careful researcher answering the ask cite this page as a source?", {
-    true: "it gives specific facts on the ask (numbers, practices, causes, first-hand accounts) from a party in a position to know, or credits a named source for them",
-    false:
-      "off the ask, thin, generic advice, a sales pitch, a rehash with no source, a list of links, or a page shell",
-  }),
+  format: FORMAT,
 } satisfies Questions;
 
 export const FINDING_QUESTIONS = {
@@ -195,7 +196,7 @@ export const passNote = (p: Pass): string =>
     ? `; judge: ${p.judged} judged${p.failed ? `, ${p.failed} failed` : ""}${p.stopped ? ` (${p.stopped})` : ""}`
     : "";
 
-/** Uncalled hits with no answers yet: serves the ask, whose side, what class, each criterion. */
+/** Uncalled hits with no answers yet: format, whose side, what class, each criterion. */
 export function judgeHits(ctx: StepContext, state: RunState): Promise<Pass> {
   const ask = state.snapshot?.ask.text ?? "";
   const whyOf = new Map(state.queries.map((q) => [q.id, q.why]));
@@ -215,7 +216,7 @@ export function judgeHits(ctx: StepContext, state: RunState): Promise<Pass> {
   return pass(ctx, items, { ...HIT_QUESTIONS, ...criteriaQuestions(state.snapshot?.ask.criteria) });
 }
 
-/** Documents with no answers yet: class, worth and each criterion, read whole in parts. */
+/** Documents with no answers yet: class, format and each criterion, read whole in parts. */
 export function judgeDocuments(ctx: StepContext, state: RunState): Promise<Pass> {
   const ask = state.snapshot?.ask.text ?? "";
   const items = state.documents
@@ -317,8 +318,6 @@ export interface JudgeStats {
   calls: number;
   failed: number;
   usd: number;
-  /** Serves the ask (yes over a half) against the agent's keep or drop. */
-  hits: Agreement;
   /** Its class guess against the agent's class on a document. */
   classes: Agreement;
   /** Backs the sentence (yes over a half) against the model's check. */
@@ -326,21 +325,6 @@ export interface JudgeStats {
     /** Findings it doubted (under DOUBT) that a check read, and how many of those failed. */
     doubted: number;
     doubtedFailed: number;
-  };
-  /**
-   * The worth trial: on documents read for facts (a verdict, a finding or a gap on it), its
-   * worth score against "a finding on it was kept".
-   * `under` is what a gate at a half would skip, and how many of those held a kept finding.
-   * `rich`: its AUC against the extract's verdict "rich", on pages with one (papers nearly all
-   * yield a finding, so the first label has no negatives there).
-   */
-  worth: {
-    both: number;
-    good: number;
-    auc: number | null;
-    rich: number | null;
-    under: number;
-    underGood: number;
   };
   /**
    * Each criterion against "a finding on the page was kept", on pages read for facts: asked on
@@ -366,11 +350,6 @@ export function judgeStats(state: RunState, judge: string | null): JudgeStats {
   const tally = (pairs: [boolean, boolean][]): Agreement => ({
     both: pairs.length,
     agree: pairs.filter(([a, b]) => a === b).length,
-  });
-  const hits = state.hits.flatMap((h): [boolean, boolean][] => {
-    const yes = yesOf(state, h.id, "serves");
-    const call = state.called.get(h.id);
-    return yes === undefined || !call ? [] : [[yes > 0.5, call === "keep"]];
   });
   const classes = state.documents.flatMap((d): [boolean, boolean][] => {
     const guess = pickOf(state, d.id, "class");
@@ -405,9 +384,6 @@ export function judgeStats(state: RunState, judge: string | null): JudgeStats {
       pairs.flatMap(([p, d]) => (quality.has(d) ? [[p, quality.get(d) === "rich"]] : [])),
     ),
   });
-  const worthPairs = scored("worth", (d) => d);
-  const worth = worthPairs.map(([p, d]): [number, boolean] => [p, keptOn.has(d)]);
-  const under = worth.filter(([p]) => p < 0.5);
   const criteria = Object.fromEntries(
     (state.snapshot?.ask.criteria ?? []).map((c) => [
       c.name,
@@ -423,20 +399,11 @@ export function judgeStats(state: RunState, judge: string | null): JudgeStats {
     calls: spends.length,
     failed: spends.filter((s) => !s.ok).length,
     usd: spends.reduce((a, s) => a + (s.usd ?? 0), 0),
-    hits: tally(hits),
     classes: tally(classes),
     checks: {
       ...tally(checks),
       doubted: doubted.length,
       doubtedFailed: doubted.filter(([, ok]) => !ok).length,
-    },
-    worth: {
-      both: worth.length,
-      good: worth.filter(([, y]) => y).length,
-      auc: aucOf(worth),
-      rich: ranked(worthPairs).rich,
-      under: under.length,
-      underGood: under.filter(([, y]) => y).length,
     },
     criteria,
   };

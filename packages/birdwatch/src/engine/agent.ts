@@ -1054,16 +1054,12 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
   }
 }
 
-/** What the agent takes from the judge in bulk: classes over a bar, or calls on uncalled hits. */
-export type Acceptance =
-  | { take: "class"; min: number; why: string }
-  | { take: "keep"; over: number; why: string }
-  | { take: "drop"; under: number; why: string };
+/** What the agent takes from the judge in bulk: classes over a bar. Never a keep or drop (11-03). */
+export type Acceptance = { take: "class"; min: number; why: string };
 
 /**
- * The judge's guesses over a bar, written in the agent's name with its why and the judge's
- * number: a class on each document with none, or a keep or drop on each uncalled hit by how
- * likely it serves the ask. The agent sets the bar and owns the records; the judge decides none.
+ * The judge's class guesses over a bar, written in the agent's name with its why and the
+ * judge's number, on each document with none. The agent sets the bar and owns the records.
  */
 export async function accept(
   deps: Deps,
@@ -1072,40 +1068,25 @@ export async function accept(
   who: Who,
 ): Promise<{ wrote: Shown[]; skipped: number }> {
   const state = await stateOf(deps, run);
+  if (a.take !== "class")
+    throw new Error(`accept ${a.take}: only class; the judge never keeps or drops a hit`);
   if (!a.why.trim()) throw new Error(`accept ${a.take}: why?`);
-  const bar = a.take === "class" ? a.min : a.take === "keep" ? a.over : a.under;
-  if (!(bar >= 0 && bar <= 1))
+  if (!(a.min >= 0 && a.min <= 1))
     throw new Error(`accept ${a.take}: the bar is a probability, 0 to 1`);
   const wrote: Shown[] = [];
   let skipped = 0;
-  if (a.take === "class") {
-    for (const d of state.documents) {
-      if (state.classOf.has(d.id)) continue;
-      const g = pickOf(state, d.id, "class");
-      if (!g) continue;
-      if (g.p < a.min || !(SOURCE_CLASSES as readonly string[]).includes(g.pick)) {
-        skipped++;
-        continue;
-      }
-      const why = `${a.why} (judge: ${g.pick} ${g.p.toFixed(2)})`;
-      wrote.push(
-        (await add(deps, run, { type: "class", on: d.id, class: g.pick as SourceClass, why }, who))
-          .record,
-      );
-    }
-    return { wrote, skipped };
-  }
-  for (const h of state.hits) {
-    if (state.called.has(h.id)) continue;
-    const yes = yesOf(state, h.id, "serves");
-    if (yes === undefined) continue;
-    if (a.take === "keep" ? yes <= a.over : yes >= a.under) {
+  for (const d of state.documents) {
+    if (state.classOf.has(d.id)) continue;
+    const g = pickOf(state, d.id, "class");
+    if (!g) continue;
+    if (g.p < a.min || !(SOURCE_CLASSES as readonly string[]).includes(g.pick)) {
       skipped++;
       continue;
     }
-    const why = `${a.why} (judge: serves ${yes.toFixed(2)})`;
+    const why = `${a.why} (judge: ${g.pick} ${g.p.toFixed(2)})`;
     wrote.push(
-      (await add(deps, run, { type: "call", on: h.id, verdict: a.take, why }, who)).record,
+      (await add(deps, run, { type: "class", on: d.id, class: g.pick as SourceClass, why }, who))
+        .record,
     );
   }
   return { wrote, skipped };
@@ -1147,10 +1128,10 @@ export type HitBrief = Omit<HitRecord, "type" | "run" | "step" | "at" | "from" |
   /** The facets whose queries found it. */
   facets: string[];
   /**
-   * The judge's hint: how likely it serves the ask, whose side wrote it, its class. The brief
-   * lists hits by facets plus `serves`, most first. A hint: the agent calls each.
+   * The judge's labels: its format, whose side wrote it, its class, each criterion's yes odds.
+   * What it is, never whether it is good: the agent reads and calls each hit.
    */
-  judge?: { serves: number; side: string; class: string; criteria?: Record<string, number> };
+  judge?: { format: string; side: string; class: string; criteria?: Record<string, number> };
   /**
    * Its counts over its author's medians (`authors`), every run: 54.7 is 54.7 times the
    * author's usual. What drew, not what is big.
@@ -1250,10 +1231,10 @@ export interface Brief {
   authors: ({ channel: string } & Baseline)[];
   documents: {
     /**
-     * Best first by the judge: the mean of its criteria yeses when the ask has criteria, else
-     * `worth` (its trial score); pages it has not judged last. A hint only: the agent picks.
+     * Read order; the ask's criteria first when it has some (the mean of their yes odds), else as
+     * read. The agent picks.
      */
-    toExtract: { id: string; url: string; worth?: number; criteria?: Record<string, number> }[];
+    toExtract: { id: string; url: string; format?: string; criteria?: Record<string, number> }[];
     /**
      * Documents with a kept finding and no class: class them before the patterns count. `guess`
      * is the judge's; `accept <run> class` takes every guess over a bar.
@@ -1271,18 +1252,13 @@ export interface Brief {
 
 const mean = (xs: readonly number[]) => xs.reduce((a, x) => a + x, 0) / xs.length;
 
-/** An uncalled hit's place in the brief: facets it serves, then the judge's serves and criteria. */
-const hitRank = (h: {
-  facets: string[];
-  judge?: { serves: number; criteria?: Record<string, number> };
-}) =>
-  h.facets.length +
-  (h.judge?.serves ?? 0) +
-  (h.judge?.criteria ? mean(Object.values(h.judge.criteria)) : 0);
+/** An uncalled hit's place in the brief: facets it serves, then the ask's criteria. No quality score. */
+const hitRank = (h: { facets: string[]; judge?: { criteria?: Record<string, number> } }) =>
+  h.facets.length + (h.judge?.criteria ? mean(Object.values(h.judge.criteria)) : 0);
 
-/** A page's place in the extract list: its criteria's mean, else worth; unjudged last. */
-const pageRank = (d: { worth?: number; criteria?: Record<string, number> }) =>
-  d.criteria ? mean(Object.values(d.criteria)) : (d.worth ?? -1);
+/** A page's place in the extract list: the ask's criteria's mean; else as read. */
+const pageRank = (d: { criteria?: Record<string, number> }) =>
+  d.criteria ? mean(Object.values(d.criteria)) : 0;
 
 /** The brief, as JSON: everything the agent needs to plan, triage, review and stop. */
 export async function brief(deps: Deps, run: string): Promise<Brief> {
@@ -1395,7 +1371,7 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
       uncalled: state.hits
         .filter((h) => !state.called.has(h.id))
         .map(({ type: _t, run: _r, step: _s, at: _a, from: _f, by: _b, key: _k, ...view }) => {
-          const serves = yesOf(state, view.id, "serves");
+          const format = pickOf(state, view.id, "format");
           const side = pickOf(state, view.id, "side");
           const cls = pickOf(state, view.id, "class");
           const met = criteriaOf(view.id);
@@ -1404,10 +1380,10 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
             ...view,
             facets: facetsOf(view.id),
             ...(lift ? { lift } : {}),
-            ...(serves !== undefined
+            ...(state.judged.has(view.id)
               ? {
                   judge: {
-                    serves,
+                    format: format?.pick ?? "",
                     side: side?.pick ?? "",
                     class: cls?.pick ?? "",
                     ...(met ? { criteria: met } : {}),
@@ -1430,12 +1406,12 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
     documents: {
       toExtract: unjudged(state)
         .map(({ id, url }) => {
-          const worth = yesOf(state, id, "worth");
+          const format = pickOf(state, id, "format");
           const met = criteriaOf(id);
           return {
             id,
             url,
-            ...(worth !== undefined ? { worth } : {}),
+            ...(format ? { format: format.pick } : {}),
             ...(met ? { criteria: met } : {}),
           };
         })

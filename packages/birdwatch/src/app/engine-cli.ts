@@ -412,7 +412,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     )
     .option(
       "--criterion <name=question...>",
-      'a yes-or-no test of a good source (code="Is code released?"): the judge asks it on every hit and every page read whole, a hint only',
+      'a yes-or-no label on what a source is or covers (code="Is code released?"): the judge asks it on every hit and every page read whole; it orders, never drops',
     )
     .option("--site <host>", "the site the ask is about")
     .option(
@@ -836,34 +836,18 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
 
   agent(common(program.command("accept <run> <take>")))
     .description(
-      "take the judge's guesses over a bar, in your name with your why: `class --min p` classes every unclassed document whose guess is at least p; `keep --over p` and `drop --under p` call every uncalled hit by how likely it serves the ask",
+      "take the judge's class guesses over a bar, in your name with your why: `class --min p` classes every unclassed document whose guess is at least p. The judge never keeps or drops a hit: you call each",
     )
     .requiredOption("--why <why>", "why this bar")
     .option("--min <p>", "class: the guess's least probability", (v) => Number(v))
-    .option("--over <p>", "keep: serves the ask over p", (v) => Number(v))
-    .option("--under <p>", "drop: serves the ask under p", (v) => Number(v))
     .action(
-      async (
-        runId: string,
-        take: string,
-        o: Common & Agent & { why: string; min?: number; over?: number; under?: number },
-      ) => {
-        const bar = (v: number | undefined, flag: string) => {
-          if (v === undefined) throw new Error(`accept ${take}: ${flag} <p>`);
-          return v;
-        };
-        const a: Acceptance =
-          take === "class"
-            ? { take, min: bar(o.min, "--min"), why: o.why }
-            : take === "keep"
-              ? { take, over: bar(o.over, "--over"), why: o.why }
-              : take === "drop"
-                ? { take, under: bar(o.under, "--under"), why: o.why }
-                : (() => {
-                    throw new Error(
-                      `accept <run> <take>: the run first, then class, keep or drop; got "${runId} ${take}"`,
-                    );
-                  })();
+      async (runId: string, take: string, o: Common & Agent & { why: string; min?: number }) => {
+        if (take !== "class")
+          throw new Error(
+            `accept <run> class: only class; the judge never keeps or drops a hit, you call each (got "${take}")`,
+          );
+        if (o.min === undefined) throw new Error("accept class: --min <p>");
+        const a: Acceptance = { take, min: o.min, why: o.why };
         const s = { ledger: ledgerOf(o), sources: registry(), model: null, judge: null };
         const out = await accept(depsOf(s, agentOf(o)), runId, a, whoOf(o));
         console.error(`${runId}: ${out.wrote.length} taken, ${out.skipped} under the bar`);

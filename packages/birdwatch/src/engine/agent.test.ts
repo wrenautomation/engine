@@ -105,6 +105,12 @@ const deps = (): Deps => {
   };
 };
 const agent: Who = { from: "ai", by: "claude-code" };
+
+/** The agent keeps every uncalled hit, one call each. */
+const keepAll = async (d: Deps, run: string) => {
+  for (const h of (await brief(d, run)).hits.uncalled)
+    await add(d, run, { type: "call", on: h.id, verdict: "keep", why: "all" }, agent);
+};
 const will: Who = { from: "human", by: "will" };
 
 describe("agent commands", () => {
@@ -506,13 +512,15 @@ describe("agent commands", () => {
     expect(checkCount(700, 0)).toBe(0);
   });
 
-  it("a judge hints and routes, never calls: hit order, class guesses, accept, doubted findings join the check", async () => {
-    // Page two serves the ask, page one not; every page reads as a survey; every finding doubted.
+  it("a judge labels and routes, never calls: labels, class guesses, accept class only, doubted findings join the check", async () => {
+    // Page two reads as a post, page one as a sales page; every page a survey; every finding doubted.
     const judge = fakeJudge((state) => {
       const x = state as { page?: { url: string }; sentence?: string };
       if (x.page)
         return {
-          serves: x.page.url.endsWith("two") ? { yes: 0.9, no: 0.1 } : { yes: 0.2, no: 0.8 },
+          format: x.page.url.endsWith("two")
+            ? { post: 0.9, sales_page: 0.1 }
+            : { sales_page: 0.8, post: 0.2 },
           class: { survey: 0.9, other: 0.1 },
         };
       if (x.sentence) return { backs: { yes: 0.3, no: 0.7 }, cites: { yes: 0.9, no: 0.1 } };
@@ -526,24 +534,25 @@ describe("agent commands", () => {
     expect(searched.note).toContain("judge: 2 judged");
     expect(searched.wrote.filter((r) => r.type === "judge")).toHaveLength(2);
 
-    // The brief ranks the hit the judge says serves first and shows its answers.
+    // The brief keeps the found order (no quality score) and shows the labels; nothing is called.
     const uncalled = (await brief(d, runId)).hits.uncalled;
-    expect(uncalled.map((h) => h.url)).toEqual(["https://a.example/two", "https://a.example/one"]);
+    expect(uncalled.map((h) => h.url)).toEqual(["https://a.example/one", "https://a.example/two"]);
+    expect(uncalled.map((h) => h.judge?.format)).toEqual(["sales_page", "post"]);
     expect(uncalled[0]?.judge).toMatchObject({ class: "survey", side: expect.any(String) });
+    expect(uncalled[0]?.judge).not.toHaveProperty("serves");
 
-    // accept is the agent's bulk call at its own bar; each record carries the judge's number.
-    await expect(accept(d, runId, { take: "keep", over: 2, why: "w" }, agent)).rejects.toThrow(
+    // accept takes classes only: the judge never keeps or drops a hit.
+    await expect(
+      accept(d, runId, { take: "keep" as "class", min: 0.5, why: "w" }, agent),
+    ).rejects.toThrow("only class");
+    await expect(accept(d, runId, { take: "class", min: 2, why: "w" }, agent)).rejects.toThrow(
       "probability",
     );
-    const kept = await accept(d, runId, { take: "keep", over: 0.8, why: "serves" }, agent);
-    expect(kept.skipped).toBe(1);
-    expect(kept.wrote.map((r) => r.type === "call" && r.why)).toEqual([
-      "serves (judge: serves 0.90)",
-    ]);
-    const dropped = await accept(d, runId, { take: "drop", under: 0.3, why: "off" }, agent);
-    expect(dropped.wrote).toHaveLength(1);
-    expect(dropped.skipped).toBe(0);
 
+    // The agent's own calls: keep two, drop one; it opens one anyway.
+    const [hitOne, hitTwo] = uncalled.map((h) => h.id) as [string, string];
+    await add(d, runId, { type: "call", on: hitTwo, verdict: "keep", why: "a post" }, agent);
+    await add(d, runId, { type: "call", on: hitOne, verdict: "drop", why: "a sales page" }, agent);
     await open(
       d,
       runId,
@@ -568,8 +577,6 @@ describe("agent commands", () => {
     expect(stats).toMatchObject({
       judge: "fake-judge",
       failed: 0,
-      // The agent opened page one after the drop: a keep against the judge.
-      hits: { both: 2, agree: 1 },
       classes: { both: 3, agree: 3 },
       checks: { both: 2, agree: 0, doubted: 2, doubtedFailed: 0 },
     });
@@ -616,7 +623,7 @@ describe("agent commands", () => {
       ],
     };
     await searchTree(d, runId, tree, agent);
-    await accept(d, runId, { take: "keep", over: 0, why: "all" }, agent);
+    await keepAll(d, runId);
     const second = await searchTree(d, runId, tree, agent);
     expect(second.note).toContain("spend: try 2 (3 kept, none of them survey)");
     expect(second.tree.facets[0]).toMatchObject({ kept: 3, guessed: 3, fit: 0, enough: false });
@@ -626,7 +633,7 @@ describe("agent commands", () => {
       await planRound(d, { ask: { text: "what owners spend", kind: "web" }, planFile, model: "m" })
     ).run;
     await searchTree(d, runId2, tree, agent);
-    await accept(d, runId2, { take: "keep", over: 0, why: "all" }, agent);
+    await keepAll(d, runId2);
     const done = await searchTree(d, runId2, tree, agent);
     expect(done.tree.facets[0]).toMatchObject({ kept: 3, fit: 3, enough: true });
     // The read page with a finding turns out a vendor's: the facet lacks its class, not enough.
@@ -854,11 +861,9 @@ describe("agent commands", () => {
     };
     const judge = fakeJudge((state) => {
       const x = state as { page?: unknown; url?: string; sentence?: string };
-      if (x.page) return { serves: { yes: 0.5, no: 0.5 } };
+      if (x.page) return { format: { post: 0.5, article: 0.5 } };
       if (x.sentence) return { backs: { yes: 0.9, no: 0.1 } };
-      return x.url?.endsWith("one")
-        ? { worth: { yes: 0.9, no: 0.1 } }
-        : { worth: { yes: 0.3, no: 0.7 } };
+      return { format: x.url?.endsWith("one") ? { article: 0.9 } : { video: 0.9 } };
     });
     const d = { ...deps(), judge, sources: registry(fake, opener, tube, like) };
     const { run: runId } = await planRound(d, {
@@ -940,31 +945,8 @@ describe("agent commands", () => {
     expect(b.people).toMatchObject([{ name: "Bee Speaker", documents: 1, kept: 1, sites: 1 }]);
     expect(b.unfollowed).toEqual([]);
 
-    // The worth trial: both pages kept a finding; the low score on page four is a miss a gate would make.
     expect(b.documents.toExtract).toEqual([]);
-    expect(b.judge.worth).toEqual({
-      both: 2,
-      good: 2,
-      auc: null,
-      rich: null,
-      under: 1,
-      underGood: 1,
-    });
-
-    // Read by hand with nothing to keep: a gap on the page labels it.
-    await open(d, runId, { urls: ["https://a.example/two"], why: "w" }, agent);
-    const two = (await fold(runId, await d.ledger.trace(runId))).documents.find((x) =>
-      x.url.endsWith("two"),
-    )?.id as string;
-    await add(d, runId, { type: "gap", note: "nothing on the ask", on: two }, agent);
-    expect((await brief(d, runId)).judge.worth).toEqual({
-      both: 3,
-      good: 2,
-      auc: 0.75,
-      rich: null,
-      under: 2,
-      underGood: 1,
-    });
+    expect(b.judge).not.toHaveProperty("worth");
   });
 
   it("asks the criteria on hits and on a long page in parts; the brief ranks pages by them", async () => {
@@ -1031,7 +1013,7 @@ describe("agent commands", () => {
     ]);
     expect(() => criteriaOf(["Code=x"])).toThrow("want name=question");
     expect(() => criteriaOf(["no question"])).toThrow("want name=question");
-    expect(() => criteriaOf(["worth=x"])).toThrow("taken");
+    expect(() => criteriaOf(["format=x"])).toThrow("taken");
     expect(() => criteriaOf(["a=x", "a=y"])).toThrow("taken");
   });
 

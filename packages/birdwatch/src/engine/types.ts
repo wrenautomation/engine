@@ -188,7 +188,7 @@ export const HitView = z.object({
   /** What the post drew, when the source lists it (a listing's view count, a post's reactions). */
   metrics: Metrics.optional(),
   sources: z.array(z.string()).default([]),
-  /** The judge's yes odds by question (serves, each criterion): a hint the brief shows. */
+  /** The judge's yes odds by question (each criterion): a label the brief shows. */
   odds: z.record(z.string(), z.number()).optional(),
 });
 export type HitView = z.infer<typeof HitView>;

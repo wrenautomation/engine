@@ -64,8 +64,7 @@ birdwatch add check 01M5YS... 01M5YW... --ok --why "the quote says it"   # the a
 birdwatch extract 01M5YS...                            # or a model behind the quote gate, every document without a verdict
 birdwatch check 01M5YS... -n 3                         # or a model's sample of findings read against their documents
 birdwatch check 01M5YS... --patterns                   # every unchecked finding a pattern rests on
-birdwatch accept 01M5YS... keep --over 0.8 --why "serves the ask"   # the judge's hints in bulk, at the agent's bar
-birdwatch accept 01M5YS... class --min 0.8 --why "head of page"   # also: drop --under 0.2
+birdwatch accept 01M5YS... class --min 0.8 --why "head of page"   # the judge's class guesses in bulk, at the agent's bar
 birdwatch add gap 01M5YS... "no UK numbers yet"
 birdwatch add steer 01M5YS... "numbers only" --human will                                # the person's word, relayed
 birdwatch add pattern 01M5YS... "Repeat clients come from referrals." --on 01M5YV... 01M5YW...   # what findings say together; sites counted
@@ -223,28 +222,28 @@ check, then lands as a new finding with `fixes` naming the old one. The review s
 carries its document's date, so the review weighs age as the plan file's `age` line says.
 
 The judge (Jev, from `@wrenautomation/models/judge`) answers typed questions with probabilities
-and no text, so it never writes a call or a check. `search` asks it of each new hit: does it
-serve the ask, whose side wrote it (the people the ask is about, or a seller to them), what
-class. `open` asks each new page its class. `check` asks each kept finding with a quote: does the
+and no text, so it never writes a call or a check. From 0.31.0 it labels, never judges
+quality: the agent reads and calls every hit. `search` asks it of each new hit: its format
+(video, post, thread, article, paper, list, sales page, directory, docs), whose side wrote it
+(the people the ask is about, or a seller to them), what class. `open` asks each new page its
+class and format. `check` asks each kept finding with a quote: does the
 quote back it, does it credit another source. Each answer is a `judge` record and each call a
-spend. They hint and route: `brief.hits.uncalled` sorts by facets then the judge's serves, and
-shows its answers; `documents.unclassed[].guess` shows its class; a facet with `needs` is not
+spend. They label and route: `brief.hits.uncalled` sorts by facets then the run's criteria, and
+shows the labels; `documents.unclassed[].guess` shows its class; a facet with `needs` is not
 enough while its kept hits have a class (the agent's, else the judge's) and none is needed;
 `patterns[].cites` lists findings that credit another source, and the vendor echo warning names
 them. `check` reads the sample plus each finding the judge backs under 0.8: a judge's yes never
-takes one out. `accept` turns the hints into records at the agent's own bar, each with the
-judge's number in its why. `brief.judge` counts its calls, cost, and how often the agent and the
-check agreed with it. A trial (0.22.0): `open` also asks each page its `worth` (would a careful
-researcher cite it for the ask). `documents.toExtract[].worth` shows it; `brief.judge.worth`
-gives its AUC against "a finding on it was kept", and what a gate at a half would skip. Nothing
-gates on it yet.
+takes one out. `accept class` turns class guesses into records at the agent's own bar, each with
+the judge's number in its why; there is no bulk keep or drop. `brief.judge` counts its calls,
+cost, and how often the agent and the check agreed with it. The `serves` and `worth` scores
+(0.20.0 to 0.30.x) are gone: a quality call is the agent's.
 
 From 0.25.0 the judge reads a page whole: the body to its references (an appendix stays), in
 parts of 64,000 characters, 4 at most, each answer the most yes of any part. Jev's input is
 cheap (about $0.04 per million tokens), so a paper costs about a tenth of a cent. A run's
-criteria (`--criterion name="question"`, on `plan`) are the person's own yes-or-no tests of a
-good source: the judge asks each one on every hit and every page, and the brief shows its odds
-on each hit (serves and each test) as a hint. Their mean sorts `hits.uncalled` and `documents.toExtract`; `brief.judge.criteria` gives each one's AUC against
+criteria (`--criterion name="question"`, on `plan`) are the person's own yes-or-no labels on
+what a source is or covers: the judge asks each one on every hit and every page, and the brief
+shows its odds on each hit. Their mean sorts `hits.uncalled` and `documents.toExtract`; `brief.judge.criteria` gives each one's AUC against
 "a finding on it was kept", on hits and on pages. A sort and a hint, never a gate.
 
 From 0.27.0 the extractor reads the body too (the reference list holds no finding). Each review
