@@ -172,8 +172,11 @@ export function baselines(
   for (const h of latest.values()) {
     const channel = h.channel as string;
     const by = values.get(channel) ?? {};
-    for (const [k, v] of Object.entries(h.metrics ?? {}) as [MetricKey, number][])
-      (by[k] ??= []).push(v);
+    for (const [k, v] of Object.entries(h.metrics ?? {}) as [MetricKey, number][]) {
+      const list = by[k] ?? [];
+      list.push(v);
+      by[k] = list;
+    }
     values.set(channel, by);
   }
   const out = new Map<string, Baseline>();
