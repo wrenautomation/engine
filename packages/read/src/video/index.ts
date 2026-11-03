@@ -10,6 +10,7 @@ export * from "./gemini.js";
 export * from "./list.js";
 export * from "./read.js";
 export * from "./shots.js";
+export * from "./store.js";
 export * from "./tools.js";
 export * from "./url.js";
 export * from "./watch.js";

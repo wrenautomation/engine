@@ -132,8 +132,9 @@ the bulk (extract, check) only; the agent decides. Sources come
 from the environment: `SEARXNG_URL` (and `SEARXNG_TOKEN`, a bearer, for an instance behind a
 proxy), `EXA_API_KEY` (or `_1..n`), `YOUTUBE_API_KEY` (the YouTube Data API: search, a channel's
 uploads and exact counts; without it yt-dlp lists), `ANTHROPIC_API_KEY` for `youtube-see`
-(Claude reads a video's frames, on `open --see` only) and `COHERE_API_KEY` to hear a video
-whose captions fail there,
+(Claude reads a video's frames, on `open --see` only, 6 videos a run at most; each download is
+kept in `BIRDWATCH_MEDIA`, default `~/.cache/birdwatch/media`, 5 GB, oldest out first) and
+`COHERE_API_KEY` to hear a video whose captions fail there,
 `BIRDWATCH_CONTACT` for the fetcher and `arxiv` (no contact, no page opens; `OPENALEX_API_KEY`, free, gives `arxiv` its own citation budget, and `SEMANTIC_SCHOLAR_API_KEY`, free, its own rate for `--as refs`; `--sources arxiv` names it, since no stock plan file does), and for the ladder either
 `AUTOBROWSE_URL` and `AUTOBROWSE_TOKEN` (a worker's HTTP face) or `RESTATE_INGRESS_URL` and
 `RESTATE_AUTH_TOKEN` (the Restate ingress a desk worker sits behind: `POST /desk/call`;

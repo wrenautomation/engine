@@ -12,7 +12,8 @@
  */
 
 import { mkdir, readFile } from "node:fs/promises";
-import { userInfo } from "node:os";
+import { homedir, userInfo } from "node:os";
+import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import type { Model } from "@wrenautomation/models";
 import { anthropic } from "@wrenautomation/models";
@@ -20,7 +21,7 @@ import { type Judge, judgeFromSpec } from "@wrenautomation/models/judge";
 import { modelFromSpec } from "@wrenautomation/models/spec";
 import type { LadderClient } from "@wrenautomation/read/fetch";
 import { PoliteFetcher, userAgent } from "@wrenautomation/read/fetch";
-import { cohereSpeech } from "@wrenautomation/read/video";
+import { cohereSpeech, dirStore } from "@wrenautomation/read/video";
 import type { Command } from "commander";
 import { z } from "zod";
 import type { Extractor } from "../document/index.js";
@@ -191,6 +192,7 @@ export function sourcesHere(
         ytDlp,
         eye: anthropic({ key: claudeKeys, model: SEE_MODEL }),
         ...(cohereKeys.length ? { ear: cohereSpeech(cohereKeys) } : {}),
+        store: dirStore(printed.BIRDWATCH_MEDIA ?? join(homedir(), ".cache", "birdwatch", "media")),
       }),
     );
   if (printed.BIRDWATCH_CONTACT) {

@@ -139,7 +139,7 @@ records show done.
    it answers the ask, and its captions lean on the screen ("as you can see", "this slide",
    "look at this", a demo or chart the words do not describe) or leave the point unsaid. It
    downloads the video, and Claude reads each frame: the text, then what it shows (~$0.30 for
-   10 minutes). The why names the test it passed. The read is a second document on the hit. Write each fact that answers the
+   10 minutes; 6 videos a run at most). The why names the test it passed. The read is a second document on the hit. Write each fact that answers the
    ask as `add finding` with its exact quote; a quote that is not on the page fails. Say what
    the page lacks as `add gap --on <document>`. For a run too big to read (tens of pages),
    `extract` puts a model behind the same gate; then judge its findings in

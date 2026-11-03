@@ -652,6 +652,9 @@ export const unread = (state: RunState): HitRecord[] => {
  * Keeps the hits named (and writes a hit per URL named), then runs the read step over every
  * kept hit of the run that has no document. No names: the reads alone.
  */
+/** Videos seen a run: each is about $0.30 of Claude on the frames. */
+export const SEE_PER_RUN = 6;
+
 export async function open(deps: Deps, run: string, input: OpenInput, who: Who): Promise<Did> {
   const state = await stateOf(deps, run);
   planned(state);
@@ -695,6 +698,12 @@ export async function open(deps: Deps, run: string, input: OpenInput, who: Who):
     if (!seers.length)
       throw new Error("open --see: no source here sees a video (ANTHROPIC_API_KEY)");
     const want = new Set(named);
+    const names = new Set(seers.map((s) => s.name));
+    const seen = state.spends.filter((s) => names.has(s.source) && s.op === "open" && s.ok).length;
+    if (seen + want.size > SEE_PER_RUN)
+      throw new Error(
+        `open --see: ${seen} seen this run, ${want.size} asked; the cap is ${SEE_PER_RUN} a run (about $0.30 each)`,
+      );
     return stepRun(deps, run, "read", (c, s) =>
       readHits(
         c,

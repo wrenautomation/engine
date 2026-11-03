@@ -9,9 +9,12 @@
  * and tools. Nothing here touches a database.
  */
 import { createHash } from "node:crypto";
+import { createWriteStream } from "node:fs";
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import type { Model, Part } from "@wrenautomation/models";
 import type { Ear } from "@wrenautomation/models/hear";
 import { readMedia, SHOWN } from "./gemini.js";
@@ -25,6 +28,7 @@ import {
   real,
   type VideoRead,
 } from "./read.js";
+import { type MediaStore, mediaKey } from "./store.js";
 import { clock, runFor, sleep, TOOL_MS, waitOutCap } from "./tools.js";
 import {
   onScreenLines,
@@ -47,11 +51,89 @@ export interface VideoMeta
   height?: number;
 }
 
-/** yt-dlp's download of a reel or video: 540p on the short side, remuxed to mp4. */
+/** Where a video comes from, beside yt-dlp: the store, a direct file link, what the caller knows. */
+export interface Fetched {
+  /** Checked first by `mediaKey(url)`; every fresh download is kept there. */
+  store?: MediaStore;
+  /** A direct file link (Instagram Graph's `media_url`): fetched before yt-dlp. It expires, so a failed one falls back. */
+  mediaUrl?: string;
+  /** What the caller knows (Graph's caption, author, date) over what the source gave. */
+  meta?: Partial<VideoMeta>;
+  fetchFn?: typeof fetch;
+  warn?: (line: string) => void;
+}
+
+/** 500 MB: past any reel or short. */
+const VIDEO_MAX = 500_000_000;
+
+async function fetchFile(link: string, file: string, fetchFn: typeof fetch): Promise<void> {
+  const res = await fetchFn(link, { signal: AbortSignal.timeout(TOOL_MS) });
+  if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+  if (Number(res.headers.get("content-length") ?? 0) > VIDEO_MAX)
+    throw new Error(`over ${VIDEO_MAX} bytes`);
+  await pipeline(Readable.fromWeb(res.body as never), createWriteStream(file));
+}
+
+/**
+ * A reel or video as an mp4 in `dir`: the store's copy, else the direct link, else yt-dlp (540p
+ * on the short side, remuxed to mp4). A fresh one goes into the store.
+ */
 export async function download(
   url: string,
   ytDlp: string,
   dir: string,
+  o: Fetched = {},
+): Promise<{ file: string; info: VideoMeta }> {
+  const key = mediaKey(url);
+  const warn = o.warn ?? ((line: string) => console.warn(line));
+  const file = join(dir, "video.mp4");
+  if (o.store && key) {
+    const kept = await o.store.get(key, file).catch((err: unknown) => {
+      warn(`${key}: store read failed, ${err instanceof Error ? err.message : err}`);
+      return null;
+    });
+    if (kept) return { file, info: { ...kept, ...o.meta } };
+  }
+  const linked = o.mediaUrl ? await fromLink(url, o.mediaUrl, file, key, o, warn) : null;
+  const done = linked ?? (await ytDlpDownload(url, ytDlp, dir, o.meta));
+  if (o.store && key)
+    await o.store.put(key, done.file, done.info).catch((err: unknown) => {
+      warn(`${key}: not kept, ${err instanceof Error ? err.message : err}`);
+    });
+  return done;
+}
+
+async function fromLink(
+  url: string,
+  link: string,
+  file: string,
+  key: string | null,
+  o: Fetched,
+  warn: (line: string) => void,
+): Promise<{ file: string; info: VideoMeta } | null> {
+  try {
+    await fetchFile(link, file, o.fetchFn ?? fetch);
+  } catch (err) {
+    warn(`${url}: media link failed (${err instanceof Error ? err.message : err}), yt-dlp instead`);
+    await rm(file, { force: true });
+    return null;
+  }
+  const [platform, id] = key?.split("/") ?? [];
+  const info = {
+    id: id ?? createHash("sha256").update(url).digest("hex").slice(0, 16),
+    title: url,
+    webpage_url: url,
+    ...(platform ? { extractor_key: platform } : {}),
+    ...o.meta,
+  } as VideoMeta;
+  return { file, info };
+}
+
+async function ytDlpDownload(
+  url: string,
+  ytDlp: string,
+  dir: string,
+  meta?: Partial<VideoMeta>,
 ): Promise<{ file: string; info: VideoMeta }> {
   const [cmd, ...pre] = ytDlp.split(/\s+/) as [string, ...string[]];
   const { stdout } = await runFor(
@@ -68,22 +150,22 @@ export async function download(
   );
   const file = (await readdir(dir)).find((f) => f.endsWith(".mp4"));
   if (!file) throw new Error(`${url}: yt-dlp wrote no mp4`);
-  return { file: join(dir, file), info: JSON.parse(stdout) as VideoMeta };
+  return { file: join(dir, file), info: { ...(JSON.parse(stdout) as VideoMeta), ...meta } };
 }
 
 /**
- * Watch a video: a URL yt-dlp fetches first (`ytDlp` is the command, split on spaces:
- * `uvx yt-dlp`), or a file on disk, which goes straight to `watchFile`. A URL's yt-dlp
- * metadata comes back as `info`; a duration ffmpeg could not read falls back to it.
+ * Watch a video: a URL fetched first (`download`: the store, a direct link, or yt-dlp; `ytDlp`
+ * is the command, split on spaces: `uvx yt-dlp`), or a file on disk, which goes straight to
+ * `watchFile`. A URL's metadata comes back as `info`; a duration ffmpeg could not read falls back to it.
  */
 export async function watch(
   input: string,
-  opts: WatchOptions & { ytDlp?: string },
+  opts: WatchOptions & Fetched & { ytDlp?: string },
 ): Promise<Watched & { info?: VideoMeta }> {
   if (!/^https?:\/\//.test(input)) return watchFile(input, opts);
   const dir = await mkdtemp(join(tmpdir(), "read-watch-"));
   try {
-    const { file, info } = await download(input, opts.ytDlp ?? "yt-dlp", dir);
+    const { file, info } = await download(input, opts.ytDlp ?? "yt-dlp", dir, opts);
     const watched = await watchFile(file, opts);
     return { ...watched, durationS: watched.durationS || info.duration || 0, info };
   } finally {
@@ -268,6 +350,7 @@ export async function seeYoutube(
     ffmpeg?: string;
     fetchFn?: typeof fetch;
     pause?: (ms: number) => Promise<void>;
+    store?: MediaStore;
   },
 ): Promise<VideoRead & { heard: boolean }> {
   let words = "";
@@ -292,6 +375,7 @@ export async function seeYoutube(
     speech: hear,
     ...(hear && opts.ear ? { ear: opts.ear } : {}),
     ...(opts.ffmpeg ? { ffmpeg: opts.ffmpeg } : {}),
+    ...(opts.store ? { store: opts.store } : {}),
   });
   const info = watched.info as VideoMeta;
   const said = words
@@ -386,13 +470,13 @@ export async function readYoutubeByUrl(
 }
 
 /**
- * Any other video `yt-dlp` fetches (an Instagram reel, TikTok, X). No captions there, so
+ * Any other video (an Instagram reel, TikTok, X): the store, a direct link, else yt-dlp. No captions there, so
  * `watch` hears the audio and reads the frames (its `video` model adds a read of the whole
  * screen when given). The body holds the caption, then Speech, On screen and Cuts.
  */
 export async function readVideo(
   url: string,
-  opts: WatchOptions & { ytDlp: string },
+  opts: WatchOptions & Fetched & { ytDlp: string },
 ): Promise<VideoRead> {
   const watched = await watch(url, opts);
   const info = watched.info as VideoMeta;

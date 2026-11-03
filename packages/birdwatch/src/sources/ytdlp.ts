@@ -7,7 +7,7 @@
 
 import type { Model } from "@wrenautomation/models";
 import type { Ear } from "@wrenautomation/models/hear";
-import type { VideoRead } from "@wrenautomation/read/video";
+import type { MediaStore, VideoRead } from "@wrenautomation/read/video";
 import {
   flatPlaylist,
   pageInfo,
@@ -226,6 +226,8 @@ export function youtubeSee(o: {
   /** For tests: a stand-in for the read. */
   see?: typeof seeYoutube;
   pause?: (ms: number) => Promise<void>;
+  /** Keeps each download: a video seen again is not fetched again. */
+  store?: MediaStore;
 }): Source {
   const see = o.see ?? seeYoutube;
   const inLine = queue(o.pause ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms))));
@@ -243,6 +245,7 @@ export function youtubeSee(o: {
           eye: priced.model,
           words: !opt?.read,
           ...(o.ear ? { ear: o.ear } : {}),
+          ...(o.store ? { store: o.store } : {}),
         });
         const doc = videoDocument(r);
         const usd = r.heard ? undefined : priced.usd();

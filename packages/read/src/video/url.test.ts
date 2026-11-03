@@ -6,6 +6,7 @@ import { fakeModel, gemini } from "@wrenautomation/models";
 import { fakeEar } from "@wrenautomation/models/hear";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { flatPlaylist } from "./list.js";
+import { dirStore, mediaKey } from "./store.js";
 import { CAPTION_WAITS_MS, readAudio, readVideo, readYoutube, readYoutubeByUrl } from "./url.js";
 
 const hasFfmpeg = (() => {
@@ -168,6 +169,84 @@ console.log(JSON.stringify({ id: "abc", title: "Video by x", extractor_key: "Ins
     );
     expect(r.body).toMatch(/\n## Cuts\n\n\d:\d\d\.\d\n$/);
   }, 30_000);
+  it("takes the direct link before yt-dlp, keeps it, and reads it again from the store", async () => {
+    const calls = join(dir, "calls.log");
+    const fake = join(dir, "yt-dlp-count.mjs");
+    await writeFile(
+      fake,
+      `import { appendFileSync } from "node:fs";
+appendFileSync(${JSON.stringify(calls)}, "yt-dlp\\n");
+process.exit(1);`,
+    );
+    const bytes = await readFile(video);
+    let fetched = 0;
+    const cdn = (async () => {
+      fetched++;
+      return new Response(bytes, { headers: { "content-length": String(bytes.length) } });
+    }) as unknown as typeof fetch;
+    const store = dirStore(join(dir, "store"));
+    const opts = {
+      ytDlp: `node ${fake}`,
+      eye,
+      ear: fakeEar("from the link"),
+      store,
+      fetchFn: cdn,
+      mediaUrl: "https://scontent.cdninstagram.com/v/abc.mp4?oe=1",
+      meta: { description: "Graph caption", uploader: "acct", upload_date: "20261101" },
+    };
+    const url = "https://www.instagram.com/reel/DQx1abc/";
+    const first = await readVideo(url, opts);
+    expect(first).toMatchObject({
+      kind: "instagram",
+      id: "DQx1abc",
+      title: "Graph caption",
+      channel: "acct",
+      uploaded: "2026-11-01",
+    });
+    expect(first.body).toContain("from the link");
+    const second = await readVideo(url, { ...opts, mediaUrl: "https://gone.example/x.mp4" });
+    expect(second.id).toBe("DQx1abc");
+    expect(fetched).toBe(1);
+    await expect(readFile(calls, "utf8")).rejects.toThrow();
+  }, 30_000);
+
+  it("falls back to yt-dlp when the link has expired", async () => {
+    const fake = join(dir, "yt-dlp-fallback.mjs");
+    await writeFile(
+      fake,
+      `import { copyFileSync } from "node:fs";
+const a = process.argv.slice(2);
+copyFileSync(${JSON.stringify(video)}, a[a.indexOf("-o") + 1].replace("%(ext)s", "mp4"));
+console.log(JSON.stringify({ id: "Zz9", title: "t", extractor_key: "Instagram", webpage_url: "https://www.instagram.com/reel/Zz9/" }));`,
+    );
+    const warned: string[] = [];
+    const r = await readVideo("https://www.instagram.com/reel/Zz9/", {
+      ytDlp: `node ${fake}`,
+      eye,
+      fetchFn: (async () => new Response("expired", { status: 403 })) as unknown as typeof fetch,
+      mediaUrl: "https://scontent.cdninstagram.com/v/old.mp4",
+      warn: (l) => warned.push(l),
+    });
+    expect(r.id).toBe("Zz9");
+    expect(warned.join()).toMatch(/media link failed \(HTTP 403\), yt-dlp instead/);
+  }, 30_000);
+});
+
+describe("media key", () => {
+  it("is the platform and the id from a page URL", () => {
+    expect(mediaKey("https://www.youtube.com/watch?v=abcdefghijk&t=3")).toBe("youtube/abcdefghijk");
+    expect(mediaKey("https://youtu.be/abcdefghijk")).toBe("youtube/abcdefghijk");
+    expect(mediaKey("https://www.youtube.com/shorts/abcdefghijk")).toBe("youtube/abcdefghijk");
+    expect(mediaKey("https://www.instagram.com/reel/DQx1abc/")).toBe("instagram/DQx1abc");
+    expect(mediaKey("https://www.instagram.com/acct/reel/DQx1abc/")).toBe("instagram/DQx1abc");
+    expect(mediaKey("https://www.instagram.com/p/DQx1abc/")).toBe("instagram/DQx1abc");
+    expect(mediaKey("https://www.tiktok.com/@a/video/7312345678901234567")).toBe(
+      "tiktok/7312345678901234567",
+    );
+    expect(mediaKey("https://x.com/a/status/1850000000000000000")).toBe("x/1850000000000000000");
+    expect(mediaKey("https://example.com/v.mp4")).toBeNull();
+    expect(mediaKey("not a url")).toBeNull();
+  });
 });
 
 describe("youtube captions", () => {

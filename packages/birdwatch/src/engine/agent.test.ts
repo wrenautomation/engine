@@ -15,6 +15,7 @@ import {
   follow,
   open,
   planRound,
+  SEE_PER_RUN,
   search,
   searchTree,
   tunePlan,
@@ -151,6 +152,12 @@ describe("agent commands", () => {
     const plain = { ...deps(), ledger: d.ledger, sources: registry(fake, opener) };
     await expect(open(plain, run, { hits: [one], see: true, why: "w" }, agent)).rejects.toThrow(
       "no source here sees",
+    );
+    // 2 seen, then 4, then 6: the cap a run
+    await open(d, run, { hits: [one, two], see: true, why: "again" }, agent);
+    await open(d, run, { hits: [one, two], see: true, why: "again" }, agent);
+    await expect(open(d, run, { hits: [one], see: true, why: "w" }, agent)).rejects.toThrow(
+      `6 seen this run, 1 asked; the cap is ${SEE_PER_RUN} a run`,
     );
   });
 
