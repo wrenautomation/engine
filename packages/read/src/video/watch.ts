@@ -72,7 +72,11 @@ export interface WatchOptions {
   language?: string;
   /** Seconds between frames; stretched so a long video stays under `MAX_FRAMES`. */
   everyS?: number;
+  /** `all`: each frame's text and what it shows (a chart, a demo); default `text` alone. */
+  look?: Look;
 }
+
+export type Look = "text" | "all";
 
 /** Cohere's vision model on a key ring, waiting out a busy ring. */
 export const cohereEye = (keys: readonly string[], o: { fetch?: typeof fetch } = {}): Model =>
@@ -93,6 +97,11 @@ export function stamp(s: number): string {
 const SCREEN_ASK = (times: string[]) =>
   `These are ${times.length} frames from one video, in order. Their times: ${times.join(", ")}. Read the text shown in each frame: captions, titles, slide and UI text, labels, numbers. Reply with exactly one line per frame, starting with its time in square brackets, like "[${times[0]}] text". Write "[${times[0]}] none" for a frame with no text. No other text.`;
 
+const ALL_ASK = (times: string[]) =>
+  `These are ${times.length} frames from one video, in order. Their times: ${times.join(", ")}. Reply with exactly one line per frame, starting with its time in square brackets. On it: the text shown (slide, title, UI, labels, numbers), then " | " and what the frame shows in a few words (a chart of what, a screen recording of which app doing what, a diagram, a product, a person talking). Write "[${times[0]}] same" for a frame that shows what the frame before it showed. No other text.`;
+
+const ASKS: Record<Look, (times: string[]) => string> = { text: SCREEN_ASK, all: ALL_ASK };
+
 /** Added to the ask once, when the model would not describe a frame. */
 const TEXT_ONLY = "Read only on-screen text, UI and graphics. Ignore people.";
 
@@ -100,7 +109,7 @@ const TEXT_ONLY = "Read only on-screen text, UI and graphics. Ignore people.";
 const REFUSAL =
   /\bi(?:'|’)?m (?:sorry|unable|not able)|\bi am (?:sorry|unable|not able)|\bunable to (?:assist|help|describe|identify|process|provide|analy[sz]e)|\b(?:can(?:'|’)?t|cannot|can not|won(?:'|’)?t|not able to)\s+(?:\w+\s+){0,3}(?:assist|help|describe|identify|process|provide|analy[sz]e|comply)/i;
 const LINE = /^[\s*•-]*\[?(\d+(?::\d{2}){1,2})\]?\s*[:–—-]?\s*(.*)$/;
-const NONE = /^(?:none|no text|n\/a|-)\.?$/i;
+const NONE = /^(?:none|no text|n\/a|-|same)\.?$/i;
 
 /**
  * The lines of an answer by frame time. A time that is not in the batch is dropped; the first
@@ -123,13 +132,13 @@ function parseScreen(answer: string, times: ReadonlySet<string>) {
 
 type Shot = { at: number; jpeg: Buffer };
 
-async function readBatch(batch: Shot[], eye: Model): Promise<Frame[]> {
+async function readBatch(batch: Shot[], eye: Model, look: Look): Promise<Frame[]> {
   const times = batch.map((f) => clock(f.at));
   const ask = (extra: string) =>
     eye
       .complete({
         prompt: [
-          { type: "text", text: `${SCREEN_ASK(times)}${extra}` },
+          { type: "text", text: `${ASKS[look](times)}${extra}` },
           ...batch.map((f) => ({ type: "image" as const, data: f.jpeg, mediaType: "image/jpeg" })),
         ],
       })
@@ -155,14 +164,14 @@ async function readBatch(batch: Shot[], eye: Model): Promise<Frame[]> {
  * batch that cannot be asked at all leaves its frames unread (and a warning); all of them
  * failing throws.
  */
-export async function readScreen(shots: Shot[], eye: Model): Promise<Frame[]> {
+export async function readScreen(shots: Shot[], eye: Model, look: Look = "text"): Promise<Frame[]> {
   const batches: Shot[][] = [];
   for (let i = 0; i < shots.length; i += BATCH) batches.push(shots.slice(i, i + BATCH));
   const out: Frame[] = [];
   const errors: Error[] = [];
   for (let i = 0; i < batches.length; i += BATCHES_AT_ONCE) {
     const group = batches.slice(i, i + BATCHES_AT_ONCE);
-    const done = await Promise.allSettled(group.map((b) => readBatch(b, eye)));
+    const done = await Promise.allSettled(group.map((b) => readBatch(b, eye, look)));
     for (const [j, r] of done.entries()) {
       if (r.status === "fulfilled") {
         out.push(...r.value);
@@ -367,7 +376,7 @@ export async function watchFile(input: string, opts: WatchOptions): Promise<Watc
       sceneCuts(file, ffmpeg),
       psd("hash"),
       psd("adaptive"),
-      frames(file, dir, every, ffmpeg).then((shots) => readScreen(shots, opts.eye)),
+      frames(file, dir, every, ffmpeg).then((shots) => readScreen(shots, opts.eye, opts.look)),
       opts.speech === false || !facts.audio || !opts.ear
         ? Promise.resolve("")
         : speech(file, dir, ffmpeg, opts.ear, {

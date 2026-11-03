@@ -1,4 +1,4 @@
-import type { Model } from "@wrenautomation/models";
+import { fakeModel, type Model } from "@wrenautomation/models";
 import type { LadderClient } from "@wrenautomation/read/fetch";
 import { describe, expect, it } from "vitest";
 import { canonical } from "../engine/canonical.js";
@@ -16,6 +16,7 @@ import {
   hn,
   httpLadderClient,
   ingressLadderClient,
+  isoSeconds,
   LadderCallError,
   ladderSource,
   ledgerSource,
@@ -23,7 +24,10 @@ import {
   paste,
   perplexity,
   postsOf,
+  QuotaSpent,
   searxng,
+  youtubeApi,
+  youtubeSee,
   ytdlpSource,
 } from "./index.js";
 import { OPEN_GAP_MS, pricedOf } from "./ytdlp.js";
@@ -947,6 +951,129 @@ describe("youtube", () => {
     const hit = (n: number) => ({ url: `https://youtu.be/abc123def4${n}` }) as HitRecord;
     await Promise.all([src.open?.(hit(1)), src.open?.(hit(2))]);
     expect(log).toEqual(["start 1", "end 1", `wait ${OPEN_GAP_MS}`, "start 2", "end 2"]);
+  });
+});
+
+describe("youtube data api", () => {
+  const video = (id: string, views: string) => ({
+    id,
+    snippet: {
+      title: `t ${id}`,
+      channelTitle: "Bee",
+      channelId: "UC1",
+      publishedAt: "2026-10-01T10:00:00Z",
+      description: "d",
+    },
+    statistics: { viewCount: views, likeCount: "7", commentCount: "2" },
+    contentDetails: { duration: "PT1M5S" },
+  });
+  const wire = (calls: string[]) =>
+    (async (url: string | URL) => {
+      const u = new URL(String(url));
+      calls.push(
+        `${u.pathname.split("/").pop()} ${[...u.searchParams]
+          .filter(([k]) => k !== "key" && k !== "part")
+          .map(([k, v]) => `${k}=${v}`)
+          .join("&")}`,
+      );
+      const path = u.pathname.split("/").pop();
+      const json =
+        path === "search"
+          ? { items: [{ id: { videoId: "aaaaaaaaaaa" } }, { id: { videoId: "bbbbbbbbbbb" } }] }
+          : path === "channels"
+            ? { items: [{ id: "UC1" }] }
+            : path === "playlistItems"
+              ? { items: [{ contentDetails: { videoId: "bbbbbbbbbbb" } }] }
+              : // out of order: the client puts them back
+                {
+                  items: u.searchParams
+                    .get("id")
+                    ?.split(",")
+                    .reverse()
+                    .map((id) => video(id, "1200")),
+                };
+      return new Response(JSON.stringify(json), { status: 200 });
+    }) as typeof fetch;
+
+  it("searches, lists a channel's uploads and gives exact counts", async () => {
+    const calls: string[] = [];
+    const api = youtubeApi({ key: "k", fetch: wire(calls) });
+    const found = await api.search("cold email", 2);
+    expect(found.map((h) => h.url)).toEqual([
+      "https://www.youtube.com/watch?v=aaaaaaaaaaa",
+      "https://www.youtube.com/watch?v=bbbbbbbbbbb",
+    ]);
+    expect(found[0]).toEqual({
+      url: "https://www.youtube.com/watch?v=aaaaaaaaaaa",
+      title: "t aaaaaaaaaaa",
+      channel: "Bee",
+      length: 65,
+      date: "2026-10-01",
+      snippet: "d",
+      metrics: { views: 1200, likes: 7, comments: 2 },
+    });
+    expect((await api.uploads("https://www.youtube.com/@bee", 3)).map((h) => h.url)).toEqual([
+      "https://www.youtube.com/watch?v=bbbbbbbbbbb",
+    ]);
+    expect(calls).toEqual([
+      "search type=video&q=cold email&maxResults=2",
+      "videos id=aaaaaaaaaaa,bbbbbbbbbbb&maxResults=50",
+      "channels forHandle=@bee",
+      "playlistItems playlistId=UU1&maxResults=3",
+      "videos id=bbbbbbbbbbb&maxResults=50",
+    ]);
+    expect(isoSeconds("PT1H2M3S")).toBe(3723);
+    expect(isoSeconds("P1D")).toBe(86400);
+    expect(isoSeconds("x")).toBeNull();
+  });
+
+  it("a spent quota sends the rest of the process to yt-dlp, said once", async () => {
+    let apiCalls = 0;
+    const warned: string[] = [];
+    const src = ytdlpSource({
+      ytDlp: "yt-dlp",
+      api: {
+        search: async () => {
+          apiCalls++;
+          throw new QuotaSpent("youtube api search: HTTP 403 quotaExceeded");
+        },
+        uploads: async () => {
+          throw new Error("unused");
+        },
+        videos: async () => [],
+      },
+      list: async () => [{ id: "abc123def45", title: "T" }],
+      warn: (l) => warned.push(l),
+    });
+    expect((await src.search?.(query("a")))?.map((h) => h.url)).toEqual([
+      "https://www.youtube.com/watch?v=abc123def45",
+    ]);
+    await src.search?.(query("b"));
+    expect(apiCalls).toBe(1);
+    expect(warned).toEqual([
+      "youtube api search: HTTP 403 quotaExceeded: yt-dlp lists YouTube from now on",
+    ]);
+  });
+
+  it("youtube-see opens only on ask, its words only for a hit with no document", async () => {
+    const asked: { words: boolean | undefined }[] = [];
+    const eye = fakeModel(() => "x", "eye");
+    const src = youtubeSee({
+      ytDlp: "yt-dlp",
+      eye,
+      see: async (url, o) => {
+        asked.push({ words: o.words });
+        return { kind: "youtube", id: "x", title: "T", url, body: "## On screen", heard: false };
+      },
+      pause: async () => {},
+    });
+    expect(src.asked).toBe(true);
+    expect(src.opens?.("https://other.example/v")).toBe(false);
+    const doc = await src.open?.(hit("https://youtu.be/abc123def45"), { read: true });
+    await src.open?.(hit("https://youtu.be/abc123def45"), { read: false });
+    expect(asked).toEqual([{ words: false }, { words: true }]);
+    expect(doc?.text).toBe("## On screen");
+    expect((doc as unknown as { usd?: number }).usd).toBe(0);
   });
 });
 

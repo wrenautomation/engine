@@ -50,7 +50,12 @@ export interface Source {
    * (a 403, a block, no reader for the media): the engine writes the spend `ok: false` with the
    * reason and the next opener gets its turn.
    */
-  open?(hit: HitRecord): Promise<Document>;
+  open?(hit: HitRecord, o?: { read?: boolean }): Promise<Document>;
+  /**
+   * Opens only a hit the agent names for it (`open --see`), never in a plain read: a costly
+   * read (a video downloaded, every frame to a model). `read`: the hit has a document already.
+   */
+  asked?: true;
 }
 
 export type Sources = Map<string, Source>;

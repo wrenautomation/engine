@@ -114,6 +114,46 @@ const keepAll = async (d: Deps, run: string) => {
 const will: Who = { from: "human", by: "will" };
 
 describe("agent commands", () => {
+  it("open --see reads named hits with the asked sources alone; a plain read never uses them", async () => {
+    const seen: { url: string; read: boolean | undefined }[] = [];
+    const seer: Source = {
+      name: "seer",
+      kind: "open",
+      cost: "metered",
+      asked: true,
+      open: async (h, o) => {
+        seen.push({ url: h.url, read: o?.read });
+        return { url: h.url, media: "video", text: "## On screen\n\n[0:02] a chart" };
+      },
+    };
+    const d = { ...deps(), sources: registry(fake, opener, seer) };
+    const { run } = await planRound(d, {
+      ask: { text: "how do staffing firms win repeat clients", kind: "web" },
+      planFile: { ...planFile, sources: ["fake", "opener", "seer"] },
+      model: "m",
+    });
+    const hits = (await search(d, run, [{ terms: "a", why: "w" }], agent)).wrote.filter(
+      (r) => r.type === "hit",
+    );
+    const [one, two] = hits.map((h) => h.id) as [string, string];
+    await open(d, run, { hits: [one], why: "numbers" }, agent);
+    // in the allow-list, still never in a plain read
+    expect(seen).toEqual([]);
+    await expect(open(d, run, { see: true, why: "w" }, agent)).rejects.toThrow("name the hits");
+    const looked = await open(d, run, { hits: [one, two], see: true, why: "the chart" }, agent);
+    expect(seen).toEqual([
+      { url: "https://a.example/one", read: true },
+      { url: "https://a.example/two", read: false },
+    ]);
+    const docs = fold(run, await d.ledger.trace(run)).documents.filter((x) => x.hit === one);
+    expect(docs.map((x) => x.media)).toEqual(["text", "video"]);
+    expect(looked.wrote.filter((r) => r.type === "document")).toHaveLength(2);
+    const plain = { ...deps(), ledger: d.ledger, sources: registry(fake, opener) };
+    await expect(open(plain, run, { hits: [one], see: true, why: "w" }, agent)).rejects.toThrow(
+      "no source here sees",
+    );
+  });
+
   it("drives a run step by step; after a stop the fold points nowhere", async () => {
     const d = deps();
     const planned = await planRound(d, {

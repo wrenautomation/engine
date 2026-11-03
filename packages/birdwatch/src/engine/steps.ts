@@ -102,10 +102,11 @@ const sourcesOf = (ctx: StepContext, state: RunState): Source[] =>
   pick(ctx.deps.sources, state.snapshot?.sources ?? []);
 
 /** The allow-list plus the openers let in to open and follow; one this machine lacks is skipped. */
-const readersOf = (ctx: StepContext, state: RunState): Source[] => [
-  ...sourcesOf(ctx, state),
-  ...(state.snapshot?.opens ?? []).flatMap((n) => ctx.deps.sources.get(n) ?? []),
-];
+const readersOf = (ctx: StepContext, state: RunState): Source[] =>
+  [
+    ...sourcesOf(ctx, state),
+    ...(state.snapshot?.opens ?? []).flatMap((n) => ctx.deps.sources.get(n) ?? []),
+  ].filter((s) => !s.asked);
 
 /** Settled calls in order: the values, the first Transient, and any other error thrown on. */
 function gather<T>(settled: PromiseSettledResult<T>[]): {
@@ -332,6 +333,8 @@ export async function readHits(
   ctx: StepContext,
   state: RunState,
   wanted: readonly HitRecord[],
+  /** The agent's `open --see`: these openers alone, a hit read again. */
+  only?: readonly Source[],
 ): Promise<StepResult> {
   // The tree's cap is the one hard stop on reads.
   const room = wanted.length ? await treeRoom(ctx.deps, ctx.run) : null;
@@ -343,7 +346,8 @@ export async function readHits(
   const hits = room ? wanted.slice(0, room.left) : wanted;
   const capped =
     hits.length < wanted.length ? `; the tree's cap left ${hits.length} of ${wanted.length}` : "";
-  const listed = readersOf(ctx, state).filter((s) => s.open);
+  const listed = (only ?? readersOf(ctx, state)).filter((s) => s.open);
+  const hasDoc = new Set(state.documents.map((d) => d.hit));
   // A site's own reader before the general openers; the allow-list's order inside each.
   const openers = [...listed.filter((s) => s.first), ...listed.filter((s) => !s.first)];
   if (hits.length && !openers.length)
@@ -364,10 +368,12 @@ export async function readHits(
       if (s.opens && !s.opens(h.url)) continue;
       try {
         const doc = await ctx.invoke(s, "open", h.url, h.id, () =>
-          (s.open as NonNullable<Source["open"]>)(h).catch((err: unknown) => {
-            if (!isTransient(err)) why.push(`${s.name}: ${message(err)}`);
-            throw err;
-          }),
+          (s.open as NonNullable<Source["open"]>)(h, { read: hasDoc.has(h.id) }).catch(
+            (err: unknown) => {
+              if (!isTransient(err)) why.push(`${s.name}: ${message(err)}`);
+              throw err;
+            },
+          ),
         );
         if (doc) return { doc, source: s };
       } catch (err) {

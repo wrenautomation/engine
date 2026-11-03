@@ -15,11 +15,12 @@ import { mkdir, readFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { serve } from "@hono/node-server";
 import type { Model } from "@wrenautomation/models";
+import { anthropic } from "@wrenautomation/models";
 import { type Judge, judgeFromSpec } from "@wrenautomation/models/judge";
 import { modelFromSpec } from "@wrenautomation/models/spec";
 import type { LadderClient } from "@wrenautomation/read/fetch";
 import { PoliteFetcher, userAgent } from "@wrenautomation/read/fetch";
-import { geminiVideo } from "@wrenautomation/read/video";
+import { cohereSpeech } from "@wrenautomation/read/video";
 import type { Command } from "commander";
 import { z } from "zod";
 import type { Extractor } from "../document/index.js";
@@ -88,6 +89,8 @@ import {
   perplexity,
   redditSource,
   searxng,
+  youtubeApi,
+  youtubeSee,
   ytdlpSource,
 } from "../sources/index.js";
 import { SERVE_ORIGINS, SERVE_PORT, serveApp, watchRuns } from "./serve.js";
@@ -148,6 +151,9 @@ export interface EngineCliDeps {
 
 const filesLedger = (o: Common) => new FilesLedger(o.ledger, o.writer);
 
+/** Reads the frames of a video the agent asks to see: each one's text and what it shows. */
+const SEE_MODEL = "sonnet";
+
 /** The sources this machine can run, from the environment. */
 export function sourcesHere(
   printed: NodeJS.ProcessEnv,
@@ -168,13 +174,25 @@ export function sourcesHere(
   const pplxKeys = keys(printed, "PERPLEXITY_API_KEY");
   if (pplxKeys.length) out.push(perplexity({ keys: pplxKeys }));
   out.push(hn());
-  const geminiKeys = keys(printed, "GEMINI_API_KEY");
+  // hits through the Data API when there is a key; an open reads captions, no model
   out.push(
     ytdlpSource({
       ytDlp,
-      ...(geminiKeys.length ? { video: () => geminiVideo(geminiKeys) } : {}),
+      ...(printed.YOUTUBE_API_KEY ? { api: youtubeApi({ key: printed.YOUTUBE_API_KEY }) } : {}),
+      warn,
     }),
   );
+  // what a video shows, on the agent's ask: Claude on the frames, Cohere hears a video with no captions
+  const claudeKeys = keys(printed, "ANTHROPIC_API_KEY");
+  const cohereKeys = keys(printed, "COHERE_API_KEY");
+  if (claudeKeys.length)
+    out.push(
+      youtubeSee({
+        ytDlp,
+        eye: anthropic({ key: claudeKeys, model: SEE_MODEL }),
+        ...(cohereKeys.length ? { ear: cohereSpeech(cohereKeys) } : {}),
+      }),
+    );
   if (printed.BIRDWATCH_CONTACT) {
     out.push(fetcherSource({ fetcher: new PoliteFetcher(userAgent(printed.BIRDWATCH_CONTACT)) }));
     const categories = (printed.BIRDWATCH_ARXIV_CATEGORIES ?? "")
@@ -554,11 +572,17 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       "--with <source...>",
       "open sources this machine has that the run's allow-list lacks (`sources` lists them)",
     )
+    .option(
+      "--see",
+      "read what the named videos show, frame by frame (downloaded; Claude reads the frames, ~$0.30 for 10 min): only a video worth it whose captions lean on the screen",
+    )
     .action(
       async (
         runId: string,
         hits: string[],
-        o: Common & Machine & Agent & { url?: string[]; why?: string; with?: string[] },
+        o: Common &
+          Machine &
+          Agent & { url?: string[]; why?: string; with?: string[]; see?: boolean },
       ) => {
         const s = setup(o);
         printDid(
@@ -570,6 +594,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
               ...(o.url ? { urls: o.url } : {}),
               ...(o.why ? { why: o.why } : {}),
               ...(o.with ? { with: o.with } : {}),
+              ...(o.see ? { see: true } : {}),
             },
             whoOf(o),
           ),

@@ -16,7 +16,7 @@ names it. The ledger folder is `--ledger` (before or after the command) or `BIRD
 (default `./ledger`). Sources come from the environment. `~/.config/birdwatch/config.json`
 names the env files to read keys from, so no wrapper is needed; a set variable wins.
 `birdwatch sources` lists what this machine can run. A Reddit thread and a Facebook
-group post open through their own readers (`reddit`, `facebook`) before the page openers. A query pinned to `reddit.com` also searches Reddit itself, signed out (it shares a daily read cap; Exa has no Reddit index). `hn` searches Hacker News (free) and reads a thread with every comment. A query pinned to `linkedin.com` searches LinkedIn posts through the desk, only as the account `BIRDWATCH_ACCOUNTS` names (`linkedin=linkedin@wren`; never the bare `linkedin`, a person's own profile). A hit's `metrics` (views, likes, comments) are what the listing showed: a post's draw, before any read. The brief reads each hit's `lift` against its author's median over every run (`authors`): 54.7 is 54.7 times the author's usual, so a small account and a big one compare. `follow --as posts` on an author fills their baseline (five posts up). Reddit
+group post open through their own readers (`reddit`, `facebook`) before the page openers. A query pinned to `reddit.com` also searches Reddit itself, signed out (it shares a daily read cap; Exa has no Reddit index). `hn` searches Hacker News (free) and reads a thread with every comment. `youtube` lists through the YouTube Data API when `YOUTUBE_API_KEY` is set (exact views, likes and comments; 10k units a day, a search costs 100, a listing 1), else through yt-dlp. A YouTube open reads the captions only, free. `youtube-see` (with `ANTHROPIC_API_KEY`) reads what a video shows, only when you name it: `open --see`. A query pinned to `linkedin.com` searches LinkedIn posts through the desk, only as the account `BIRDWATCH_ACCOUNTS` names (`linkedin=linkedin@wren`; never the bare `linkedin`, a person's own profile). A hit's `metrics` (views, likes, comments) are what the listing showed: a post's draw, before any read. The brief reads each hit's `lift` against its author's median over every run (`authors`): 54.7 is 54.7 times the author's usual, so a small account and a big one compare. `follow --as posts` on an author fills their baseline (five posts up). Reddit
 reads signed out, then as the account `BIRDWATCH_ACCOUNTS` names (`reddit=reddit@alt`); the person
 picks that account, never you. `google` searches Google's own page through the desk's browser:
 each result is a hit, and the AI Overview is one hit (channel "Google AI Overview") whose
@@ -40,6 +40,7 @@ birdwatch search <run> < tree.json                      # the round's query tree
 birdwatch add call <run> <hit> keep|drop --why "<why>"  # triage, one per hit; the last call wins, a flip warns, a person's call stands over yours
 echo '[{"on":"<hit>","verdict":"keep","why":".."}]' | birdwatch add call <run>   # many calls, one process
 birdwatch open <run> [<hit>...] [--url <url>...] --why "<why>"   # then reads every kept hit without a document
+birdwatch open <run> <hit>... --see --why "<why>"         # what a video shows, frame by frame: only a strong video whose captions lean on the screen
 birdwatch open <run> --with <source>                    # an opener `sources` lists but the run lacks (a ladder that came later); it joins to open, never to search
 birdwatch show <run> <document> [--head N]              # the page's text: read it yourself
 birdwatch add finding <run> <document> --text "<sentence>" --quote "<quote on the page>"
@@ -129,7 +130,16 @@ records show done.
    page the ask does not need). One why per call, short. A page you know of yourself: `open --url`.
    Read every hit yourself, however many: the labels sort them, they never call one. There is
    no bulk keep or drop. A drop on a rule (under 3 times the author's usual) names the rule.
-4. **Read.** `open`, then `show` each document and read it. Write each fact that answers the
+   On an ask about content (what draws, what works, a format, a hook), drop only what is off
+   the topic. A video that drew little is the comparison that shows what the strong ones did
+   differently: keep it, and say so in the why. Open every kept video: its captions cost nothing.
+4. **Read.** `open`, then `show` each document and read it. A video whose captions failed
+   stays kept and unread: `open` again later tries it again. **See a video** (`open <run> <hit>
+   --see --why`) only when all three hold: its metrics or lift put it among the run's strongest,
+   it answers the ask, and its captions lean on the screen ("as you can see", "this slide",
+   "look at this", a demo or chart the words do not describe) or leave the point unsaid. It
+   downloads the video, and Claude reads each frame: the text, then what it shows (~$0.30 for
+   10 minutes). The why names the test it passed. The read is a second document on the hit. Write each fact that answers the
    ask as `add finding` with its exact quote; a quote that is not on the page fails. Say what
    the page lacks as `add gap --on <document>`. For a run too big to read (tens of pages),
    `extract` puts a model behind the same gate; then judge its findings in

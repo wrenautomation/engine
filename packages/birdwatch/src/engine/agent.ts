@@ -635,6 +635,11 @@ export interface OpenInput {
    * plan). Written as a new snapshot in the agent's name, so the ledger says when the list grew.
    */
   with?: readonly string[];
+  /**
+   * The named hits read again by the sources that only open on ask (`asked`): what a video
+   * shows, frame by frame. Costly: only for a hit worth it, and the why says so.
+   */
+  see?: boolean;
 }
 
 /** Kept hits of any round with no document yet. */
@@ -653,6 +658,8 @@ export async function open(deps: Deps, run: string, input: OpenInput, who: Who):
   const named = [...(input.hits ?? [])];
   if ((named.length || input.urls?.length) && !input.why?.trim())
     throw new Error("open: why read these?");
+  if (input.see && !named.length && !input.urls?.length)
+    throw new Error("open --see: name the hits to see");
   const ids = new Set(state.hits.map((h) => h.id));
   for (const id of named) if (!ids.has(id)) throw new Error(`no hit ${id}`);
   const ctx = context(deps, run, state.round, "triage");
@@ -682,6 +689,20 @@ export async function open(deps: Deps, run: string, input: OpenInput, who: Who):
     }
     const { id: _id, at: _at, from: _from, by: _by, ...rest } = snapshot;
     await ctx.write({ ...rest, opens: [...snapshot.opens, ...joining] }, who);
+  }
+  if (input.see) {
+    const seers = [...deps.sources.values()].filter((s) => s.asked && s.open);
+    if (!seers.length)
+      throw new Error("open --see: no source here sees a video (ANTHROPIC_API_KEY)");
+    const want = new Set(named);
+    return stepRun(deps, run, "read", (c, s) =>
+      readHits(
+        c,
+        s,
+        s.hits.filter((h) => want.has(h.id)),
+        seers,
+      ),
+    );
   }
   return stepRun(deps, run, "read", (c, s) => readHits(c, s, unread(s)));
 }

@@ -13,6 +13,7 @@ import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Model, Part } from "@wrenautomation/models";
+import type { Ear } from "@wrenautomation/models/hear";
 import { readMedia, SHOWN } from "./gemini.js";
 import type { VideoInfo } from "./index.js";
 import {
@@ -25,7 +26,13 @@ import {
   type VideoRead,
 } from "./read.js";
 import { clock, runFor, sleep, TOOL_MS, waitOutCap } from "./tools.js";
-import { renderWatched, type Watched, type WatchOptions, watchFile } from "./watch.js";
+import {
+  onScreenLines,
+  renderWatched,
+  type Watched,
+  type WatchOptions,
+  watchFile,
+} from "./watch.js";
 
 /** What yt-dlp's `-j` prints for a download; only what the readers use. */
 export interface VideoMeta
@@ -241,6 +248,72 @@ export async function readYoutube(
     ...(info.duration ? { duration: Math.round(info.duration) } : {}),
     ...(info.thumbnail ? { thumbnail: info.thumbnail } : {}),
     body,
+  };
+}
+
+/**
+ * What a YouTube video shows, for the few the agent picks: downloaded by yt-dlp (the stream
+ * reads from the home IP even when the caption URLs 429), each frame read by `eye`: its text and
+ * what it shows. `words`: the speech too, from the captions, else `ear` hears the audio. Without
+ * `words`, the body is the screen alone (the hit has its captions already).
+ */
+export async function seeYoutube(
+  url: string,
+  opts: {
+    ytDlp: string;
+    /** Takes images (Claude). */
+    eye: Model;
+    ear?: Ear | undefined;
+    words?: boolean;
+    ffmpeg?: string;
+    fetchFn?: typeof fetch;
+    pause?: (ms: number) => Promise<void>;
+  },
+): Promise<VideoRead & { heard: boolean }> {
+  let words = "";
+  let failed: string | null = null;
+  if (opts.words)
+    words = await readYoutube(url, {
+      ytDlp: opts.ytDlp,
+      ...(opts.fetchFn ? { fetchFn: opts.fetchFn } : {}),
+      ...(opts.pause ? { pause: opts.pause } : {}),
+    }).then(
+      (r) => r.body,
+      (err: unknown) => {
+        failed = err instanceof Error ? err.message : String(err);
+        return "";
+      },
+    );
+  const hear = !!opts.words && !words && !!opts.ear;
+  const watched = await watch(url, {
+    ytDlp: opts.ytDlp,
+    eye: opts.eye,
+    look: "all",
+    speech: hear,
+    ...(hear && opts.ear ? { ear: opts.ear } : {}),
+    ...(opts.ffmpeg ? { ffmpeg: opts.ffmpeg } : {}),
+  });
+  const info = watched.info as VideoMeta;
+  const said = words
+    ? words
+    : hear
+      ? `## Speech\n\nHeard from the audio (captions: ${failed}).\n\n${watched.speech || "(no speech)"}\n`
+      : opts.words
+        ? `## Speech\n\nNot read: ${failed}\n`
+        : "";
+  const lines = onScreenLines(watched).join("\n") || "(nothing on screen)";
+  const uploaded = isoDate(info.upload_date);
+  return {
+    kind: "youtube",
+    id: info.id,
+    title: info.title,
+    url: info.webpage_url ?? url,
+    ...(info.channel ? { channel: info.channel } : {}),
+    ...(uploaded ? { uploaded } : {}),
+    ...(info.duration ? { duration: Math.round(info.duration) } : {}),
+    ...(info.thumbnail ? { thumbnail: info.thumbnail } : {}),
+    body: `${said}\n## On screen\n\nWhat the video showed, frame by frame: the text, then what the frame shows. A frame like the one before is left out.\n\n${lines}\n`,
+    heard: hear,
   };
 }
 

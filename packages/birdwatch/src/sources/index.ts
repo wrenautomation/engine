@@ -19,4 +19,5 @@ export * from "./paste.js";
 export * from "./perplexity.js";
 export * from "./searxng.js";
 export * from "./sites.js";
+export * from "./youtube-api.js";
 export * from "./ytdlp.js";
