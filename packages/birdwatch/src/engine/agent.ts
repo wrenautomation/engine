@@ -1220,7 +1220,10 @@ export interface Brief {
   tree: TreeView | null;
   hits: {
     uncalled: HitBrief[];
-    toRead: { id: string; url: string }[];
+    /** Kept hits not read yet, with what the listing showed: title, channel, metrics, lift. */
+    toRead: (Pick<HitRecord, "id" | "url" | "title" | "channel" | "metrics"> & {
+      lift?: Partial<Record<MetricKey, number>>;
+    })[];
     read: number;
     total: number;
   };
@@ -1393,7 +1396,17 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
           };
         })
         .sort((a, b) => hitRank(b) - hitRank(a)),
-      toRead: unread(state).map(({ id, url }) => ({ id, url })),
+      toRead: unread(state).map((h) => {
+        const lift = liftOf(h, base);
+        return {
+          id: h.id,
+          url: h.url,
+          ...(h.title ? { title: h.title } : {}),
+          ...(h.channel ? { channel: h.channel } : {}),
+          ...(h.metrics ? { metrics: h.metrics } : {}),
+          ...(lift ? { lift } : {}),
+        };
+      }),
       read: state.documents.length,
       total: state.hits.length,
     },

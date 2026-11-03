@@ -5,6 +5,7 @@
 import { execFile } from "node:child_process";
 import { basename } from "node:path";
 import { promisify } from "node:util";
+import { isTransient } from "@wrenautomation/models";
 
 export const run = promisify(execFile);
 
@@ -24,6 +25,28 @@ export async function runFor(
     if ((err as { killed?: boolean }).killed)
       throw new Error(`${basename(cmd)} timed out after ${Math.round(ms / 1000)}s`);
     throw err;
+  }
+}
+
+export const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** A per-minute cap with no `retry-after`: wait it out this long, at most `CAP_WAITS` times a call. */
+export const CAP_WAIT_MS = 61_000;
+export const CAP_WAITS = 3;
+
+/** `fn`, again after the vendor's wait (a minute when it names none) each time it says "later". */
+export async function waitOutCap<T>(
+  fn: () => Promise<T>,
+  pause: (ms: number) => Promise<void> = sleep,
+): Promise<T> {
+  for (let i = 0; ; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (i >= CAP_WAITS || !isTransient(err)) throw err;
+      const until = err.retryAfter ? Date.parse(err.retryAfter) - Date.now() : Number.NaN;
+      await pause(Number.isNaN(until) ? CAP_WAIT_MS : Math.max(0, Math.min(until, CAP_WAIT_MS)));
+    }
   }
 }
 

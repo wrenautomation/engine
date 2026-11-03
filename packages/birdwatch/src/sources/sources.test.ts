@@ -26,7 +26,7 @@ import {
   searxng,
   ytdlpSource,
 } from "./index.js";
-import { pricedOf } from "./ytdlp.js";
+import { OPEN_GAP_MS, pricedOf } from "./ytdlp.js";
 
 const base = {
   id: "r-1",
@@ -928,6 +928,25 @@ describe("youtube", () => {
       { target: "https://www.youtube.com/channel/UC1/videos", range: { start: 1, end: 3 } },
       { target: "https://www.tiktok.com/@bee", range: { start: 1, end: 3 } },
     ]);
+  });
+
+  it("reads YouTube one video at a time, a gap between", async () => {
+    const log: string[] = [];
+    const src = ytdlpSource({
+      ytDlp: "yt-dlp",
+      read: async (url) => {
+        log.push(`start ${url.slice(-1)}`);
+        await new Promise((r) => setTimeout(r, 5));
+        log.push(`end ${url.slice(-1)}`);
+        return { kind: "youtube", id: "x", title: "t", url, body: "b" };
+      },
+      pause: async (ms) => {
+        log.push(`wait ${ms}`);
+      },
+    });
+    const hit = (n: number) => ({ url: `https://youtu.be/abc123def4${n}` }) as HitRecord;
+    await Promise.all([src.open?.(hit(1)), src.open?.(hit(2))]);
+    expect(log).toEqual(["start 1", "end 1", `wait ${OPEN_GAP_MS}`, "start 2", "end 2"]);
   });
 });
 

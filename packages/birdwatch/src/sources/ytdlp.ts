@@ -100,6 +100,9 @@ export function postsOf(
   return null;
 }
 
+/** Pause between YouTube reads: 4 at once drew 429s on captions and clips (11-03). */
+export const OPEN_GAP_MS = 3_000;
+
 export function ytdlpSource(o: {
   ytDlp: string;
   /**
@@ -112,6 +115,8 @@ export function ytdlpSource(o: {
   list?: typeof flatPlaylist;
   read?: typeof readYoutube;
   info?: typeof pageInfo;
+  /** For tests: the wait between reads. */
+  pause?: (ms: number) => Promise<void>;
 }): Source {
   const list = o.list ?? flatPlaylist;
   const read = o.read ?? readYoutube;
@@ -120,6 +125,19 @@ export function ytdlpSource(o: {
   const videoModel = (make: () => Promise<Model | null>) => {
     video ??= make();
     return video;
+  };
+  const pause = o.pause ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  // one read at a time, a gap between: the open step runs 4 at once
+  let line: Promise<unknown> = Promise.resolve();
+  let first = true;
+  const inLine = <T>(fn: () => Promise<T>): Promise<T> => {
+    const next = line.then(async () => {
+      if (!first) await pause(OPEN_GAP_MS);
+      first = false;
+      return fn();
+    });
+    line = next.catch(() => undefined);
+    return next;
   };
   return {
     name: "youtube",
@@ -157,18 +175,19 @@ export function ytdlpSource(o: {
         .filter((h): h is NonNullable<typeof h> => h !== null);
     },
     opens: isYoutube,
-    async open(h) {
-      if (!isYoutube(h.url)) throw new Error(`youtube: not a YouTube page: ${h.url}`);
-      const model = o.video ? await videoModel(o.video) : null;
-      const priced = model ? pricedOf(model) : null;
-      const doc = videoDocument(
-        await read(h.url, { ytDlp: o.ytDlp, ...(priced ? { video: priced.model } : {}) }),
-      );
-      // captions: free; heard: the model's priced calls; an unpriced call leaves it unpriced
-      const usd = priced ? priced.usd() : 0;
-      // hidden: the spend reads it, the stored document never carries it
-      if (usd !== undefined) Object.defineProperty(doc, "usd", { value: usd, enumerable: false });
-      return doc;
-    },
+    open: (h) => inLine(() => openOne(h)),
   };
+  async function openOne(h: { url: string }): Promise<Document> {
+    if (!isYoutube(h.url)) throw new Error(`youtube: not a YouTube page: ${h.url}`);
+    const model = o.video ? await videoModel(o.video) : null;
+    const priced = model ? pricedOf(model) : null;
+    const doc = videoDocument(
+      await read(h.url, { ytDlp: o.ytDlp, ...(priced ? { video: priced.model } : {}) }),
+    );
+    // captions: free; heard: the model's priced calls; an unpriced call leaves it unpriced
+    const usd = priced ? priced.usd() : 0;
+    // hidden: the spend reads it, the stored document never carries it
+    if (usd !== undefined) Object.defineProperty(doc, "usd", { value: usd, enumerable: false });
+    return doc;
+  }
 }

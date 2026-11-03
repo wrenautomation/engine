@@ -6,7 +6,7 @@ import { fakeModel, gemini } from "@wrenautomation/models";
 import { fakeEar } from "@wrenautomation/models/hear";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { flatPlaylist } from "./list.js";
-import { readAudio, readVideo, readYoutubeByUrl } from "./url.js";
+import { CAPTION_WAITS_MS, readAudio, readVideo, readYoutube, readYoutubeByUrl } from "./url.js";
 
 const hasFfmpeg = (() => {
   try {
@@ -168,6 +168,40 @@ console.log(JSON.stringify({ id: "abc", title: "Video by x", extractor_key: "Ins
     );
     expect(r.body).toMatch(/\n## Cuts\n\n\d:\d\d\.\d\n$/);
   }, 30_000);
+});
+
+describe("youtube captions", () => {
+  it("waits out a round of 429s, then reads the next track", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "read-yt-test-"));
+    try {
+      const fake = join(dir, "yt-dlp.mjs");
+      const tracks = [1, 2, 3, 4].map((i) => ({ ext: "json3", url: `https://cap.example/${i}` }));
+      await writeFile(
+        fake,
+        `console.log(JSON.stringify(${JSON.stringify({ id: "abcdefghijk", title: "T", duration: 5, automatic_captions: { en: tracks } })}));`,
+      );
+      const asked: string[] = [];
+      const fetchFn = (async (u: string) => {
+        asked.push(u);
+        return u.endsWith("/4")
+          ? Response.json({ events: [{ tStartMs: 0, segs: [{ utf8: "hello" }] }] })
+          : new Response("", { status: 429 });
+      }) as unknown as typeof fetch;
+      const waits: number[] = [];
+      const r = await readYoutube("https://www.youtube.com/watch?v=abcdefghijk", {
+        ytDlp: `node ${fake}`,
+        fetchFn,
+        pause: async (ms) => {
+          waits.push(ms);
+        },
+      });
+      expect(asked.map((u) => u.slice(-1))).toEqual(["1", "2", "3", "4"]);
+      expect(waits).toEqual([CAPTION_WAITS_MS[0]]);
+      expect(r.body).toContain("hello");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("list", () => {

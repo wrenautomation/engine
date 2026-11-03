@@ -8,8 +8,8 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isTransient, type Model } from "@wrenautomation/models";
-import { runFor, TOOL_MS } from "./tools.js";
+import type { Model } from "@wrenautomation/models";
+import { runFor, sleep, TOOL_MS, waitOutCap } from "./tools.js";
 
 /** The labels asked, each with its closed set. */
 export const LABELS = ["type", "move", "in"] as const;
@@ -25,23 +25,6 @@ export interface ShotSpan {
 
 /** Calls at a time: the vision model's per-minute limit refuses 3 at once on a film. */
 const AT_ONCE = 1;
-/** A per-minute cap with no `retry-after`: wait it out this long, at most `CAP_WAITS` times a shot. */
-const CAP_WAIT_MS = 61_000;
-const CAP_WAITS = 3;
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-/** `fn`, again after the vendor's wait (a minute when it names none) each time it says "later". */
-async function waitOutCap<T>(fn: () => Promise<T>, pause: (ms: number) => Promise<void>) {
-  for (let i = 0; ; i++) {
-    try {
-      return await fn();
-    } catch (err) {
-      if (i >= CAP_WAITS || !isTransient(err)) throw err;
-      const until = err.retryAfter ? Date.parse(err.retryAfter) - Date.now() : Number.NaN;
-      await pause(Number.isNaN(until) ? CAP_WAIT_MS : Math.max(0, Math.min(until, CAP_WAIT_MS)));
-    }
-  }
-}
 
 /** Dark films read as nothing; this lifts the shadows before the model sees them. */
 const BRIGHTEN = "eq=gamma=1.6:contrast=1.15";

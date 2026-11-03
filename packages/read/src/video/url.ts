@@ -24,7 +24,7 @@ import {
   real,
   type VideoRead,
 } from "./read.js";
-import { clock, runFor, TOOL_MS } from "./tools.js";
+import { clock, runFor, sleep, TOOL_MS, waitOutCap } from "./tools.js";
 import { renderWatched, type Watched, type WatchOptions, watchFile } from "./watch.js";
 
 /** What yt-dlp's `-j` prints for a download; only what the readers use. */
@@ -105,6 +105,46 @@ const youtubePart = (page: string, start: number | null, durationS: number): Par
 // Low resolution reads a shown document fine at a quarter of the tokens.
 const LOW = { resolution: "low" } as const;
 
+/** Caption URLs tried per round; a 429 on all of them is the IP, not the URL. */
+const TRACKS_PER_TRY = 3;
+/** Waits after a round of 429s, unless YouTube names its own (capped at the longest). */
+export const CAPTION_WAITS_MS = [20_000, 60_000, 120_000];
+
+/**
+ * The first caption track that answers. YouTube throttles single caption URLs (429) and the same
+ * text sits behind several, so a round tries a few; a round of 429s waits and goes again.
+ */
+async function captionsOf(
+  url: string,
+  tracks: readonly { url: string }[],
+  fetchFn: typeof fetch,
+  pause: (ms: number) => Promise<void>,
+): Promise<Json3> {
+  let last = 0;
+  let next = 0;
+  for (let round = 0; round <= CAPTION_WAITS_MS.length; round++) {
+    let throttled = false;
+    let retryAfter: string | null = null;
+    for (let i = 0; i < Math.min(TRACKS_PER_TRY, tracks.length); i++) {
+      const t = tracks[next++ % tracks.length] as { url: string };
+      const res = await fetchFn(t.url);
+      last = res.status;
+      if (res.ok) return (await res.json()) as Json3;
+      if (res.status === 429) {
+        throttled = true;
+        retryAfter = res.headers.get("retry-after") ?? retryAfter;
+      }
+    }
+    if (!throttled || round === CAPTION_WAITS_MS.length) break;
+    const named = retryAfter ? Number(retryAfter) * 1000 : Number.NaN;
+    const longest = CAPTION_WAITS_MS.at(-1) as number;
+    await pause(
+      Number.isFinite(named) ? Math.min(named, longest) : (CAPTION_WAITS_MS[round] as number),
+    );
+  }
+  throw new Error(`${url}: captions fetch HTTP ${last} on ${tracks.length} tracks, after waits`);
+}
+
 /**
  * What the video shows on screen (documents, slides, tables, templates), read by `model` straight
  * from the YouTube URL in `CLIP_S` clips. One markdown block per clip, timestamps absolute.
@@ -114,17 +154,30 @@ async function screenText(
   url: string,
   durationS: number,
   model: Model | null | undefined,
+  pause: (ms: number) => Promise<void> = sleep,
 ): Promise<string> {
   if (!model) return "";
   const clips = Array.from({ length: Math.ceil(durationS / CLIP_S) }, (_, i) => i * CLIP_S);
+  // a day's quota spent: the clips after it fail at once, no call, no wait
+  let spent: string | null = null;
   const read = async (start: number): Promise<string> => {
     try {
-      return await readMedia(
-        model,
-        [youtubePart(url, start, durationS)],
-        (paraphrase) => SHOWN_ASK(start, paraphrase),
-        LOW,
-      );
+      if (spent) throw new Error(spent);
+      // a per-minute cap (429) waits it out
+      return await waitOutCap(async () => {
+        try {
+          return await readMedia(
+            model,
+            [youtubePart(url, start, durationS)],
+            (paraphrase) => SHOWN_ASK(start, paraphrase),
+            LOW,
+          );
+        } catch (err) {
+          const why = err instanceof Error ? err.message : String(err);
+          if (/per ?day/i.test(why)) throw new Error((spent = `day quota spent: ${why}`));
+          throw err;
+        }
+      }, pause);
     } catch (err) {
       // One unread clip must not lose the other 23: leave a marker and carry on.
       const why = err instanceof Error ? err.message : String(err);
@@ -134,9 +187,9 @@ async function screenText(
     }
   };
   const out: string[] = [];
-  // 4 clips at a time; limits are per key, so go wider if it ever drags.
-  for (let i = 0; i < clips.length; i += 4) {
-    const texts = await Promise.all(clips.slice(i, i + 4).map(read));
+  // 2 clips at a time: 4 met the free tier's per-minute cap (11-03)
+  for (let i = 0; i < clips.length; i += 2) {
+    const texts = await Promise.all(clips.slice(i, i + 2).map(read));
     out.push(...texts.filter(real));
   }
   return out.join("\n\n");
@@ -149,9 +202,16 @@ async function screenText(
  */
 export async function readYoutube(
   url: string,
-  opts: { ytDlp: string; video?: Model | null; fetchFn?: typeof fetch },
+  opts: {
+    ytDlp: string;
+    video?: Model | null;
+    fetchFn?: typeof fetch;
+    /** For tests: the wait between caption tries. */
+    pause?: (ms: number) => Promise<void>;
+  },
 ): Promise<VideoRead> {
   const fetchFn = opts.fetchFn ?? fetch;
+  const pause = opts.pause ?? sleep;
   const [cmd, ...pre] = opts.ytDlp.split(/\s+/) as [string, ...string[]];
   const { stdout } = await runFor(
     cmd,
@@ -162,19 +222,9 @@ export async function readYoutube(
   const info = JSON.parse(stdout) as VideoInfo;
   const tracks = captionTracks(info);
   if (!tracks.length) throw new Error(`${url}: no English captions (manual or auto) to read`);
-  // YouTube throttles single caption URLs (429); the same text sits behind several, so try each.
-  let json: Json3 | undefined;
-  let last = 0;
-  for (const t of tracks) {
-    const res = await fetchFn(t.url);
-    last = res.status;
-    if (!res.ok) continue;
-    json = (await res.json()) as Json3;
-    break;
-  }
-  if (!json) throw new Error(`${url}: captions fetch HTTP ${last} on all ${tracks.length} tracks`);
+  const json = await captionsOf(url, tracks, fetchFn, pause);
   let body = captionsBody(info, json);
-  const screen = await screenText(url, info.duration ?? 0, opts.video);
+  const screen = await screenText(url, info.duration ?? 0, opts.video, pause);
   if (screen)
     body += `\n## On screen\n\nWhat the video showed (documents, slides, tables, visuals), read from the frames; the transcript above has only the speech.\n\n${screen}\n`;
   const uploaded = isoDate(info.upload_date);
