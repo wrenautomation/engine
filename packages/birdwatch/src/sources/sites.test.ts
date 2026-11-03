@@ -378,7 +378,10 @@ describe("site readers", () => {
     const seen: { url: string; body?: string }[] = [];
     const fetchFn = async (u: unknown, init?: RequestInit) => {
       seen.push({ url: String(u), ...(init?.body ? { body: String(init.body) } : {}) });
-      return new Response("{}", { status: 200 });
+      // the ingress: a send names the invocation, its output is the answer
+      return new Response(String(u).endsWith("/send") ? '{"invocationId":"inv_1"}' : "{}", {
+        status: 200,
+      });
     };
     await httpLadderClient({ url: "http://desk.local", fetchFn }).call(
       "reddit",
@@ -397,7 +400,8 @@ describe("site readers", () => {
       {},
       { account: "reddit@alt" },
     );
-    expect(JSON.parse(seen[1]?.body ?? "{}")).toMatchObject({
+    const sent = () => seen.filter((c) => c.body);
+    expect(JSON.parse(sent()[0]?.body ?? "{}")).toMatchObject({
       site: "reddit",
       account: "reddit@alt",
     });
@@ -406,7 +410,7 @@ describe("site readers", () => {
       "GET",
       "/fetch",
     );
-    expect(JSON.parse(seen[2]?.body ?? "{}")).not.toHaveProperty("account");
+    expect(JSON.parse(sent()[1]?.body ?? "{}")).not.toHaveProperty("account");
   });
 });
 
@@ -505,7 +509,7 @@ describe("linkedin", () => {
       {
         site: "linkedin",
         path: "/search/results/content",
-        input: { keywords: "first sales hire", max: 50, since: "past-month" },
+        input: { keywords: "first sales hire", max: 20, since: "past-month" },
         account: "linkedin@wren",
       },
     ]);
@@ -555,8 +559,8 @@ describe("linkedin", () => {
     const page = await src.follow?.("posts", "https://www.linkedin.com/company/acme/posts/", 80);
     expect(page?.map((h) => h.channel)).toEqual(["company/acme", "company/acme"]);
     expect(w.calls.map((c) => [c.path, c.input])).toEqual([
-      ["/in/jane-doe/activity", { vanity: "jane-doe", max: 30 }],
-      ["/company/acme/posts", { company: "acme", max: 50 }],
+      ["/in/jane-doe/activity", { vanity: "jane-doe", max: 20 }],
+      ["/company/acme/posts", { company: "acme", max: 20 }],
     ]);
   });
 });

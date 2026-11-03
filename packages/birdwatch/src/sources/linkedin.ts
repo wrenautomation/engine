@@ -13,7 +13,11 @@ import { metricsOf } from "./metrics.js";
 import { routeCall } from "./sites.js";
 
 /** Posts per search page: the route's most. */
-const SEARCH_MAX = 50;
+/**
+ * Posts per page read. The flow scrolls at a person's pace: 50 took 196 s on 2026-11-03, and
+ * the desk's stream to Restate was cut twice past two minutes (each retry spent the cap).
+ */
+const SEARCH_MAX = 20;
 /** The widest window the search route offers. */
 const SINCE = "past-month";
 
@@ -107,7 +111,7 @@ export function linkedinSource(o: { sites: LadderClient; account: string }): Sou
         );
         return hitsOf(body, "posts", channel);
       }
-      const input = { vanity: page.id, max: Math.min(n, 100) };
+      const input = { vanity: page.id, max: Math.min(n, SEARCH_MAX) };
       const body = await routeCall(
         o.sites,
         who,

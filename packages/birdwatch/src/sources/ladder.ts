@@ -10,6 +10,18 @@
  * Restate ingress the desk worker sits behind (`POST $url/desk/call`, the same bearer).
  */
 
+/**
+ * How long one worker call may take. A desk flow runs at a person's pace: a LinkedIn post
+ * search of 50 took 195 s on 2026-11-03, so three minutes cut it off after the cap was spent.
+ */
+export const WORKER_WAIT_MS = 600_000;
+/** One short request: the send, a poll. */
+const SEND_WAIT_MS = 30_000;
+/** Between polls of a running invocation. */
+const POLL_MS = 5_000;
+/** Restate's answer for an invocation still running. */
+const NOT_DONE = 470;
+
 import { Transient } from "@wrenautomation/models";
 import { fetchLadder, type LadderClient, type LadderTier } from "@wrenautomation/read/fetch";
 import { defaultReaders, type Media, type Reader } from "../document/index.js";
@@ -101,7 +113,7 @@ export function httpLadderClient(o: {
           ...(o.token ? { authorization: `Bearer ${o.token}` } : {}),
         },
         ...(read ? {} : { body: JSON.stringify(input ?? {}) }),
-        signal: AbortSignal.timeout(180_000),
+        signal: AbortSignal.timeout(WORKER_WAIT_MS),
       });
       const text = await res.text();
       const body = text ? (JSON.parse(text) as unknown) : null;
@@ -119,11 +131,15 @@ export function httpLadderClient(o: {
 }
 
 /**
- * The Restate ingress wire to an autobrowse worker: `POST $url/$service/call` with the site
- * call as its body, the way wren's CLI reaches the desk. `service` is `desk` (the Mac) or
- * `sites` (a box); `caller` names who asks, for the worker's per-caller usage. Restate answers a
- * refused call as `{"code":429,"message":"…"}` under that status: a 429 is the ladder's "cap".
- * A coded refusal adds `"metadata":{"code":"need_login"}`.
+ * The Restate ingress wire to an autobrowse worker: the site call as the body of `POST
+ * $url/$service/call/send`, the way wren's CLI reaches the desk, then `GET
+ * $url/restate/invocation/$id/output` every few seconds until the answer is in. Sent, not held:
+ * a desk flow runs for minutes, a held request dies on the way (a proxy's idle cut, undici's
+ * five-minute wait for headers), and Restate retries a cut flow on its own, so the answer
+ * lands whichever try finishes. `service` is `desk` (the Mac) or `sites` (a box); `caller`
+ * names who asks, for the worker's per-caller usage. Restate answers a refused call as
+ * `{"code":429,"message":"…"}` under that status: a 429 is the ladder's "cap". A coded refusal
+ * adds `"metadata":{"code":"need_login"}`.
  */
 export function ingressLadderClient(o: {
   url: string;
@@ -131,11 +147,46 @@ export function ingressLadderClient(o: {
   service?: string;
   caller?: string;
   fetchFn?: typeof fetch;
+  /** For tests: the wait between polls. */
+  sleepFn?: (ms: number) => Promise<void>;
 }): LadderClient {
   const fetchFn = o.fetchFn ?? fetch;
+  const sleepFn = o.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const base = o.url.replace(/\/$/, "");
   const service = o.service ?? "desk";
   const caller = o.caller ?? "birdwatch";
+  const headers = {
+    "content-type": "application/json",
+    ...(o.token ? { authorization: `Bearer ${o.token}` } : {}),
+  };
+  const bodyOf = async (res: Response): Promise<{ text: string; body: unknown }> => {
+    const text = await res.text();
+    try {
+      return { text, body: text ? JSON.parse(text) : null };
+    } catch {
+      return { text, body: text };
+    }
+  };
+  const refusal = (
+    site: string,
+    method: string,
+    path: string,
+    res: Response,
+    text: string,
+    body: unknown,
+  ) => {
+    const said =
+      body && typeof body === "object" && "message" in body
+        ? String((body as { message: unknown }).message)
+        : text || res.statusText;
+    // A coded refusal: autobrowse puts the access code in the terminal error's metadata.
+    const code = (body as { metadata?: { code?: unknown } } | null)?.metadata?.code;
+    return new LadderCallError(
+      `${site} ${method} ${path}: ${res.status} ${said}`,
+      res.status,
+      typeof code === "string" ? code : null,
+    );
+  };
   return {
     async call<T>(
       site: string,
@@ -144,13 +195,9 @@ export function ingressLadderClient(o: {
       input?: unknown,
       as?: { account?: string },
     ): Promise<T> {
-      const res = await fetchFn(`${base}/${service}/call`, {
+      const sent = await fetchFn(`${base}/${service}/call/send`, {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "idempotency-key": crypto.randomUUID(),
-          ...(o.token ? { authorization: `Bearer ${o.token}` } : {}),
-        },
+        headers: { ...headers, "idempotency-key": crypto.randomUUID() },
         body: JSON.stringify({
           site,
           method,
@@ -159,29 +206,29 @@ export function ingressLadderClient(o: {
           caller,
           ...(as?.account ? { account: as.account } : {}),
         }),
-        signal: AbortSignal.timeout(180_000),
+        signal: AbortSignal.timeout(SEND_WAIT_MS),
       });
-      const text = await res.text();
-      let body: unknown = null;
-      try {
-        body = text ? JSON.parse(text) : null;
-      } catch {
-        body = text;
+      const first = await bodyOf(sent);
+      if (!sent.ok) throw refusal(site, method, path, sent, first.text, first.body);
+      const id = (first.body as { invocationId?: unknown } | null)?.invocationId;
+      if (typeof id !== "string")
+        throw new Error(`${site} ${method} ${path}: the ingress named no invocation`);
+      const until = Date.now() + WORKER_WAIT_MS;
+      for (;;) {
+        const res = await fetchFn(`${base}/restate/invocation/${id}/output`, {
+          headers,
+          signal: AbortSignal.timeout(SEND_WAIT_MS),
+        });
+        const { text, body } = await bodyOf(res);
+        if (res.ok) return body as T;
+        // 470: the invocation runs still
+        if (res.status !== NOT_DONE) throw refusal(site, method, path, res, text, body);
+        if (Date.now() >= until)
+          throw new Error(
+            `${site} ${method} ${path}: no answer in ${WORKER_WAIT_MS / 1000} s (${id})`,
+          );
+        await sleepFn(POLL_MS);
       }
-      if (!res.ok) {
-        const said =
-          body && typeof body === "object" && "message" in body
-            ? String((body as { message: unknown }).message)
-            : text || res.statusText;
-        // A coded refusal: autobrowse puts the access code in the terminal error's metadata.
-        const code = (body as { metadata?: { code?: unknown } } | null)?.metadata?.code;
-        throw new LadderCallError(
-          `${site} ${method} ${path}: ${res.status} ${said}`,
-          res.status,
-          typeof code === "string" ? code : null,
-        );
-      }
-      return body as T;
     },
   };
 }

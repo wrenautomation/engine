@@ -742,26 +742,45 @@ describe("ladder", () => {
       'fetcher: a wall, not a page: "Page Not Found | Framer"',
     );
   });
-  it("speaks the Restate ingress: POST $service/call with the site call, a bearer, Restate's message", async () => {
+  it("speaks the Restate ingress: sends $service/call, polls the invocation's output, Restate's message", async () => {
     const seen: { url: string; init: RequestInit | undefined }[] = [];
+    const slept: number[] = [];
+    let outputs = 0;
     const sites = ingressLadderClient({
       url: "https://ingress.local/",
       token: "t",
       caller: "birdwatch:test",
+      sleepFn: async (ms) => {
+        slept.push(ms);
+      },
       fetchFn: async (u, init) => {
         seen.push({ url: String(u), init });
-        return seen.length === 1
-          ? json({ finalUrl: "https://e.example" })
-          : json({ code: 429, message: "fetch: 1500 of 1500 today" }, 429);
+        const url = String(u);
+        if (url.endsWith("/send"))
+          return json({ invocationId: `inv_${seen.length}`, status: "Accepted" }, 202);
+        outputs++;
+        // the first call: running once, then its answer; the second: refused by the cap
+        if (url.includes("inv_1/")) {
+          return outputs === 1
+            ? json({ code: 470, message: "the invocation exists but has not completed yet" }, 470)
+            : json({ finalUrl: "https://e.example" });
+        }
+        return json({ code: 429, message: "fetch: 1500 of 1500 today" }, 429);
       },
     });
     expect(
       await sites.call("web", "GET", "/fetch", { url: "https://e.example", from: "impersonate" }),
     ).toEqual({ finalUrl: "https://e.example" });
-    expect(seen[0]?.url).toBe("https://ingress.local/desk/call");
+    expect(seen.map((s) => s.url)).toEqual([
+      "https://ingress.local/desk/call/send",
+      "https://ingress.local/restate/invocation/inv_1/output",
+      "https://ingress.local/restate/invocation/inv_1/output",
+    ]);
+    expect(slept).toEqual([5_000]);
     const h = new Headers(seen[0]?.init?.headers);
     expect(h.get("authorization")).toBe("Bearer t");
     expect(h.get("idempotency-key")).toMatch(/[0-9a-f-]{36}/);
+    expect(new Headers(seen[1]?.init?.headers).get("authorization")).toBe("Bearer t");
     expect(JSON.parse(String(seen[0]?.init?.body))).toEqual({
       site: "web",
       method: "GET",
