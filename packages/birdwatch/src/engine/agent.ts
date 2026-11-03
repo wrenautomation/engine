@@ -1169,9 +1169,11 @@ export interface Brief {
   budget: NonNullable<RunState["snapshot"]>["budget"] | null;
   /** The run's allow-list, as planned. */
   sources: string[];
+  /** Openers let in beside it (the plan's, or `open --with`). */
+  opens: string[];
   /** Allow-listed sources this machine cannot run (no key, no account): they search nothing. */
   sourcesMissing: string[];
-  /** Sources this machine runs that the run did not list: `open --with`, or the next plan. */
+  /** Sources this machine runs that the run has not: `open --with` an opener, the next plan a searcher. */
   sourcesUnused: string[];
   /** What earlier runs found on the ask's words, best match first, this run left out. */
   recalled: Recalled[];
@@ -1289,6 +1291,7 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
   const round = state.round;
   const urlOf = new Map(state.documents.map((d) => [d.id, d.url]));
   const sources = s?.sources ?? [];
+  const opens = s?.opens ?? [];
   const yieldRows = (await deps.ledger.yield()).filter(
     (r) => r.source === undefined || sources.includes(r.source),
   );
@@ -1325,8 +1328,11 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
     ask: s?.ask ?? null,
     budget: s?.budget ?? null,
     sources,
+    opens,
     sourcesMissing: sources.filter((n) => !deps.sources.has(n)),
-    sourcesUnused: [...deps.sources.keys()].filter((n) => !sources.includes(n)),
+    sourcesUnused: [...deps.sources.keys()].filter(
+      (n) => !sources.includes(n) && !opens.includes(n),
+    ),
     recalled: s ? await recall(deps.ledger, s.ask.text, { not: run }) : [],
     planFile: s?.planFile ?? null,
     guide: kindFile ? { age: ageOf(kindFile) ?? null, rules: rulesOf(kindFile) } : null,

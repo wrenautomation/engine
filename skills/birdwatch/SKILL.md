@@ -79,7 +79,7 @@ records show done.
 2. **Plan the tree.** Read the ask and `brief`. `brief.guide` holds the kind's age sentence and
    rules: heed them when you plan and when you triage. `brief.sourcesMissing` names allow-listed
    sources this machine cannot run (they search nothing); `brief.sourcesUnused` the ones it can
-   that the run did not list. Write the round's query tree: one facet per
+   that the run has not (not in `sources`, not let in as `opens`). Write the round's query tree: one facet per
    side of the ask the guide names (`birdwatch plans <kind>`: a number, a how, a who, a
    counter-view, a primary source; add a facet the ask needs), each with 2 or 3 tries in the
    order you expect to work: the plain words first, then a narrower angle (a site, a year, a

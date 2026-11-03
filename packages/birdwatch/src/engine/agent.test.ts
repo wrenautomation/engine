@@ -1396,6 +1396,8 @@ describe("brief carries the lean reads", () => {
     await d.ledger.append(hitRec(planned.run, 1, "New", 9));
     const b = await brief(d, planned.run);
     expect(b.sourcesMissing).toEqual([]);
+    expect(b.opens).toEqual([]);
+    // this machine's opener is not in the run: `open --with` lets it in
     expect(b.sourcesUnused).toEqual(["opener"]);
     expect(b.authors).toEqual([{ channel: "YC", views: { median: 100, n: 6 } }]);
     expect(b.hits.uncalled.map((h) => [h.channel, h.lift])).toEqual([

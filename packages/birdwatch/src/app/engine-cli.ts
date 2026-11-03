@@ -324,15 +324,19 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
         "the record is the person's word, relayed: from human, by their name (default: the writer)",
       );
   /** The ledger, this machine's sources and the model, from the options. */
-  /** The sources this machine runs: the test's, else the environment's. */
-  const sourcesOf = (o: Common & { ytDlp?: string }, ledger: ReturnType<typeof ledgerOf>) =>
+  /** The sources this machine runs: the test's, else the environment's. `warn`: where a missing key is said. */
+  const sourcesOf = (
+    o: Common & { ytDlp?: string },
+    ledger: ReturnType<typeof ledgerOf>,
+    warn?: (line: string) => void,
+  ) =>
     deps.sources
       ? deps.sources(o, ledger)
       : sourcesHere(
           process.env,
           ledger as FilesLedger,
           o.ytDlp ?? process.env.BIRDWATCH_YTDLP ?? "yt-dlp",
-          () => undefined,
+          warn,
         );
   const setup = (
     o: Common & Machine,
@@ -950,9 +954,10 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       "the run as the agent needs it: the ask, sources (and those missing here), what earlier runs found, what the last round left open, hits to call with their metrics and lift, authors' baselines, documents to extract, findings, checks, edges, yield, cost",
     )
     .action(async (runId: string, o: Common) => {
-      // this machine's sources, built not called: the brief names which the run lacks
+      // this machine's sources, built not called: the brief names which the run lacks; quiet
       const ledger = ledgerOf(o);
-      const s = { ledger, sources: sourcesOf(o, ledger), model: null, judge: null };
+      const sources = sourcesOf(o, ledger, () => undefined);
+      const s = { ledger, sources, model: null, judge: null };
       console.log(JSON.stringify(await brief(depsOf(s, o.writer), runId), null, 2));
     });
 
