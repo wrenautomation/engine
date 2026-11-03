@@ -174,7 +174,10 @@ async function screenText(
           );
         } catch (err) {
           const why = err instanceof Error ? err.message : String(err);
-          if (/per ?day/i.test(why)) throw new Error((spent = `day quota spent: ${why}`));
+          if (/per ?day/i.test(why)) {
+            spent = `day quota spent: ${why}`;
+            throw new Error(spent);
+          }
           throw err;
         }
       }, pause);
