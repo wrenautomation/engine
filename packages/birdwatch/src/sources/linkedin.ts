@@ -12,12 +12,11 @@ import type { HitViewIn } from "../engine/types.js";
 import { metricsOf } from "./metrics.js";
 import { routeCall } from "./sites.js";
 
-/** Posts per search page: the route's most. */
 /**
- * Posts per page read. The flow scrolls at a person's pace: 50 took 196 s on 2026-11-03, and
- * the desk's stream to Restate was cut twice past two minutes (each retry spent the cap).
+ * Posts per page read: the route's most, so one cap unit takes all LinkedIn serves. A search
+ * serves 25-50 and stops (3 live reads, 2026-11-03); a read takes 3-8 min at a person's pace.
  */
-const SEARCH_MAX = 20;
+const SEARCH_MAX = 100;
 /** The widest window the search route offers. */
 const SINCE = "past-month";
 

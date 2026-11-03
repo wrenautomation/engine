@@ -11,10 +11,10 @@
  */
 
 /**
- * How long one worker call may take. A desk flow runs at a person's pace: a LinkedIn post
- * search of 50 took 195 s on 2026-11-03, so three minutes cut it off after the cap was spent.
+ * How long one worker call may take, its wait for a busy profile (up to 5 min) included. A desk
+ * flow runs at a person's pace: a LinkedIn search of 100 posts reads for 8 min or more.
  */
-export const WORKER_WAIT_MS = 600_000;
+export const WORKER_WAIT_MS = 20 * 60_000;
 /** One short request: the send, a poll. */
 const SEND_WAIT_MS = 30_000;
 /** Between polls of a running invocation. */

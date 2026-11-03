@@ -509,7 +509,7 @@ describe("linkedin", () => {
       {
         site: "linkedin",
         path: "/search/results/content",
-        input: { keywords: "first sales hire", max: 20, since: "past-month" },
+        input: { keywords: "first sales hire", max: 100, since: "past-month" },
         account: "linkedin@wren",
       },
     ]);
@@ -559,8 +559,8 @@ describe("linkedin", () => {
     const page = await src.follow?.("posts", "https://www.linkedin.com/company/acme/posts/", 80);
     expect(page?.map((h) => h.channel)).toEqual(["company/acme", "company/acme"]);
     expect(w.calls.map((c) => [c.path, c.input])).toEqual([
-      ["/in/jane-doe/activity", { vanity: "jane-doe", max: 20 }],
-      ["/company/acme/posts", { company: "acme", max: 20 }],
+      ["/in/jane-doe/activity", { vanity: "jane-doe", max: 30 }],
+      ["/company/acme/posts", { company: "acme", max: 80 }],
     ]);
   });
 });
