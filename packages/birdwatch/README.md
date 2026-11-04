@@ -56,7 +56,7 @@ birdwatch search 01M5YS... < tree.json                 # a query tree, one tier:
 birdwatch search 01M5YS... < tree.json                 # after triage, the same file: the next try of each facet still thin in kept hits
 birdwatch add call 01M5YS... 01M5YT... keep --why "a survey with numbers"               # triage: a hit kept
 birdwatch add call 01M5YS... 01M5YU... drop --why "a vendor page"
-birdwatch open 01M5YS... 01M5YT... --url https://a.example/report --why "numbers"      # keep these, read every kept hit
+birdwatch open 01M5YS... 01M5YT... --url https://a.example/report --why "numbers"      # keep these and read them
 birdwatch open 01M5YS... --with ladder                                                  # an opener the run lacks joins it, to open only
 birdwatch show 01M5YS... 01M5YV...                     # a document's text, for the agent to read itself
 birdwatch add finding 01M5YS... 01M5YV... --text "412 firms were surveyed." --quote "A 2025 survey of 412 firms"
@@ -85,7 +85,7 @@ steer, what the last round left open, the allow-list and the budget. No queries:
 through `search` or `add query`, never capped. The budget is a guard rail: `brief` shows it, and
 an edge `again` past `budget.rounds` prints a warning, never a refusal. `search`, `open`,
 `extract` and `check` each run one step and print what it wrote (a document's text as `chars`);
-a step that gave up exits 2 with its note. `open` reads every kept hit of the run that has no
+a step that gave up exits 2 with its note. `open` reads the hits it names, else every kept hit of the run that has no
 document; `extract` every document without a verdict; `check` a sample across documents of the
 kept findings not yet checked. `add` writes one record by hand: a query, a finding (its quote
 must be on the document word for word, or the add fails with the gate's why), a check (the

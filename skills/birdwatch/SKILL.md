@@ -39,7 +39,7 @@ birdwatch brief <run>                                   # read it after every st
 birdwatch search <run> < tree.json                      # the round's query tree (below); or "<terms>" --why, or a JSON array
 birdwatch add call <run> <hit> keep|drop --why "<why>"  # triage, one per hit; the last call wins, a flip warns, a person's call stands over yours
 echo '[{"on":"<hit>","verdict":"keep","why":".."}]' | birdwatch add call <run>   # many calls, one process
-birdwatch open <run> [<hit>...] [--url <url>...] --why "<why>"   # then reads every kept hit without a document
+birdwatch open <run> [<hit>...] [--url <url>...] --why "<why>"   # reads the named; no names: every kept hit without a document
 birdwatch open <run> <hit>... --see --why "<why>"         # what a video shows, frame by frame: only a strong video whose captions lean on the screen
 birdwatch open <run> --with <source>                    # an opener `sources` lists but the run lacks (a ladder that came later); it joins to open, never to search
 birdwatch show <run> <document> [--head N]              # the page's text: read it yourself
@@ -132,9 +132,9 @@ records show done.
    no bulk keep or drop. A drop on a rule (under 3 times the author's usual) names the rule.
    On an ask about content (what draws, what works, a format, a hook), drop only what is off
    the topic. A video that drew little is the comparison that shows what the strong ones did
-   differently: keep it, and say so in the why. Open every kept video: its captions cost nothing.
-4. **Read.** `open`, then `show` each document and read it. A video whose captions failed
-   stays kept and unread: `open` again later tries it again. **See a video** (`open <run> <hit>
+   differently: keep it, and say so in the why. Open every kept video: its words cost nothing (captions; after a caption 429, Cohere hears the audio).
+4. **Read.** `open`, then `show` each document and read it. A video that failed to read
+   stays kept and unread: `open <run> <hit> --why` retries that one alone. **See a video** (`open <run> <hit>
    --see --why`) only when all three hold: its metrics or lift put it among the run's strongest,
    it answers the ask, and its captions lean on the screen ("as you can see", "this slide",
    "look at this", a demo or chart the words do not describe) or leave the point unsaid. It

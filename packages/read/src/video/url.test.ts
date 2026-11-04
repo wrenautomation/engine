@@ -283,6 +283,51 @@ describe("youtube captions", () => {
   });
 });
 
+describe.skipIf(!hasFfmpeg)("youtube with an ear", () => {
+  it("a caption 429 rests captions and hears the audio; the next read skips captions", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "read-yt-ear-"));
+    try {
+      const fake = join(dir, "yt-dlp.mjs");
+      const info = {
+        id: "abcdefghijk",
+        title: "T",
+        duration: 3,
+        automatic_captions: { en: [{ ext: "json3", url: "https://cap.example/1" }] },
+      };
+      await writeFile(
+        fake,
+        `import { execFileSync } from "node:child_process";
+const a = process.argv.slice(2);
+if (a.includes("-J")) console.log(JSON.stringify(${JSON.stringify(info)}));
+else execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=d=3", a[a.indexOf("-o") + 1].replace("%(ext)s", "mp3")]);`,
+      );
+      let asked = 0;
+      const fetchFn = (async () => {
+        asked++;
+        return new Response("", { status: 429 });
+      }) as unknown as typeof fetch;
+      const rest = { until: 0 };
+      const o = {
+        ytDlp: `node ${fake}`,
+        fetchFn,
+        ear: fakeEar("words heard"),
+        rest,
+        pause: async () => {},
+      };
+      const first = await readYoutube("https://www.youtube.com/watch?v=abcdefghijk", o);
+      expect(asked).toBe(1);
+      expect(rest.until).toBeGreaterThan(Date.now());
+      expect(first.body).toContain("Heard from the audio (captions: captions fetch HTTP 429");
+      expect(first.body).toContain("words heard");
+      const second = await readYoutube("https://www.youtube.com/watch?v=abcdefghijk", o);
+      expect(asked).toBe(1);
+      expect(second.body).toContain("captions resting after a 429");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("list", () => {
   it("is yt-dlp's flat playlist, entries with an id, the range as playlist bounds", async () => {
     const dir = await mkdtemp(join(tmpdir(), "read-list-test-"));

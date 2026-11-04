@@ -116,6 +116,8 @@ export function ytdlpSource(o: {
   ytDlp: string;
   /** The Data API (`youtubeApi`): hits and counts without the home IP. */
   api?: YoutubeApi;
+  /** Hears the audio when captions 429 or are missing; a 429 rests captions for 30 min. */
+  ear?: Ear;
   n?: number;
   /** For tests: stand-ins for the yt-dlp calls. */
   list?: typeof flatPlaylist;
@@ -187,11 +189,13 @@ export function ytdlpSource(o: {
         .filter((h): h is NonNullable<typeof h> => h !== null);
     },
     opens: isYoutube,
-    // captions only, free: what the screen shows is `youtubeSee`, on the agent's ask
+    // words only, free: captions, else the ear; what the screen shows is `youtubeSee`, on the agent's ask
     open: (h) =>
       inLine(async () => {
         if (!isYoutube(h.url)) throw new Error(`youtube: not a YouTube page: ${h.url}`);
-        const doc = videoDocument(await read(h.url, { ytDlp: o.ytDlp }));
+        const doc = videoDocument(
+          await read(h.url, { ytDlp: o.ytDlp, ...(o.ear ? { ear: o.ear } : {}) }),
+        );
         Object.defineProperty(doc, "usd", { value: 0, enumerable: false });
         return doc;
       }),

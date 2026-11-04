@@ -69,8 +69,12 @@ const YEAR = /^(19|20)\d\d$/;
  * the quote is on, its URL or text: "Level CFO's 2026 benchmarks" names the
  * report, and the quote rarely repeats it.
  */
-export const numbersQuoted = (claim: string, quote: string, page?: EvidencePage): boolean => {
+export const numbersQuoted = (claim: string, quote: string, page?: EvidencePage): boolean =>
+  !numbersUnquoted(claim, quote, page).length;
+
+/** The numbers of `claim` the quote lacks (a year on the page counts as quoted), as `numbers` reads them. */
+export const numbersUnquoted = (claim: string, quote: string, page?: EvidencePage): string[] => {
   const inQuote = new Set(numbers(quote));
   const onPage = new Set(page ? numbers(`${page.url} ${page.text}`) : []);
-  return numbers(claim).every((n) => inQuote.has(n) || (YEAR.test(n) && onPage.has(n)));
+  return numbers(claim).filter((n) => !inQuote.has(n) && !(YEAR.test(n) && onPage.has(n)));
 };

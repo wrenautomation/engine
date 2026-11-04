@@ -8,7 +8,7 @@
  */
 
 import { isTransient } from "@wrenautomation/models";
-import { gateDrafts, type NumberedClaim } from "@wrenautomation/read/study";
+import { gateDrafts, type NumberedClaim, numbersUnquoted } from "@wrenautomation/read/study";
 import { type ClaimAnswer, gateFindings, patternOf } from "../document/index.js";
 import { type Baseline, baselines, liftOf } from "../ledger/ledger.js";
 import {
@@ -649,8 +649,8 @@ export const unread = (state: RunState): HitRecord[] => {
 };
 
 /**
- * Keeps the hits named (and writes a hit per URL named), then runs the read step over every
- * kept hit of the run that has no document. No names: the reads alone.
+ * Keeps the hits named (and writes a hit per URL named), then reads those named that have no
+ * document. No names: reads every kept hit of the run that has no document.
  */
 /** Videos seen a run: each is about $0.30 of Claude on the frames. */
 export const SEE_PER_RUN = 6;
@@ -713,7 +713,11 @@ export async function open(deps: Deps, run: string, input: OpenInput, who: Who):
       ),
     );
   }
-  return stepRun(deps, run, "read", (c, s) => readHits(c, s, unread(s)));
+  // names: only those (a retry costs one read); none: every kept hit with no document
+  const only = new Set(named);
+  return stepRun(deps, run, "read", (c, s) =>
+    readHits(c, s, only.size ? unread(s).filter((h) => only.has(h.id)) : unread(s)),
+  );
 }
 
 /** Documents of any round the extractor has no verdict on. */
@@ -813,6 +817,8 @@ export interface Added {
   record: Shown;
   /** What the agent should know: an edge past the budget, a finding on a dropped document. */
   warnings: string[];
+  /** A pattern's spread as the brief counts it: distinct sites, and sites per class. */
+  spread?: { sources: number; classes: Partial<Record<SourceClass | "unclassed", number>> };
 }
 
 /**
@@ -880,10 +886,16 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
       const f = gate.findings[0];
       if (!f) {
         const why = gate.dropped[0]?.why ?? "empty";
+        const lacks =
+          why === "number_not_in_quote"
+            ? numbersUnquoted(a.text, a.quote, { url: doc.url, text: doc.text })
+            : [];
         throw new Error(
           why === "quote_short"
             ? "finding dropped at the gate: quote_short, the quote needs 5 words: take the line with its label or the next line"
-            : `finding dropped at the gate: ${why}`,
+            : lacks.length
+              ? `finding dropped at the gate: number_not_in_quote, the quote lacks ${lacks.join(", ")}: drop it from the text or quote the line that has it`
+              : `finding dropped at the gate: ${why}`,
         );
       }
       return {
@@ -987,7 +999,11 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
             ? `unchecked: ${ids.join(" ")}; run check --patterns`
             : `unchecked in child run ${r}: ${ids.join(" ")}; run check ${r} ${ids.join(" ")}`,
         );
-      return { record: await write({ type: "pattern", ...pattern }), warnings };
+      return {
+        record: await write({ type: "pattern", ...pattern }),
+        warnings,
+        spread: { sources: sourcesOf(classes), classes },
+      };
     }
     case "dead": {
       const facet = a.facet.trim();

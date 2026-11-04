@@ -35,6 +35,8 @@ it("posts the OpenAI form and prices a free call by its length", async () => {
   expect(f?.form.get("language")).toBe("fr");
   expect(f?.form.get("response_format")).toBe("json");
   expect((f?.form.get("file") as File | undefined)?.name).toBe("audio.wav");
+  // Cohere refuses a body whose file comes before the fields
+  expect([...(f?.form.keys() ?? [])].at(-1)).toBe("file");
   expect(ear.id).toBe("groq:whisper-large-v3-turbo");
 });
 
@@ -69,4 +71,18 @@ it("a file over the vendor's cap throws before the call", async () => {
   const ear = compatibleEar({ url: "http://x/t", model: "w", maxBytes: 2, fetch: w.fetch });
   await expect(ear.hear(audio)).rejects.toThrow();
   expect(w.forms).toHaveLength(0);
+});
+
+it("perMinute spaces calls to fit the key's rate", async () => {
+  const w = wire([ok("a"), ok("b"), ok("c")]);
+  const ear = compatibleEar({
+    url: "https://x/v1/audio/transcriptions",
+    model: "m",
+    key: "k",
+    perMinute: 600,
+    fetch: w.fetch,
+  });
+  const t0 = Date.now();
+  await Promise.all([ear.hear(audio), ear.hear(audio), ear.hear(audio)]);
+  expect(Date.now() - t0).toBeGreaterThanOrEqual(190);
 });

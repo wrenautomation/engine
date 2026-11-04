@@ -213,19 +213,26 @@ describe("agent commands", () => {
       add(d, runId, { type: "call", on: two, verdict: "drop", why: "empty" }, agent),
     ).rejects.toThrow("a person's call stands over the agent's");
     await add(d, runId, { type: "call", on: two, verdict: "drop", why: "empty after all" }, will);
+    // Named: only those read; a kept hit not named waits for an open with no names.
+    await add(d, runId, { type: "call", on: one, verdict: "keep", why: "numbers" }, agent);
     const opened = await open(
       d,
       runId,
-      { hits: [one], urls: ["https://b.example/four"], why: "numbers" },
+      { urls: ["https://b.example/four"], why: "numbers" },
       agent,
     );
     expect(opened.step).toBe("read");
-    const docs = opened.wrote.filter((r) => r.type === "document");
-    expect(docs.map((x) => x.type === "document" && x.url)).toEqual([
-      "https://a.example/one",
+    const docsOf = (did: typeof opened) => did.wrote.filter((r) => r.type === "document");
+    expect(docsOf(opened).map((x) => x.type === "document" && x.url)).toEqual([
       "https://b.example/four",
     ]);
-    expect(docs.every((x) => "chars" in x && !("text" in x))).toBe(true);
+    const rest = await open(d, runId, {}, agent);
+    expect(docsOf(rest).map((x) => x.type === "document" && x.url)).toEqual([
+      "https://a.example/one",
+    ]);
+    expect([...docsOf(opened), ...docsOf(rest)].every((x) => "chars" in x && !("text" in x))).toBe(
+      true,
+    );
     // The same page again: no new hit, no new read.
     const again = await open(d, runId, { urls: ["https://b.example/four"], why: "x" }, agent);
     expect(again.wrote.filter((r) => r.type === "hit" || r.type === "document")).toEqual([]);
@@ -244,15 +251,29 @@ describe("agent commands", () => {
     const extracted = await extract(d, runId);
     const findings = extracted.wrote.filter((r) => r.type === "finding");
     expect(findings.map((f) => f.type === "finding" && f.text)).toEqual([
-      "38% of placements came from repeat clients.",
       "A weekly call keeps a client 3 more years.",
+      "38% of placements came from repeat clients.",
     ]);
     // The gate: a quote not on the page fails the add.
-    const [docOne] = docs;
+    const [docOne] = docsOf(rest);
     if (!docOne) throw new Error("the open wrote no document");
     await expect(
       add(d, runId, { type: "finding", document: docOne.id, text: "x", quote: "not there" }, agent),
     ).rejects.toThrow("gate");
+    // A number the quote lacks: the error names it.
+    await expect(
+      add(
+        d,
+        runId,
+        {
+          type: "finding",
+          document: docOne.id,
+          text: "418 firms were surveyed.",
+          quote: "A 2025 survey of 412 firms",
+        },
+        agent,
+      ),
+    ).rejects.toThrow("the quote lacks 418");
     const byHand = await add(
       d,
       runId,
@@ -289,6 +310,7 @@ describe("agent commands", () => {
       agent,
     );
     expect(single.warnings).toEqual(["one source: a claim, not a pattern yet"]);
+    expect(single.spread).toEqual({ sources: 1, classes: { unclassed: 1 } });
     const pattern = await add(
       d,
       runId,
@@ -305,13 +327,13 @@ describe("agent commands", () => {
     ).rejects.toThrow("no finding nope");
 
     // A class on a document reaches its findings; one on a finding overrides it; the latest wins.
-    const weekly = findings[1];
-    if (weekly?.type !== "finding") throw new Error("no second finding");
+    const weekly = findings[0];
+    if (weekly?.type !== "finding") throw new Error("no weekly finding");
     const classes = async () => (await brief(d, runId)).patterns.at(-1)?.classes;
     expect(await classes()).toEqual({ unclassed: 2 });
     expect((await brief(d, runId)).documents.unclassed.map((x) => x.id)).toEqual([
-      docOne.id,
       weekly.document,
+      docOne.id,
     ]);
     await add(d, runId, { type: "class", on: docOne.id, class: "survey", why: "a survey" }, agent);
     await add(d, runId, { type: "class", on: weekly.document, class: "vendor", why: "ad" }, agent);
@@ -606,6 +628,7 @@ describe("agent commands", () => {
       { urls: ["https://a.example/one", "https://b.example/four"], why: "w" },
       agent,
     );
+    await open(d, runId, {}, agent);
     await extract(d, runId);
     const b = await brief(d, runId);
     expect(b.documents.unclassed.map((x) => x.guess?.class)).toEqual(["survey", "survey"]);

@@ -295,27 +295,47 @@ export async function sceneCuts(file: string, ffmpeg: string): Promise<number[]>
   );
 }
 
-async function speech(
+/** Seconds of audio per call: a transcriber given a long file loops ("the case of the case of…", 2026-11-03). */
+export const SPEECH_CLIP_S = 60;
+
+/**
+ * The speech in a media file, heard by `ear` in `SPEECH_CLIP_S` clips (ffmpeg cuts 16 kHz mono
+ * mp3s in `dir`), one at a time (a trial key's transcriptions are few a minute), in order; past
+ * one clip each starts with its time.
+ */
+export async function hearSpeech(
   file: string,
   dir: string,
   ffmpeg: string,
   ear: Ear,
-  o: { language: string; seconds: number },
+  o: { language: string; seconds: number; clipS?: number },
 ): Promise<string> {
-  const mp3 = join(dir, "speech.mp3");
+  const clipS = o.clipS ?? SPEECH_CLIP_S;
   await runFor(
     ffmpeg,
     [
       ...["-hide_banner", "-loglevel", "error", "-y", "-i", file, "-vn"],
-      ...["-ac", "1", "-ar", "16000", "-b:a", "48k", mp3],
+      ...["-ac", "1", "-ar", "16000", "-b:a", "48k"],
+      ...["-f", "segment", "-segment_time", String(clipS), "-reset_timestamps", "1"],
+      join(dir, "speech%03d.mp3"),
     ],
     TOOL_MS,
   );
-  const heard = await ear.hear(
-    { data: await readFile(mp3), mediaType: "audio/mpeg", filename: "speech.mp3" },
-    o,
-  );
-  return heard.text.trim();
+  const clips = (await readdir(dir)).filter((f) => /^speech\d{3}\.mp3$/.test(f)).sort();
+  const hear = async (name: string) => {
+    const heard = await ear.hear(
+      { data: await readFile(join(dir, name)), mediaType: "audio/mpeg", filename: name },
+      { language: o.language, seconds: Math.min(clipS, o.seconds || clipS) },
+    );
+    return heard.text.trim();
+  };
+  const texts: string[] = [];
+  for (const c of clips) texts.push(await hear(c));
+  if (texts.length <= 1) return texts[0] ?? "";
+  return texts
+    .map((t, i) => (t ? `[${clock(i * clipS)}] ${t}` : ""))
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 // -- the whole video ---------------------------------------------------------------------
@@ -379,7 +399,7 @@ export async function watchFile(input: string, opts: WatchOptions): Promise<Watc
       frames(file, dir, every, ffmpeg).then((shots) => readScreen(shots, opts.eye, opts.look)),
       opts.speech === false || !facts.audio || !opts.ear
         ? Promise.resolve("")
-        : speech(file, dir, ffmpeg, opts.ear, {
+        : hearSpeech(file, dir, ffmpeg, opts.ear, {
             language: opts.language ?? "en",
             seconds: durationS,
           }),

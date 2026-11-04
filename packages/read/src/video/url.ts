@@ -31,6 +31,7 @@ import {
 import { type MediaStore, mediaKey } from "./store.js";
 import { clock, runFor, sleep, TOOL_MS, waitOutCap } from "./tools.js";
 import {
+  hearSpeech,
   onScreenLines,
   renderWatched,
   type Watched,
@@ -39,6 +40,10 @@ import {
 } from "./watch.js";
 
 /** What yt-dlp's `-j` prints for a download; only what the readers use. */
+// the uploader's own track: plain wa/ba can land on a YouTube auto-dub (de-DE on A8PxRHQrLJ8, 2026-11-03)
+const ORIG = "[format_note*=original]";
+const ORIGINAL = `ba${ORIG}`;
+
 export interface VideoMeta
   extends Pick<
     VideoInfo,
@@ -142,7 +147,7 @@ async function ytDlpDownload(
       ...pre,
       ...["-j", "--no-simulate", "--no-warnings", "--no-playlist"],
       // `res` is the short side, so a vertical reel gets 540x960, not its 1080x1920.
-      ...["-S", "res:540", "-f", "bv*+ba/b", "--remux-video", "mp4"],
+      ...["-S", "res:540", "-f", `bv*+${ORIGINAL}/bv*+ba/b`, "--remux-video", "mp4"],
       ...["-o", join(dir, "video.%(ext)s"), url],
     ],
     TOOL_MS,
@@ -208,10 +213,11 @@ async function captionsOf(
   tracks: readonly { url: string }[],
   fetchFn: typeof fetch,
   pause: (ms: number) => Promise<void>,
+  waits: readonly number[] = CAPTION_WAITS_MS,
 ): Promise<Json3> {
   let last = 0;
   let next = 0;
-  for (let round = 0; round <= CAPTION_WAITS_MS.length; round++) {
+  for (let round = 0; round <= waits.length; round++) {
     let throttled = false;
     let retryAfter: string | null = null;
     for (let i = 0; i < Math.min(TRACKS_PER_TRY, tracks.length); i++) {
@@ -224,14 +230,55 @@ async function captionsOf(
         retryAfter = res.headers.get("retry-after") ?? retryAfter;
       }
     }
-    if (!throttled || round === CAPTION_WAITS_MS.length) break;
+    if (!throttled || round === waits.length) break;
     const named = retryAfter ? Number(retryAfter) * 1000 : Number.NaN;
-    const longest = CAPTION_WAITS_MS.at(-1) as number;
-    await pause(
-      Number.isFinite(named) ? Math.min(named, longest) : (CAPTION_WAITS_MS[round] as number),
-    );
+    const longest = waits.at(-1) as number;
+    await pause(Number.isFinite(named) ? Math.min(named, longest) : (waits[round] as number));
   }
-  throw new Error(`${url}: captions fetch HTTP ${last} on ${tracks.length} tracks, after waits`);
+  const why = `${url}: captions fetch HTTP ${last} on ${tracks.length} tracks${waits.length ? ", after waits" : ""}`;
+  throw last === 429 ? new CaptionsThrottled(why) : new Error(why);
+}
+
+/** Every caption URL answered 429: the IP is throttled, not the video. */
+export class CaptionsThrottled extends Error {}
+
+/** After a 429, captions rest this long and every open hears the audio instead. */
+export const CAPTION_REST_MS = 30 * 60_000;
+/** One per process: the throttle is the IP's, so it holds across videos. */
+const captionRest = { until: 0 };
+
+/** The audio alone (yt-dlp, smallest stream: from the video servers, not the caption URLs), heard by `ear`. */
+async function heardYoutube(
+  url: string,
+  info: VideoInfo,
+  why: string,
+  o: { ytDlp: string; ear: Ear; ffmpeg?: string },
+): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "read-hear-"));
+  try {
+    const [cmd, ...pre] = o.ytDlp.split(/\s+/) as [string, ...string[]];
+    await runFor(
+      cmd,
+      [
+        ...pre,
+        ...["--no-warnings", "--no-playlist", "-f", `wa${ORIG}/${ORIGINAL}/wa/ba/worst`],
+        ...["-o", join(dir, "audio.%(ext)s"), url],
+      ],
+      TOOL_MS,
+    );
+    const file = (await readdir(dir)).find((f) => f.startsWith("audio."));
+    if (!file) throw new Error(`${url}: yt-dlp wrote no audio`);
+    const text = await hearSpeech(join(dir, file), dir, o.ffmpeg ?? "ffmpeg", o.ear, {
+      language: "en",
+      seconds: info.duration ?? 0,
+    });
+    const chapters = info.chapters?.length
+      ? `\n\nChapters: ${info.chapters.map((c) => `[${clock(c.start_time)}] ${c.title}`).join("; ")}`
+      : "";
+    return `## Speech\n\nHeard from the audio (${why}).${chapters}\n\n${text || "(no speech)"}\n`;
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 }
 
 /**
@@ -300,6 +347,11 @@ export async function readYoutube(
     fetchFn?: typeof fetch;
     /** For tests: the wait between caption tries. */
     pause?: (ms: number) => Promise<void>;
+    /** Hears the audio when captions are throttled or missing: one caption round, no waits. */
+    ear?: Ear | undefined;
+    ffmpeg?: string;
+    /** For tests: the caption rest, else the process's. */
+    rest?: { until: number };
   },
 ): Promise<VideoRead> {
   const fetchFn = opts.fetchFn ?? fetch;
@@ -313,9 +365,28 @@ export async function readYoutube(
   );
   const info = JSON.parse(stdout) as VideoInfo;
   const tracks = captionTracks(info);
-  if (!tracks.length) throw new Error(`${url}: no English captions (manual or auto) to read`);
-  const json = await captionsOf(url, tracks, fetchFn, pause);
-  let body = captionsBody(info, json);
+  const rest = opts.rest ?? captionRest;
+  let why = tracks.length ? "" : "no English captions";
+  let json: Json3 | null = null;
+  if (!opts.ear) {
+    if (!tracks.length) throw new Error(`${url}: no English captions (manual or auto) to read`);
+    json = await captionsOf(url, tracks, fetchFn, pause);
+  } else if (tracks.length && rest.until > Date.now())
+    why = `captions resting after a 429, till ${new Date(rest.until).toISOString().slice(11, 16)} UTC`;
+  else if (tracks.length)
+    try {
+      json = await captionsOf(url, tracks, fetchFn, pause, []);
+    } catch (err) {
+      if (err instanceof CaptionsThrottled) rest.until = Date.now() + CAPTION_REST_MS;
+      why = `captions: ${err instanceof Error ? err.message.replace(`${url}: `, "") : err}`;
+    }
+  let body = json
+    ? captionsBody(info, json)
+    : await heardYoutube(url, info, why, {
+        ytDlp: opts.ytDlp,
+        ear: opts.ear as Ear,
+        ...(opts.ffmpeg ? { ffmpeg: opts.ffmpeg } : {}),
+      });
   const screen = await screenText(url, info.duration ?? 0, opts.video, pause);
   if (screen)
     body += `\n## On screen\n\nWhat the video showed (documents, slides, tables, visuals), read from the frames; the transcript above has only the speech.\n\n${screen}\n`;

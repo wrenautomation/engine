@@ -163,6 +163,9 @@ export function sourcesHere(
   warn: (line: string) => void = (l) => console.error(l),
 ): Sources {
   const out: Source[] = [];
+  // one ear, one pace: Cohere takes 20 calls a minute a key
+  const cohereKeys = keys(printed, "COHERE_API_KEY");
+  const ear = cohereKeys.length ? cohereSpeech(cohereKeys) : undefined;
   if (printed.SEARXNG_URL)
     out.push(
       searxng({
@@ -175,23 +178,23 @@ export function sourcesHere(
   const pplxKeys = keys(printed, "PERPLEXITY_API_KEY");
   if (pplxKeys.length) out.push(perplexity({ keys: pplxKeys }));
   out.push(hn());
-  // hits through the Data API when there is a key; an open reads captions, no model
+  // hits through the Data API when there is a key; an open reads captions, else Cohere hears the audio
   out.push(
     ytdlpSource({
       ytDlp,
       ...(printed.YOUTUBE_API_KEY ? { api: youtubeApi({ key: printed.YOUTUBE_API_KEY }) } : {}),
+      ...(ear ? { ear } : {}),
       warn,
     }),
   );
   // what a video shows, on the agent's ask: Claude on the frames, Cohere hears a video with no captions
   const claudeKeys = keys(printed, "ANTHROPIC_API_KEY");
-  const cohereKeys = keys(printed, "COHERE_API_KEY");
   if (claudeKeys.length)
     out.push(
       youtubeSee({
         ytDlp,
         eye: anthropic({ key: claudeKeys, model: SEE_MODEL }),
-        ...(cohereKeys.length ? { ear: cohereSpeech(cohereKeys) } : {}),
+        ...(ear ? { ear } : {}),
         store: dirStore(printed.BIRDWATCH_MEDIA ?? join(homedir(), ".cache", "birdwatch", "media")),
       }),
     );
@@ -566,7 +569,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
 
   agent(machine(common(program.command("open <run> [hit...]"))))
     .description(
-      "keep the hits named (and a hit per --url), then read every kept hit of the run that has no document yet",
+      "keep the hits named (and a hit per --url) and read them; no names: read every kept hit of the run that has no document yet",
     )
     .option("--url <url...>", "pages the agent names itself")
     .option("--why <why>", "why read these (with hits or --url)")
@@ -692,9 +695,9 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
 
   const added = async (o: Common & Agent, runId: string, a: Addition) => {
     const s = { ledger: ledgerOf(o), sources: registry(), model: null, judge: null };
-    const { record, warnings } = await add(depsOf(s, agentOf(o)), runId, a, whoOf(o));
+    const { record, warnings, spread } = await add(depsOf(s, agentOf(o)), runId, a, whoOf(o));
     for (const w of warnings) console.error(`${runId}: ${w}`);
-    console.log(JSON.stringify(record));
+    console.log(JSON.stringify(spread ? { ...record, ...spread } : record));
   };
   const adds = program
     .command("add")

@@ -64,6 +64,8 @@ export interface EarOptions {
   /** Bytes the vendor takes at most; a larger file throws before the call. */
   maxBytes?: number;
   limitMs?: number;
+  /** Calls a minute each key takes; calls space out to fit. None: no pace. */
+  perMinute?: number;
   rotate?: RotateOptions;
   fetch?: typeof fetch;
 }
@@ -77,6 +79,15 @@ export function compatibleEar(o: EarOptions): Ear {
   if (!keys.length) throw new Error(`${id} needs at least one key`);
   const go = o.fetch ?? fetch;
   const next = cursor();
+  // one slot chain per ear: gap = a minute / (rate x keys)
+  const gapMs = o.perMinute ? 60_000 / (o.perMinute * keys.length) : 0;
+  let slot = 0;
+  const paced = async () => {
+    if (!gapMs) return;
+    const at = Math.max(Date.now(), slot);
+    slot = at + gapMs;
+    if (at > Date.now()) await new Promise((r) => setTimeout(r, at - Date.now()));
+  };
   return {
     id,
     model: o.model,
@@ -87,16 +98,18 @@ export function compatibleEar(o: EarOptions): Ear {
         );
       const started = performance.now();
       const once = async (key: string | undefined) => {
+        await paced();
         const form = new FormData();
         const name = audio.filename ?? `audio.${EXT[audio.mediaType] ?? "bin"}`;
+        // fields before the file: Cohere refuses a body with the file first (HTTP 400, 2026-11-03)
+        form.set("model", o.model);
+        if (o.jsonFormat !== false) form.set("response_format", "json");
+        form.set("language", h.language ?? "en");
         form.set(
           "file",
           new Blob([audio.data as Uint8Array<ArrayBuffer>], { type: audio.mediaType }),
           name,
         );
-        form.set("model", o.model);
-        if (o.jsonFormat !== false) form.set("response_format", "json");
-        form.set("language", h.language ?? "en");
         const timeout = AbortSignal.timeout(o.limitMs ?? 120_000);
         let res: Response;
         try {
@@ -128,7 +141,7 @@ export function compatibleEar(o: EarOptions): Ear {
 
 export const COHERE_SPEECH_MODEL = "cohere-transcribe-03-2026";
 
-/** Cohere's transcription on the free key ring. It takes 25 MB at most. */
+/** Cohere's transcription. 25 MB at most; 20 calls a minute a key (measured 2026-11-03). */
 export const cohereEar = (o: {
   key: string | readonly string[];
   rotate?: RotateOptions;
@@ -141,6 +154,7 @@ export const cohereEar = (o: {
     free: true,
     jsonFormat: false,
     maxBytes: 25_000_000,
+    perMinute: 20,
     ...o,
   });
 
