@@ -11,6 +11,8 @@
   "type": "module",
   "files": [
     "dist",
+    ".claude-plugin",
+    "skills",
     "!dist/**/*.test.*",
     "README.md",
     "LICENSE.md"

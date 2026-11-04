@@ -3,7 +3,7 @@
 Research from the open web, driven by an agent one step per command. The agent plans, triages,
 reviews and stops; birdwatch searches, opens pages, extracts findings behind a quote gate, checks
 them, and keeps every record in a ledger. Every finding is a sentence with a quote on a page the
-run read. `skills/birdwatch/SKILL.md` (in this repo) is how an agent drives it.
+run read. `skills/birdwatch/SKILL.md` is how an agent drives it. The package is a Claude Code plugin: `--plugin-dir <package>` loads the skill.
 
 Reading the web and files (the fetch ladder, HTML and PDF to text, video) is
 [`@wrenautomation/read`](https://github.com/wrenautomation/engine/tree/main/packages/read)'s. Every model call goes through
