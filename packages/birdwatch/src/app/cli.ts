@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFile } from "node:fs/promises";
 /**
  * `birdwatch`: the engine and its readers from a shell. The readers: `fetch <url>` prints a page
  * as text, `read <url>` a video as one markdown document, `list <target>` what a profile, channel
@@ -9,18 +10,18 @@
  * `open`, `extract`, `check`, `add`, `brief`), the plan file's (`learn`) and
  * the ledger's (`trace`, `yield`, `sources`). A person's word goes through `add ... --human`.
  */
-import { readFile } from "node:fs/promises";
+import type { Ear } from "@wrenautomation/models/hear";
 import { PoliteFetcher, userAgent } from "@wrenautomation/read/fetch";
 import { htmlText, pdfText, readPage } from "@wrenautomation/read/text";
 import {
   cohereEye,
-  cohereSpeech,
   flatPlaylist,
   frameCounts,
   geminiVideo,
   readVideo,
   readYoutube,
   renderWatched,
+  speechHere,
   type VideoRead,
   watchFile,
 } from "@wrenautomation/read/video";
@@ -83,7 +84,11 @@ program
     const video = await geminiVideo(keys(process.env, "GEMINI_API_KEY"));
     let read: VideoRead;
     if (/^https?:\/\/(www\.|m\.)?(youtube\.com|youtu\.be)\//.test(url))
-      read = await readYoutube(url, { ytDlp: o.ytDlp, video });
+      read = await readYoutube(url, {
+        ytDlp: o.ytDlp,
+        video,
+        ...withEar(speechHere(keys(process.env, "COHERE_API_KEY"))),
+      });
     else {
       const cohereKeys = keys(process.env, "COHERE_API_KEY");
       if (!cohereKeys.length)
@@ -92,7 +97,7 @@ program
         ytDlp: o.ytDlp,
         ffmpeg: o.ffmpeg,
         eye: cohereEye(cohereKeys),
-        ear: cohereSpeech(cohereKeys),
+        ...withEar(speechHere(cohereKeys)),
         video,
       });
     }
@@ -153,7 +158,7 @@ program
     if (!cohereKeys.length) throw new Error("watch needs COHERE_API_KEY");
     const watched = await watchFile(input, {
       eye: cohereEye(cohereKeys),
-      ear: cohereSpeech(cohereKeys),
+      ...withEar(speechHere(cohereKeys)),
       video: await geminiVideo(keys(process.env, "GEMINI_API_KEY")),
       ffmpeg: o.ffmpeg,
       speech: o.speech,
@@ -183,3 +188,6 @@ program.parseAsync(process.argv).catch((err: unknown) => {
   console.error(err instanceof Error ? err.message : String(err));
   process.exit(1);
 });
+
+/** `ear` only when there is one (exactOptionalPropertyTypes). */
+const withEar = (ear: Ear | undefined) => (ear ? { ear } : {});

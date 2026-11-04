@@ -14,6 +14,7 @@ export * from "./store.js";
 export * from "./tools.js";
 export * from "./url.js";
 export * from "./watch.js";
+export * from "./whisper.js";
 
 /** What `yt-dlp -J` prints; only what the readers use. */
 export interface VideoInfo {

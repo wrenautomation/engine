@@ -21,7 +21,7 @@ import { type Judge, judgeFromSpec } from "@wrenautomation/models/judge";
 import { modelFromSpec } from "@wrenautomation/models/spec";
 import type { LadderClient } from "@wrenautomation/read/fetch";
 import { PoliteFetcher, userAgent } from "@wrenautomation/read/fetch";
-import { cohereSpeech, dirStore } from "@wrenautomation/read/video";
+import { dirStore, speechHere } from "@wrenautomation/read/video";
 import type { Command } from "commander";
 import { z } from "zod";
 import type { Extractor } from "../document/index.js";
@@ -163,9 +163,8 @@ export function sourcesHere(
   warn: (line: string) => void = (l) => console.error(l),
 ): Sources {
   const out: Source[] = [];
-  // one ear, one pace: Cohere takes 20 calls a minute a key
-  const cohereKeys = keys(printed, "COHERE_API_KEY");
-  const ear = cohereKeys.length ? cohereSpeech(cohereKeys) : undefined;
+  // one ear for both YouTube sources: local whisper, else Cohere
+  const ear = speechHere(keys(printed, "COHERE_API_KEY"));
   if (printed.SEARXNG_URL)
     out.push(
       searxng({
