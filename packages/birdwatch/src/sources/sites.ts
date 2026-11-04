@@ -254,8 +254,10 @@ export function redditSource(o: { sites: LadderClient; account?: string }): Sour
     // site-wide search, signed out; only on a query pinned to reddit.com (the route's daily cap)
     keeps: (site) => /(^|\.)reddit\.com$/i.test(site),
     pinnedOnly: true,
+    presets: true,
     async search(q) {
-      const input = { q: q.terms, limit: SEARCH_LIMIT, sort: "relevance" };
+      // no sort of ours: an explicit facet beats the preset; Reddit's default is relevance
+      const input = { q: q.terms, limit: SEARCH_LIMIT, ...(q.preset ? { preset: q.preset } : {}) };
       return userHits(
         await routeCall(o.sites, "reddit signed out", "reddit-public", "/search", input),
       );

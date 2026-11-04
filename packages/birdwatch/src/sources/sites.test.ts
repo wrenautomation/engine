@@ -452,9 +452,15 @@ describe("reddit search", () => {
       {
         site: "reddit-public",
         path: "/search",
-        input: { q: "first sales hire", limit: 25, sort: "relevance" },
+        input: { q: "first sales hire", limit: 25 },
       },
     ]);
+    await src.search?.({ ...q, preset: "top-month" });
+    expect(w.calls.at(-1)?.input).toEqual({
+      q: "first sales hire",
+      limit: 25,
+      preset: "top-month",
+    });
     const names = (site?: string) =>
       searchersFor([src, exaLike], site ? { site } : {}).map((s) => s.name);
     expect(names("www.reddit.com")).toEqual(["reddit"]);
