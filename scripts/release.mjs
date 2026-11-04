@@ -98,7 +98,8 @@ try {
         cwd: f.replace(/\/?package\.json$/, "") || ".",
       });
     const peers = tryRun("sh", ["-c", "command -v peers"]).ok;
-    if (peers) run("peers", ["commit", "-m", `v${v}`, ...files]);
+    // --whole: the ledger lands after this command ends, so it cannot see these edits yet
+    if (peers) run("peers", ["commit", "-m", `v${v}`, "--whole", "--", ...files]);
     else run("git", ["commit", "-q", "-m", `v${v}`, "--", ...files]);
     if (!tryRun("git", ["push", "-q", "origin", "HEAD:main"]).ok) {
       console.error(`v${v}: main moved, try ${i + 1}`);
