@@ -593,6 +593,19 @@ describe("agent commands", () => {
         f("f2", "d2", "https://reddit.com/r/hvac/comments/2"),
         f("f3", "d3", "https://vendor.example/a"),
         f("f4", "d4", "https://vendor.example/b"),
+        f("f5", "d5", "https://www.youtube.com/watch?v=aaaaaaaaaaa"),
+        f("f6", "d6", "https://www.youtube.com/watch?v=bbbbbbbbbbb"),
+        f("f7", "d7", "https://www.youtube.com/watch?v=ccccccccccc"),
+      ],
+      hits: [
+        { id: "h5", channel: "Ali Abdaal" },
+        { id: "h6", channel: "Joanna Wiebe" },
+        { id: "h7", channel: "Ali Abdaal" },
+      ],
+      documents: [
+        { id: "d5", hit: "h5" },
+        { id: "d6", hit: "h6" },
+        { id: "d7", hit: "h7" },
       ],
       called: new Map(),
       classOf: new Map([
@@ -602,6 +615,8 @@ describe("agent commands", () => {
         ["d4", "vendor"],
       ]),
     } as unknown as RunState;
+    // a platform counts channels: two creators on YouTube are two sources, one creator twice is one
+    expect(classesOf(state, ["f5", "f6", "f7"])).toEqual({ unclassed: 2 });
     const forum = classesOf(state, ["f1", "f2"]);
     expect(forum).toEqual({ forum: 2 });
     expect(sourcesOf(forum)).toBe(2);

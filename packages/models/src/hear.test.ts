@@ -73,12 +73,12 @@ it("a file over the vendor's cap throws before the call", async () => {
   expect(w.forms).toHaveLength(0);
 });
 
-it("perMinute spaces calls to fit the key's rate", async () => {
+it("perMinute spaces calls to fit the org's rate, over all keys", async () => {
   const w = wire([ok("a"), ok("b"), ok("c")]);
   const ear = compatibleEar({
     url: "https://x/v1/audio/transcriptions",
     model: "m",
-    key: "k",
+    key: ["k1", "k2"],
     perMinute: 600,
     fetch: w.fetch,
   });

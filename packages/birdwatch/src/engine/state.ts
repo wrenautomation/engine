@@ -235,19 +235,28 @@ export const toExtract = (state: RunState, round: number): DocumentRecord[] => {
 export const classOfFinding = (state: RunState, f: FindingRecord): SourceClass | undefined =>
   state.classOf.get(f.id) ?? state.classOf.get(f.document);
 
+/** Hosts of many independent creators: a source there is the channel, not the host. */
+const PLATFORM =
+  /(^|\.)(youtube\.com|youtu\.be|tiktok\.com|instagram\.com|linkedin\.com|x\.com|twitter\.com|threads\.(net|com)|facebook\.com|medium\.com|substack\.com)$/i;
+
 /**
  * Sources per class over findings still kept: distinct sites, but each forum thread (a
- * document) counts on its own, so 31 threads on one forum are 31 voices, not one site.
+ * document) counts on its own, so 31 threads on one forum are 31 voices, not one site; on a
+ * platform (YouTube, LinkedIn) each channel counts on its own.
  */
 export function classesOf(
   state: RunState,
   ids: readonly string[],
 ): Partial<Record<SourceClass | "unclassed", number>> {
   const sources = new Map<SourceClass | "unclassed", Set<string>>();
+  const hitOf = new Map(state.hits.map((h) => [h.id, h]));
+  const channelOf = new Map(state.documents.map((d) => [d.id, hitOf.get(d.hit)?.channel]));
   for (const f of state.findings) {
     if (!ids.includes(f.id) || !kept(state, f)) continue;
     const c = classOfFinding(state, f) ?? "unclassed";
-    const key = c === "forum" ? f.document : hostOf(f.proof.url);
+    const host = hostOf(f.proof.url);
+    const channel = PLATFORM.test(host) ? channelOf.get(f.document) : undefined;
+    const key = c === "forum" ? f.document : channel ? `${host}/${channel}` : host;
     sources.set(c, (sources.get(c) ?? new Set()).add(key));
   }
   return Object.fromEntries([...sources].map(([c, s]) => [c, s.size]));

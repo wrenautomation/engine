@@ -21,6 +21,8 @@ export const COHERE_VISION_MODEL = "command-a-vision-07-2025";
 export const COHERE_TEXT_MODEL = "command-a-03-2025";
 /** Trial keys allow about 20 calls a minute: wait out a busy ring, 2 s doubling to 30 s. */
 const COHERE_ROTATE: RotateOptions = { passes: 4, waitMs: 2000, maxWaitMs: 30_000 };
+/** The ear's 429 is per minute, and other runs share the org: waits 20, 40, 60 s. */
+const HEAR_ROTATE: RotateOptions = { passes: 4, waitMs: 20_000, maxWaitMs: 60_000 };
 /** Frames per vision call. */
 const BATCH = 8;
 /** Vision calls at one time; trial keys allow about 20 calls a minute. */
@@ -84,7 +86,7 @@ export const cohereEye = (keys: readonly string[], o: { fetch?: typeof fetch } =
 
 /** Cohere's Transcribe on a key ring, waiting out a busy ring. */
 export const cohereSpeech = (keys: readonly string[], o: { fetch?: typeof fetch } = {}): Ear =>
-  cohereEar({ key: keys, rotate: COHERE_ROTATE, ...o });
+  cohereEar({ key: keys, rotate: HEAR_ROTATE, ...o });
 
 /** `0:03.2`, a mark with a tenth of a second. */
 export function stamp(s: number): string {
