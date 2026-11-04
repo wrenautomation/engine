@@ -512,10 +512,14 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
 
   agent(machine(common(program.command("search <run> [terms]"))))
     .description(
-      "one query in the agent's name, then every searcher on every unsearched query of the round; the new hits as JSON. No terms: on stdin, a JSON array of {terms, why, site?}, or a tree {facets: [{name, why, tries: [[{terms, why, site?}]]}]}: one tier. First call: every facet's first try. After triage, the same tree again: the next try of each facet under the guide's thin in kept hits; a facet with uncalled hits waits",
+      "one query in the agent's name, then every searcher on every unsearched query of the round; the new hits as JSON. No terms: on stdin, a JSON array of {terms, why, site?, preset?}, or a tree {facets: [{name, why, tries: [[{terms, why, site?, preset?}]]}]}: one tier. First call: every facet's first try. After triage, the same tree again: the next try of each facet under the guide's thin in kept hits; a facet with uncalled hits waits",
     )
     .option("--why <why>", "why this query serves the ask")
     .option("--site <host>", "keep the query on one host")
+    .option(
+      "--preset <preset>",
+      "sort and window: latest or top, day, week, month or year, or paired (top-week); only sources that take presets search it",
+    )
     .option("--facet <name>", "the tree's facet this query serves")
     .option("--all", "tree: the next try of every facet that has one, whatever triage kept")
     .action(
@@ -524,7 +528,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
         terms: string | undefined,
         o: Common &
           Machine &
-          Agent & { why?: string; site?: string; facet?: string; all?: boolean },
+          Agent & { why?: string; site?: string; preset?: string; facet?: string; all?: boolean },
       ) => {
         if (!terms && process.stdin.isTTY)
           throw new Error("search: terms, or a JSON array of {terms, why} or a tree on stdin");
@@ -535,6 +539,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
             terms,
             why: o.why ?? "",
             ...(o.site ? { site: o.site } : {}),
+            ...(o.preset ? { preset: o.preset } : {}),
             ...(o.facet ? { facet: o.facet } : {}),
           };
           printDid(await search(deps, runId, [q], whoOf(o)));
@@ -706,18 +711,23 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     .description("a query for the next search")
     .requiredOption("--why <why>", "why it serves the ask")
     .option("--site <host>")
+    .option(
+      "--preset <preset>",
+      "sort and window (top-week); only sources that take presets search it",
+    )
     .option("--facet <name>", "the tree's facet it serves")
     .action(
       (
         runId: string,
         terms: string,
-        o: Common & Agent & { why: string; site?: string; facet?: string },
+        o: Common & Agent & { why: string; site?: string; preset?: string; facet?: string },
       ) =>
         added(o, runId, {
           type: "query",
           terms,
           why: o.why,
           ...(o.site ? { site: o.site } : {}),
+          ...(o.preset ? { preset: o.preset } : {}),
           ...(o.facet ? { facet: o.facet } : {}),
         }),
     );

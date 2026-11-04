@@ -509,10 +509,18 @@ describe("linkedin", () => {
       {
         site: "linkedin",
         path: "/search/results/content",
-        input: { keywords: "first sales hire", max: 100, datePosted: "past-month" },
+        input: { keywords: "first sales hire", max: 100 },
         account: "linkedin@wren",
       },
     ]);
+    // a preset goes to the route as is: autobrowse maps it to sortBy and datePosted
+    await src.search?.({ ...q, preset: "latest-week" });
+    expect(w.calls.at(-1)?.input).toEqual({
+      keywords: "first sales hire",
+      max: 100,
+      preset: "latest-week",
+    });
+    expect(src.presets).toBe(true);
     const names = (site?: string) =>
       searchersFor([src, exaLike], site ? { site } : {}).map((s) => s.name);
     expect(names("www.linkedin.com")).toEqual(["linkedin"]);

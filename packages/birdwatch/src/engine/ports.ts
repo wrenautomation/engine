@@ -28,6 +28,8 @@ export interface Source {
   keeps?(site: string): boolean;
   /** Searches only a query pinned to a site it keeps: a capped site's search stays off the open web's queries. */
   pinnedOnly?: boolean;
+  /** Takes a query's `preset` to its platform's sort and window; its route names the ones it lacks. */
+  presets?: true;
   /** Hits as the source shows them for free. Throw on failure: the engine writes the spend. */
   search?(query: QueryRecord): Promise<HitViewIn[]>;
   /** Whether it lists that page's own posts (`posts`) or pages like it (`similar`). */
@@ -88,16 +90,18 @@ export interface Deps {
 }
 
 /**
- * The searchers a query goes to: all of them, or for a site-scoped query those that keep to it.
+ * The searchers a query goes to: all of them, or for a site-scoped query those that keep to it;
+ * with a preset, only those that take presets.
  * A follow goes to the sources that follow its URL that way.
  */
 export const searchersFor = (
   sources: readonly Source[],
-  q: Pick<QueryRecord, "site" | "follow">,
+  q: Pick<QueryRecord, "site" | "follow" | "preset">,
 ): Source[] => {
   const f = q.follow;
   if (f) return sources.filter((s) => s.follow && s.follows?.(f.as, f.url));
-  const searchers = sources.filter((s) => s.search);
+  // a preset never drops silently: only sources that take one search it
+  const searchers = sources.filter((s) => s.search && (!q.preset || s.presets));
   return q.site
     ? searchers.filter((s) => s.keeps?.(q.site as string) ?? true)
     : searchers.filter((s) => !s.pinnedOnly);

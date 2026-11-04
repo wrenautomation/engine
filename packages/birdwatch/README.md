@@ -51,6 +51,7 @@ birdwatch plan "who buys growth help" --premise "coaches are the buyer"   # a pr
 birdwatch brief 01M5YS...                              # the ask, budget, sources (and those missing here), what earlier runs found, what is open, hits with their metrics and lift, authors' baselines, findings, yield, cost
 birdwatch recall staffing repeat clients --not 01M5YS... # earlier runs' findings: quote, URL, source date, run; --also <ledger> per extra folder
 birdwatch search 01M5YS... "staffing repeat client rate" --why "the ask's words"       # one query, then every searcher
+birdwatch search 01M5YS... "first sales hire" --site linkedin.com --preset top-month --why "what drew this month"   # sort and window: only sources that take presets
 echo '[{"terms":"...","why":"..."},{"terms":"...","why":"..."}]' | birdwatch search 01M5YS...   # a batch
 birdwatch search 01M5YS... < tree.json                 # a query tree, one tier: {facets: [{name, why, tries: [[{terms, why}], [...]]}]}
 birdwatch search 01M5YS... < tree.json                 # after triage, the same file: the next try of each facet still thin in kept hits

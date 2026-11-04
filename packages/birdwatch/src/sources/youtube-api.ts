@@ -53,14 +53,35 @@ export const videoHit = (v: Video): HitViewIn => {
 };
 
 export interface YoutubeApi {
-  search(terms: string, n: number): Promise<HitViewIn[]>;
+  /** `preset`: the grammar's sort and window (`top-week`), as `order` and `publishedAfter`. */
+  search(terms: string, n: number, preset?: string): Promise<HitViewIn[]>;
   /** A channel's newest uploads; `channel` is a channel URL, an @handle page or a video URL. */
   uploads(channel: string, n: number): Promise<HitViewIn[]>;
   videos(ids: readonly string[]): Promise<HitViewIn[]>;
 }
 
-export function youtubeApi(o: { key: string; fetch?: typeof fetch }): YoutubeApi {
+const WINDOW_DAYS: Record<string, number> = { day: 1, week: 7, month: 30, year: 365 };
+
+/** A preset as the Data API's `order` and `publishedAfter`, as autobrowse's youtube facet maps it. */
+export function presetParams(preset: string, at: Date): Record<string, string> {
+  const [first, second] = preset.split("-") as [string, string | undefined];
+  const sort = first === "latest" || first === "top" ? first : undefined;
+  const window = sort ? second : first;
+  const days = window ? WINDOW_DAYS[window] : undefined;
+  return {
+    ...(sort ? { order: sort === "latest" ? "date" : "viewCount" } : {}),
+    ...(days ? { publishedAfter: new Date(at.getTime() - days * 86_400_000).toISOString() } : {}),
+  };
+}
+
+export function youtubeApi(o: {
+  key: string;
+  fetch?: typeof fetch;
+  /** For tests: the clock a window preset counts back from. */
+  now?: () => Date;
+}): YoutubeApi {
   const fetchFn = o.fetch ?? fetch;
+  const now = o.now ?? (() => new Date());
   const get = async <T>(path: string, params: Record<string, string>): Promise<T> => {
     const q = new URLSearchParams({ ...params, key: o.key });
     const res = await fetchFn(`${API}/${path}?${q}`, { signal: AbortSignal.timeout(30_000) });
@@ -119,12 +140,13 @@ export function youtubeApi(o: { key: string; fetch?: typeof fetch }): YoutubeApi
     return c;
   };
   return {
-    async search(terms, n) {
+    async search(terms, n, preset) {
       const page = await get<{ items?: { id?: { videoId?: string } }[] }>("search", {
         part: "id",
         type: "video",
         q: terms,
         maxResults: String(Math.min(n, 50)),
+        ...(preset ? presetParams(preset, now()) : {}),
       });
       return videos((page.items ?? []).flatMap((i) => (i.id?.videoId ? [i.id.videoId] : [])));
     },

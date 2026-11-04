@@ -17,8 +17,6 @@ import { routeCall } from "./sites.js";
  * serves 25-50 and stops (3 live reads, 2026-11-03); a read takes 3-8 min at a person's pace.
  */
 const SEARCH_MAX = 100;
-/** The widest window the search route offers (LinkedIn's own `datePosted`). */
-const DATE_POSTED = "past-month";
 
 /** A profile or Page URL: `in/<vanity>` or `company/<handle>`, the hit's channel. */
 export function linkedinPage(url: string): { kind: "in" | "company"; id: string } | null {
@@ -81,8 +79,14 @@ export function linkedinSource(o: { sites: LadderClient; account: string }): Sou
     cost: "browser",
     keeps: (site) => /(^|\.)linkedin\.com$/i.test(site),
     pinnedOnly: true,
+    presets: true,
     async search(q) {
-      const input = { keywords: q.terms, max: SEARCH_MAX, datePosted: DATE_POSTED };
+      // no preset: LinkedIn's own default (relevance, any date)
+      const input = {
+        keywords: q.terms,
+        max: SEARCH_MAX,
+        ...(q.preset ? { preset: q.preset } : {}),
+      };
       const body = await routeCall(
         o.sites,
         who,

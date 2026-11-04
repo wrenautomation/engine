@@ -72,9 +72,14 @@ export function googleSource(o: { sites: LadderClient; n?: number }): Source {
     name: "google",
     kind: "search",
     cost: "browser",
+    presets: true,
     async search(q) {
       const terms = q.site ? `${q.terms} site:${q.site}` : q.terms;
-      const body = await routeCall(o.sites, "google", "web", "/google", { q: terms, n: o.n ?? 10 });
+      const body = await routeCall(o.sites, "google", "web", "/google", {
+        q: terms,
+        n: o.n ?? 10,
+        ...(q.preset ? { preset: q.preset } : {}),
+      });
       return serpHits(body, terms);
     },
   };

@@ -161,6 +161,40 @@ describe("agent commands", () => {
     );
   });
 
+  it("a preset query goes only to sources that take presets; none in the run fails the write", async () => {
+    const seen: (string | undefined)[] = [];
+    const dated: Source = {
+      name: "dated",
+      kind: "search",
+      cost: "browser",
+      presets: true,
+      search: async (q) => {
+        seen.push(q.preset);
+        return [{ url: "https://a.example/one", title: "one" }];
+      },
+    };
+    const d = { ...deps(), sources: registry(fake, opener, dated) };
+    const plain = await planRound(d, { ask: { text: "x", kind: "web" }, planFile, model: "m" });
+    await expect(
+      search(d, plain.run, [{ terms: "a", why: "w", preset: "top-week" }], agent),
+    ).rejects.toThrow("no searcher in the run takes presets; these do: dated");
+    await expect(
+      search(d, plain.run, [{ terms: "a", why: "w", preset: "fortnight" }], agent),
+    ).rejects.toThrow("latest or top");
+    const withDated = await planRound(d, {
+      ask: { text: "x", kind: "web" },
+      planFile: { ...planFile, sources: ["fake", "opener", "dated"] },
+      model: "m",
+    });
+    await search(d, withDated.run, [{ terms: "a", why: "w", preset: "top-week" }], agent);
+    const trace = await d.ledger.trace(withDated.run);
+    expect(
+      trace.filter((r) => r.type === "spend").map((r) => r.type === "spend" && r.source),
+    ).toEqual(["dated"]);
+    expect(seen).toEqual(["top-week"]);
+    expect(trace.find((r) => r.type === "query")).toMatchObject({ preset: "top-week" });
+  });
+
   it("drives a run step by step; after a stop the fold points nowhere", async () => {
     const d = deps();
     const planned = await planRound(d, {

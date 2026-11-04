@@ -152,10 +152,14 @@ export function ytdlpSource(o: {
     cost: "metered",
     // YouTube's own search knows no other site.
     keeps: (site) => /(^|\.)(youtube\.com|youtu\.be)$/i.test(site),
+    // presets ride the Data API; yt-dlp's search has no sort or window
+    ...(o.api ? { presets: true as const } : {}),
     async search(q) {
       const n = o.n ?? 10;
-      const got = await viaApi((a) => a.search(q.terms, n));
+      const got = await viaApi((a) => a.search(q.terms, n, q.preset));
       if (got) return got;
+      if (q.preset)
+        throw new Error(`youtube: preset ${q.preset} needs the Data API, and it gave no answer`);
       const entries = await list(o.ytDlp, `ytsearch${n}:${q.terms}`);
       return entries.map((e) => entryHit(e)).filter((h): h is NonNullable<typeof h> => h !== null);
     },

@@ -24,6 +24,7 @@ import {
   paste,
   perplexity,
   postsOf,
+  presetParams,
   QuotaSpent,
   searxng,
   youtubeApi,
@@ -815,6 +816,18 @@ describe("ladder", () => {
     );
     expect(new Headers(seen[0]?.init?.headers).get("authorization")).toBe("Bearer t");
     await expect(sites.call("web", "GET", "/fetch", {})).rejects.toThrow("503 offline");
+  });
+});
+
+describe("youtube presets", () => {
+  it("maps the grammar to the Data API's order and publishedAfter", () => {
+    const at = new Date("2026-11-03T00:00:00.000Z");
+    expect(presetParams("latest", at)).toEqual({ order: "date" });
+    expect(presetParams("top-week", at)).toEqual({
+      order: "viewCount",
+      publishedAfter: "2026-10-27T00:00:00.000Z",
+    });
+    expect(presetParams("month", at)).toEqual({ publishedAfter: "2026-10-04T00:00:00.000Z" });
   });
 });
 

@@ -47,7 +47,7 @@ import {
   treeOf,
   type YieldRow,
 } from "./plan.js";
-import type { Deps } from "./ports.js";
+import { type Deps, searchersFor } from "./ports.js";
 import { type Recalled, recall } from "./recall.js";
 import {
   checkCount,
@@ -82,7 +82,7 @@ import {
   treeRoom,
   treeStateOf,
 } from "./tree.js";
-import type { MetricKey } from "./types.js";
+import { type MetricKey, Preset } from "./types.js";
 
 /** Who a record is from: the agent (`ai`, its id) or the person through it (`human`, their name). */
 export interface Who {
@@ -255,8 +255,33 @@ export interface QueryInput {
   terms: string;
   why: string;
   site?: string;
+  /** Sort and window (`top-week`); only sources that take presets search it. */
+  preset?: string;
   /** The tree's facet it serves, when the agent adds one more leaf by hand. */
   facet?: string;
+}
+
+/** A preset query's searchers in the run, else the error that names the sources that take one. */
+function presetOf(
+  deps: Deps,
+  state: RunState,
+  q: { preset?: string | undefined; site?: string | undefined },
+  terms: string,
+) {
+  if (!q.preset) return undefined;
+  const preset = Preset.parse(q.preset);
+  const names = state.snapshot?.sources ?? [];
+  const run = names.flatMap((n) => {
+    const s = deps.sources.get(n);
+    return s ? [s] : [];
+  });
+  if (!searchersFor(run, { preset, ...(q.site ? { site: q.site } : {}) }).length) {
+    const take = [...deps.sources.values()].filter((s) => s.search && s.presets).map((s) => s.name);
+    throw new Error(
+      `query "${terms}": preset ${preset}, but no searcher in the run${q.site ? ` for ${q.site}` : ""} takes presets${take.length ? `; these do: ${take.join(", ")}` : ""}`,
+    );
+  }
+  return preset;
 }
 
 /** Writes the agent's queries, then runs the fetch step: every searcher on every unsearched query of the round. */
@@ -274,6 +299,7 @@ export async function search(
     const terms = q.terms.replace(/\s+/g, " ").trim();
     if (!terms) throw new Error("a query needs terms");
     if (!q.why.trim()) throw new Error(`query "${terms}": why?`);
+    const preset = presetOf(deps, state, q, terms);
     await ctx.write(
       {
         type: "query",
@@ -281,6 +307,7 @@ export async function search(
         terms,
         why: q.why,
         ...(q.site ? { site: q.site } : {}),
+        ...(preset ? { preset } : {}),
         ...(q.facet ? { facet: q.facet } : {}),
       },
       who,
@@ -574,6 +601,7 @@ export async function searchTree(
       const terms = leaf.terms.replace(/\s+/g, " ").trim();
       if (!terms) throw new Error(`facet "${facet.name}": a query needs terms`);
       if (!leaf.why.trim()) throw new Error(`query "${terms}": why?`);
+      const preset = presetOf(deps, first, leaf, terms);
       ids.push(
         await ctx.write(
           {
@@ -584,6 +612,7 @@ export async function searchTree(
             facet: facet.name,
             tier,
             ...(leaf.site ? { site: leaf.site } : {}),
+            ...(preset ? { preset } : {}),
             ...(facet.needs?.length ? { needs: facet.needs } : {}),
           },
           who,
@@ -792,7 +821,7 @@ export async function check(
 
 /** What the agent or the person adds by hand. */
 export type Addition =
-  | { type: "query"; terms: string; why: string; site?: string; facet?: string }
+  | { type: "query"; terms: string; why: string; site?: string; preset?: string; facet?: string }
   | { type: "finding"; document: string; text: string; quote: string }
   | { type: "check"; on: string; ok: boolean; why: string }
   | { type: "call"; on: string; verdict: "keep" | "drop"; why: string }
@@ -866,6 +895,7 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
       if (!state.snapshot) throw new Error(`run ${run}: no plan yet`);
       const terms = a.terms.replace(/\s+/g, " ").trim();
       if (!terms) throw new Error("a query needs terms");
+      const preset = presetOf(deps, state, a, terms);
       return {
         record: await write({
           type: "query",
@@ -873,6 +903,7 @@ export async function add(deps: Deps, run: string, a: Addition, who: Who): Promi
           terms,
           why: why(a.why, `query "${terms}"`),
           ...(a.site ? { site: a.site } : {}),
+          ...(preset ? { preset } : {}),
           ...(a.facet ? { facet: a.facet } : {}),
         }),
         warnings,

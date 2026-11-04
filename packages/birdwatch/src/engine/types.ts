@@ -41,11 +41,26 @@ export const Ask = z.object({
 });
 export type Ask = z.infer<typeof Ask>;
 
+/**
+ * A search's sort and window in one grammar (autobrowse's, WA-1031): `latest` or `top`, `day`,
+ * `week`, `month` or `year`, or paired (`top-week`). Each source maps it to its platform's own
+ * filter; one that lacks it fails the call and names what it takes.
+ */
+export const Preset = z
+  .string()
+  .regex(
+    /^(?:(?:latest|top)(?:-(?:day|week|month|year))?|day|week|month|year)$/,
+    "latest or top, day, week, month or year, or paired: top-week",
+  );
+export type Preset = z.infer<typeof Preset>;
+
 /** One thing to look for. `terms` is what a person would type; a source adapter forms its own call from it. */
 export const Query = z.object({
   kind: AskKind,
   terms: z.string().min(1),
   site: z.string().optional(),
+  /** Sort and window; only sources that take presets search it. Absent: each platform's default. */
+  preset: Preset.optional(),
   /** Why this query serves the ask: the line a reviewer reads first. */
   why: z.string(),
   /** The tree's facet it serves, and which try (1 = the first). Absent on a flat query. */
@@ -64,6 +79,7 @@ export const Leaf = z.object({
   terms: z.string().min(1),
   why: z.string(),
   site: z.string().optional(),
+  preset: Preset.optional(),
 });
 export type Leaf = z.infer<typeof Leaf>;
 
