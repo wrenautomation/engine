@@ -509,7 +509,7 @@ describe("linkedin", () => {
       {
         site: "linkedin",
         path: "/search/results/content",
-        input: { keywords: "first sales hire", max: 100, since: "past-month" },
+        input: { keywords: "first sales hire", max: 100, datePosted: "past-month" },
         account: "linkedin@wren",
       },
     ]);
