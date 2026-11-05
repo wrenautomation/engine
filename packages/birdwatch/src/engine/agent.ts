@@ -1410,7 +1410,7 @@ export function surveyOf(
   query: QueryRecord,
 ): Omit<SurveyView, "top"> & { ranked: SurveyRow[] } {
   const f = query.follow;
-  if (!f || f.as !== "posts") throw new Error(`${query.id} is not a posts follow`);
+  if (f?.as !== "posts") throw new Error(`${query.id} is not a posts follow`);
   const qOf = queriesOf(state);
   const read = new Set(state.documents.map((d) => d.hit));
   const hits = state.hits.filter((h) => qOf.get(h.id)?.has(query.id));
