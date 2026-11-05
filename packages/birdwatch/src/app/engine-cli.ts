@@ -3,7 +3,7 @@
  * `open`, `extract`, `check`, `add`, `brief`, `trace` a run, `sources` on this
  * machine. Every command prints JSON. The ledger is a folder (`--ledger`, BIRDWATCH_LEDGER, default `./ledger`); a
  * writer names this terminal's file in it (`--writer`, BIRDWATCH_WRITER, default the user name).
- * The model is a `@wrenautomation/models` spec: `anthropic:sonnet` by default (Claude Sonnet direct,
+ * The model is a `@wrenautomation/models` spec: `anthropic` by default (Claude Haiku direct,
  * ANTHROPIC_API_KEY), `gateway[:alias]`, `gemini`, `claude-code`, `command:<cmd>` and the rest
  * of its grammar. A host with its own ledger, sources or
  * model passes them in `EngineCliDeps`; wren's `research` command is these commands over
@@ -107,7 +107,7 @@ import {
   watchRuns,
 } from "./serve.js";
 
-const DEFAULT_MODEL = "anthropic:sonnet";
+const DEFAULT_MODEL = "anthropic";
 
 export { costOf };
 
