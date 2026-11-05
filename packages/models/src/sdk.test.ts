@@ -4,9 +4,11 @@ import { fallback } from "./keys.js";
 import {
   anthropic,
   compatible,
+  GEMINI_LADDER,
   gateway,
   gatewayBase,
   gemini,
+  geminiLadder,
   geminiLiveKeys,
 } from "./providers.js";
 
@@ -319,5 +321,51 @@ describe("a caller's time limit", () => {
     await expect(m.complete({ prompt: "hi", signal: AbortSignal.timeout(50) })).rejects.toThrow();
     expect(Date.now() - began).toBeLessThan(2_000);
     expect(asked).toBe(1);
+  });
+});
+
+describe("geminiLadder", () => {
+  const busyUntil = (model: string) => {
+    const urls: string[] = [];
+    const fetch = (async (input: string | URL | Request) => {
+      const url = String(input instanceof Request ? input.url : input);
+      urls.push(url);
+      return url.includes(`/${model}:`) ? generated({ text: model }) : json({}, 429);
+    }) as typeof globalThis.fetch;
+    return { urls, fetch };
+  };
+
+  it("walks the ladder newest first, every key, until one answers", async () => {
+    const w = busyUntil("gemini-3.6-flash");
+    const m = geminiLadder({ key: ["k-0000000001", "k-0000000002"], fetch: w.fetch });
+    expect(m.id).toBe("google:gemini-3.8-flash");
+    expect((await m.complete({ prompt: "hi" })).text).toBe("gemini-3.6-flash");
+    const asked = w.urls.map((u) => u.match(/models\/([^:]+):/)?.[1]);
+    expect([...new Set(asked)]).toEqual(GEMINI_LADDER.slice(0, 3));
+    expect(asked.length).toBe(5);
+  });
+
+  it("a named model goes first, the ladder follows without it", async () => {
+    const w = busyUntil("gemini-3.8-flash");
+    const m = geminiLadder({ key: "k-0000000001", model: "gemini-3.5-flash", fetch: w.fetch });
+    expect(m.id).toBe("google:gemini-3.5-flash");
+    await m.complete({ prompt: "hi" });
+    expect(w.urls.map((u) => u.match(/models\/([^:]+):/)?.[1])).toEqual([
+      "gemini-3.5-flash",
+      "gemini-3.8-flash",
+    ]);
+  });
+
+  it("all busy: five passes, waits doubling from 2 s", async () => {
+    const waits: number[] = [];
+    const w = busyUntil("none");
+    const m = geminiLadder({
+      key: "k-0000000001",
+      fetch: w.fetch,
+      rotate: { sleep: async (ms) => void waits.push(ms) },
+    });
+    await expect(m.complete({ prompt: "hi" })).rejects.toThrow();
+    expect(waits).toEqual([2000, 4000, 8000, 16000]);
+    expect(w.urls.length).toBe(5 * GEMINI_LADDER.length);
   });
 });

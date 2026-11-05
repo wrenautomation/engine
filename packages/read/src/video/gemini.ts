@@ -5,8 +5,7 @@
  */
 import { readFile } from "node:fs/promises";
 import {
-  fallback,
-  gemini,
+  geminiLadder,
   geminiLiveKeys,
   isCut,
   isFiltered,
@@ -15,14 +14,6 @@ import {
 } from "@wrenautomation/models";
 import { clock, runFor, TOOL_MS } from "./tools.js";
 
-/** Newest first: a busy or refused model hands the call to the next. Free-tier quota counts per model. */
-export const GEMINI_MODELS = [
-  "gemini-3.8-flash",
-  "gemini-3.7-flash",
-  "gemini-3.6-flash",
-  "gemini-3.5-flash",
-  "gemini-3.5-flash-lite",
-];
 /** One call gives up after this long: a stalled socket would wait out undici's 5 minutes. */
 const CALL_MS = 180_000;
 /** One read, every model, key and pass together, gives up after this long. */
@@ -38,9 +29,8 @@ export const SHOWN = (start: number, paraphrase: boolean) =>
   `Transcribe in full, verbatim, every document, list, table, slide, template or other text the speaker shows on screen in this clip, each under a [h:mm:ss] heading of the video time it appears (the clip starts at ${clock(start)}). For every image, screenshot, chart, diagram or UI on screen, extract the information it carries, not what it looks like: the text in it, setting names and their values, numbers, prices, limits, labels, before and after states, and what is highlighted, circled, crossed out, ticked or pointed at. Write each as a line starting with its [h:mm:ss] then [visual], stating the fact as a reader would use it ("Instantly warmup settings: daily limit 10, slow ramp on, +1 per day, reply rate 95%"), not "a screenshot of the settings page". Skip visuals that carry no information (decoration, layout, gestures, transitions) and repeats of anything already captured. Skip the speaker's face, chat windows, b-roll and stock footage, and anything already shown earlier in the clip.${paraphrase ? " Where a shown passage is published text (a post, article, page), give its first line word for word, then every point it makes in your own words." : ""}`;
 
 /**
- * The video reader on a Gemini key ring: `GEMINI_MODELS` in turn, each over every key that still
- * works, five passes while they only say "later" (waits 2, 4, 8, 16 s). Null when no key works: a revoked fleet must
- * not get a 14 MB inline body posted to each key.
+ * The video reader: `geminiLadder` over the keys that still work. Null when no key works: a
+ * revoked fleet must not get a 14 MB inline body posted to each key.
  */
 export async function geminiVideo(
   keys: readonly string[],
@@ -55,11 +45,7 @@ export async function geminiVideo(
  * passes only generate calls (the check lists models, which such a proxy refuses).
  */
 export function geminiReader(keys: readonly string[], o: { fetch?: typeof fetch } = {}): Model {
-  const wire = o.fetch ? { fetch: o.fetch } : {};
-  return fallback(
-    GEMINI_MODELS.map((model) => gemini({ key: keys, model, limitMs: CALL_MS, ...wire })),
-    { passes: 5 },
-  );
+  return geminiLadder({ key: keys, limitMs: CALL_MS, ...(o.fetch ? { fetch: o.fetch } : {}) });
 }
 
 /**

@@ -2,7 +2,7 @@
  * A model from one string and the environment, for a CLI flag or a setting (Node only: it can
  * start `claude -p`). Grammar: `fake` | `claude-code[:model]` | `anthropic[:haiku|sonnet|opus|id]` |
  * `gateway[:alias]` | `gemini[:id]` | `cohere[:id]` | `<groq|openrouter|mistral|cerebras|openai>[:id]` |
- * `command:<shell command>` (the prompt on stdin, the answer on stdout).
+ * `command:<shell command>` (the prompt on stdin, the answer on stdout). Bare `gemini` is `geminiLadder`.
  */
 import { claudeCode, commandModel } from "./command.js";
 import { fakeModel } from "./fake.js";
@@ -14,6 +14,7 @@ import {
   compatible,
   gateway,
   gemini,
+  geminiLadder,
   isCompatible,
 } from "./providers.js";
 import type { Model } from "./types.js";
@@ -65,7 +66,7 @@ export function modelFromSpec(
     case "anthropic":
       return anthropic(vendor("anthropic"));
     case "gemini":
-      return gemini(vendor("gemini"));
+      return rest ? gemini(vendor("gemini")) : geminiLadder(vendor("gemini"));
     case "cohere":
       return cohere(vendor("cohere"));
     case "gateway": {

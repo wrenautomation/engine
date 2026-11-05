@@ -7,7 +7,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createCohere } from "@ai-sdk/cohere";
 import { createGoogle } from "@ai-sdk/google";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { type RotateOptions, rotating } from "./keys.js";
+import { fallback, type RotateOptions, rotating } from "./keys.js";
 import { TEXT_ONLY } from "./model.js";
 import { sdkModel } from "./sdk.js";
 import type { Clip, Model, Part, PartKind } from "./types.js";
@@ -87,6 +87,31 @@ export function gemini(o: VendorOptions): Model {
       }),
     o.rotate,
     "gemini",
+  );
+}
+
+/** Newest first: a busy or refused model hands the call to the next. Free-tier quota counts per model. */
+export const GEMINI_LADDER = [
+  "gemini-3.8-flash",
+  "gemini-3.7-flash",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash",
+  "gemini-3.5-flash-lite",
+] as const;
+
+/**
+ * Gemini down the ladder: each model over every key, five passes while all say "later" (waits
+ * 2, 4, 8, 16 s). `model` names the first choice; the rest of the ladder follows it. `rotate`
+ * sets the ladder's waits.
+ */
+export function geminiLadder(o: VendorOptions & { models?: readonly string[] }): Model {
+  const tail = (o.models ?? GEMINI_LADDER).filter((m) => m !== o.model);
+  const ids = o.model ? [o.model, ...tail] : tail;
+  const { models: _, rotate, ...base } = o;
+  // one wait loop, over the whole ladder
+  return fallback(
+    ids.map((model) => gemini({ ...base, model })),
+    { passes: 5, ...rotate },
   );
 }
 
