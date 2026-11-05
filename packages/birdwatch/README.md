@@ -125,8 +125,8 @@ npx birdwatch sources                                                           
 npx birdwatch serve --port 4747                                                   # the ledger over HTTP for a viewer, read only
 ```
 
-The model is `anthropic` by default (Claude Haiku direct, `ANTHROPIC_API_KEY`; `--model
-anthropic:sonnet|opus|id` for another), `--model gateway[:alias]` for Wren's LLM gateway
+The model is `anthropic:sonnet` by default (Claude Sonnet direct, `ANTHROPIC_API_KEY`; `--model
+anthropic:haiku|opus|id` for another, or `BIRDWATCH_MODEL`), `--model gateway[:alias]` for Wren's LLM gateway
 (`WREN_LLM_GATEWAY_URL`, `WREN_LLM_GATEWAY_TOKEN`), or any command that reads a prompt on stdin
 and prints the answer (`claude -p --output-format json` is Claude Code headless). The model does
 the bulk (extract, check) only; the agent decides. Sources come
