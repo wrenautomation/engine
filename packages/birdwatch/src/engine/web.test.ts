@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LedgerRecord } from "../ledger/records.js";
-import { webOf } from "./web.js";
 import { fold } from "./state.js";
+import { webOf } from "./web.js";
 
 const head = (run: string, id: string, at: string) => ({
   id,
