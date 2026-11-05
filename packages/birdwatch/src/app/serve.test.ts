@@ -2,12 +2,13 @@ import { fakeModel } from "@wrenautomation/models";
 import { describe, expect, it } from "vitest";
 import { claimExtractor } from "../document/index.js";
 import { add, open, planRound, search, type Who } from "../engine/agent.js";
+import type { ResearchMap } from "../engine/map.js";
 import { defaultPlanFile } from "../engine/plan.js";
 import { type Deps, registry, type Source } from "../engine/ports.js";
 import type { RunRow, RunView } from "../engine/view.js";
 import { countingIds } from "../ledger/ids.js";
 import { MemoryLedger } from "../ledger/memory.js";
-import { type Changes, serveApp } from "./serve.js";
+import { type Changes, groupOf, serveApp } from "./serve.js";
 
 const fake: Source = {
   name: "fake",
@@ -48,7 +49,10 @@ async function setup() {
     subs.add(on);
     return () => subs.delete(on);
   };
-  const app = serveApp({ deps: d, runs: async () => [run, "empty"], changes });
+  const app = serveApp({
+    sets: [{ group: "11-05/test", deps: d, runs: async () => [run, "empty"] }],
+    changes,
+  });
   return {
     d,
     run,
@@ -136,5 +140,28 @@ describe("birdwatch serve", () => {
     expect(got).toContain(`data: {"run":"${run}"}`);
     stop.abort();
     await reader.cancel();
+  });
+
+  it("draws every run as one map, named by its ledger folder", async () => {
+    const { run, one, app } = await setup();
+    const m = (await (await app.request("/map")).json()) as ResearchMap;
+    expect(m.nodes.find((n) => n.id === run)).toMatchObject({ kind: "run", group: "11-05/test" });
+    expect(m.nodes.find((n) => n.id === one)).toMatchObject({ kind: "page", read: true });
+    expect(groupOf("/a/tasks/docs/11-05/editing-survey/")).toBe("11-05/editing-survey");
+  });
+
+  it("reads each run from the ledger that holds it", async () => {
+    const { d, run } = await setup();
+    const app = serveApp({
+      sets: [
+        { group: "a", deps: d, runs: async () => [run] },
+        { group: "b", deps: { ...d, ledger: new MemoryLedger() }, runs: async () => ["ghost"] },
+      ],
+      changes: () => () => {},
+    });
+    expect((await app.request(`/runs/${run}`)).status).toBe(200);
+    expect((await app.request("/runs/ghost")).status).toBe(404);
+    const list = (await (await app.request("/runs")).json()) as { runs: RunRow[] };
+    expect(list.runs.map((r) => r.run)).toEqual([run]);
   });
 });

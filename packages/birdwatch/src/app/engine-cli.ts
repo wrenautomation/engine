@@ -53,6 +53,7 @@ import {
   tunePlan,
   type Who,
 } from "../engine/index.js";
+import { mapOf } from "../engine/map.js";
 import {
   type AskKind,
   Criterion,
@@ -63,6 +64,7 @@ import {
   TreeGuide,
   treeOf,
 } from "../engine/plan.js";
+import type { RunState } from "../engine/state.js";
 import { RUNS } from "../engine/tree.js";
 import { Step as PlanStep } from "../engine/types.js";
 import {
@@ -94,7 +96,15 @@ import {
   youtubeSee,
   ytdlpSource,
 } from "../sources/index.js";
-import { SERVE_ORIGINS, SERVE_PORT, serveApp, watchRuns } from "./serve.js";
+import {
+  allChanges,
+  groupOf,
+  type LedgerSet,
+  SERVE_ORIGINS,
+  SERVE_PORT,
+  serveApp,
+  watchRuns,
+} from "./serve.js";
 
 const DEFAULT_MODEL = "anthropic";
 
@@ -1058,27 +1068,65 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       for (const p of ledger.problems ?? []) console.error(`${p.file}:${p.line}: ${p.why}`);
     });
 
+  /** The ledger and `--also` folders as serve's sets: each run read with its own folder's deps. */
+  const setsOf = async (o: Common & { also?: string[] }): Promise<LedgerSet[]> => {
+    const roots = [o.ledger, ...(o.also ?? []).filter((r) => r !== o.ledger)];
+    await mkdir(`${o.ledger}/runs`, { recursive: true });
+    return roots.map((root) => {
+      const ledger = new FilesLedger(root, o.writer);
+      const deps = depsOf({ ledger, sources: registry(), model: null, judge: null }, o.writer);
+      return { group: groupOf(root), deps, runs: () => ledger.runs() };
+    });
+  };
+
   common(program.command("serve"))
     .description(
-      "the ledger over HTTP for a viewer, read only: GET /runs, /runs/:run, /runs/:run/documents/:doc, and /events (one event per changed run)",
+      "ledgers over HTTP for a viewer, read only: GET /runs, /runs/:run, /runs/:run/documents/:doc, /map (every run as one map), and /events (one event per changed run)",
     )
     .option("--port <n>", "the port", (v) => Number(v), SERVE_PORT)
     .option("--host <host>", "the address to bind", "127.0.0.1")
     .option("--origin <url...>", "the pages that may read it, besides any localhost", SERVE_ORIGINS)
-    .action(async (o: Common & { port: number; host: string; origin: string[] }) => {
-      const ledger = new FilesLedger(o.ledger, o.writer);
-      await mkdir(`${o.ledger}/runs`, { recursive: true });
-      const s = { ledger, sources: registry(), model: null, judge: null };
-      const app = serveApp({
-        deps: depsOf(s, o.writer),
-        runs: () => ledger.runs(),
-        changes: watchRuns(o.ledger),
-        origins: o.origin,
-      });
-      serve({ fetch: app.fetch, port: o.port, hostname: o.host }, (a) =>
-        console.error(`birdwatch serve: http://${a.address}:${a.port} over ${o.ledger}`),
+    .option("--also <dir...>", "more ledger folders to read beside --ledger")
+    .action(
+      async (o: Common & { port: number; host: string; origin: string[]; also?: string[] }) => {
+        const sets = await setsOf(o);
+        const roots = [o.ledger, ...(o.also ?? []).filter((r) => r !== o.ledger)];
+        const app = serveApp({
+          sets,
+          changes: allChanges(...roots.map((r) => watchRuns(r))),
+          origins: o.origin,
+        });
+        serve({ fetch: app.fetch, port: o.port, hostname: o.host }, (a) =>
+          console.error(`birdwatch serve: http://${a.address}:${a.port} over ${roots.join(", ")}`),
+        );
+        await new Promise(() => {});
+      },
+    );
+
+  common(program.command("map"))
+    .description(
+      "every run as one map: nodes (run, query, site or channel, page, finding, hub) with fixed positions, and edges",
+    )
+    .option("--also <dir...>", "more ledger folders to read beside --ledger")
+    .option("--json", "the map as JSON (the default prints counts)")
+    .action(async (o: Common & { also?: string[]; json?: boolean }) => {
+      const sets = await setsOf(o);
+      const seen = new Set<string>();
+      const runs: { group: string; state: RunState }[] = [];
+      for (const set of sets)
+        for (const run of await set.runs()) {
+          if (seen.has(run)) continue;
+          seen.add(run);
+          const records = await set.deps.ledger.trace(run);
+          if (records.length) runs.push({ group: set.group, state: fold(run, records) });
+        }
+      const m = mapOf(runs);
+      if (o.json) return void console.log(JSON.stringify(m));
+      const count = new Map<string, number>();
+      for (const n of m.nodes) count.set(n.kind, (count.get(n.kind) ?? 0) + 1);
+      console.log(
+        `${m.nodes.length} nodes, ${m.edges.length} edges: ${[...count].map(([k, v]) => `${v} ${k}`).join(", ")}`,
       );
-      await new Promise(() => {});
     });
 
   common(program.command("sources"))

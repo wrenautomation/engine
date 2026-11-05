@@ -7,6 +7,7 @@ export * from "./canonical.js";
 export * from "./context.js";
 export * from "./cost.js";
 export * from "./judge.js";
+export * from "./map.js";
 export * from "./people.js";
 export * from "./plan.js";
 export * from "./ports.js";
