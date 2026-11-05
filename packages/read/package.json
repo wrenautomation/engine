@@ -1,7 +1,7 @@
 {
   "name": "@wrenautomation/read",
   "version": "0.41.0",
-  "description": "The web and files in, text out. Polite HTTP fetching with robots and a fetch ladder up to a browser; HTML and PDF to text, a page to title, text and links; a video or podcast from a URL or a file (captions, ffmpeg and a vision model, audio to markdown, what a channel or search holds); a study's synthesis reader whose every claim quotes a page.",
+  "description": "The web and files in, text out. Polite HTTP fetching with robots and a fetch ladder up to a browser; HTML and PDF to text, a page to title, text and links; a video or podcast from a URL or a file (captions, ffmpeg and a vision model, audio to markdown, what a channel or search holds); a site's brand (logo, palette, fonts); a study's synthesis reader whose every claim quotes a page.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/wrenautomation/engine.git",
@@ -22,6 +22,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./brand": {
+      "types": "./dist/brand/index.d.ts",
+      "import": "./dist/brand/index.js"
     },
     "./fetch": {
       "types": "./dist/fetch/index.d.ts",
@@ -49,10 +53,15 @@
   },
   "dependencies": {
     "@wrenautomation/models": "workspace:*",
+    "culori": "4.0.2",
     "entities": "8.1.0",
     "htmlparser2": "12.0.0",
+    "postcss": "8.5.32",
     "robots-parser": "3.0.1",
     "unpdf": "1.8.1",
     "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/culori": "4.0.1"
   }
 }

@@ -3,10 +3,11 @@
 The web and files in, text out. No database, no accounts, no business rules: a library that
 fetches and reads. Until 0.29.0 this was falcon (files, markup, media) and the fetch and video
 halves of weaver; the research engine on top is [`@wrenautomation/birdwatch`](https://github.com/wrenautomation/engine/tree/main/packages/birdwatch),
-whose `birdwatch` CLI carries these readers (`fetch`, `read`, `list`, `text`, `page`, `watch`).
+whose `birdwatch` CLI carries these readers (`fetch`, `read`, `list`, `text`, `page`, `watch`, `brand`).
 
 | Import | Does |
 |---|---|
+| `@wrenautomation/read/brand` | `brandOf` a site: logo (`svg` inline, `img`, `icon`, `og`), palette (`primary`, `accent`, `background`, `text` as `#rrggbb`), fonts (`heading`, `body`), a 0 to 1 confidence each, and `from` (what was read). The page and up to 8 stylesheets by plain HTTP first; when that is `thin` and a `LadderClient` is given, a browser's computed styles (`web GET /brand`, shape `BrandProbe`), else the ladder's render rung's HTML. No model |
 | `@wrenautomation/read/fetch` | `PoliteFetcher` (one request at a time per host, a contact in the User-Agent, retries on 429 and 5xx, a byte cap), `robots` in warn mode, `fetchLadder` (plain GET up to a browser through a `LadderClient`: autobrowse's `web GET /fetch`) |
 | `@wrenautomation/read/text` | `htmlText`, `pdfText`, `decodeHtml`, `decodeEntities`; `readPage` (HTML to title, text, links, mailtos, tels) |
 | `@wrenautomation/read/video` | `watchFile` a video file: ffmpeg cuts and frames, an ear for the speech (`cohereSpeech`), an eye for the frames (`cohereEye`), and a video model's read of the whole file when given (`geminiVideo`, or `geminiReader` with no key check, for a proxy that holds the keys); shot labels. Over a URL: `readYoutube` (captions and chapters by yt-dlp; with an `ear`, a caption 429 rests captions 30 min and the ear hears the uploader's own audio track in 60 s clips; plus a video model's read of the screen in clips), `readYoutubeByUrl` (the video model alone, no download), `readVideo` (any other video: a `MediaStore` copy, else a direct file link such as Instagram Graph's `media_url`, else yt-dlp; then `watchFile`; `mediaKey` names a video `<platform>/<id>` and `dirStore` keeps them in a folder), `readAudio` (a podcast by its audio URL, then `hearAudio`), `watch` over a URL or a file, `flatPlaylist` (what a profile, channel or search holds), `download`. Every reader returns the one `VideoRead` shape |

@@ -19,6 +19,7 @@ import type { Model } from "@wrenautomation/models";
 import { anthropic } from "@wrenautomation/models";
 import { type Judge, judgeFromSpec } from "@wrenautomation/models/judge";
 import { modelFromSpec } from "@wrenautomation/models/spec";
+import { brandOf } from "@wrenautomation/read/brand";
 import type { LadderClient } from "@wrenautomation/read/fetch";
 import { PoliteFetcher, userAgent } from "@wrenautomation/read/fetch";
 import { dirStore, speechHere } from "@wrenautomation/read/video";
@@ -165,6 +166,22 @@ const filesLedger = (o: Common) => new FilesLedger(o.ledger, o.writer);
 /** Reads the frames of a video the agent asks to see: each one's text and what it shows. */
 const SEE_MODEL = "sonnet";
 
+/** autobrowse from the environment: a worker by URL, else through Restate ingress; null for none. */
+export function sitesHere(printed: NodeJS.ProcessEnv): LadderClient | null {
+  if (printed.AUTOBROWSE_URL)
+    return httpLadderClient({
+      url: printed.AUTOBROWSE_URL,
+      token: printed.AUTOBROWSE_TOKEN ?? null,
+    });
+  if (!printed.RESTATE_INGRESS_URL) return null;
+  return ingressLadderClient({
+    url: printed.RESTATE_INGRESS_URL,
+    token: printed.RESTATE_AUTH_TOKEN ?? null,
+    ...(printed.AUTOBROWSE_SERVICE ? { service: printed.AUTOBROWSE_SERVICE } : {}),
+    caller: `birdwatch:${printed.BIRDWATCH_AGENT ?? "cli"}`,
+  });
+}
+
 /** The sources this machine can run, from the environment. */
 export function sourcesHere(
   printed: NodeJS.ProcessEnv,
@@ -223,16 +240,7 @@ export function sourcesHere(
     );
   } else
     warn("no BIRDWATCH_CONTACT (an email address or URL for site operators): pages stay unopened");
-  const sites: LadderClient | null = printed.AUTOBROWSE_URL
-    ? httpLadderClient({ url: printed.AUTOBROWSE_URL, token: printed.AUTOBROWSE_TOKEN ?? null })
-    : printed.RESTATE_INGRESS_URL
-      ? ingressLadderClient({
-          url: printed.RESTATE_INGRESS_URL,
-          token: printed.RESTATE_AUTH_TOKEN ?? null,
-          ...(printed.AUTOBROWSE_SERVICE ? { service: printed.AUTOBROWSE_SERVICE } : {}),
-          caller: `birdwatch:${printed.BIRDWATCH_AGENT ?? "cli"}`,
-        })
-      : null;
+  const sites = sitesHere(printed);
   if (sites) {
     // The account each site reader signs in as: the caller's choice, never a default here.
     const accounts = accountsFrom(printed.BIRDWATCH_ACCOUNTS);
@@ -1126,6 +1134,22 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       for (const n of m.nodes) count.set(n.kind, (count.get(n.kind) ?? 0) + 1);
       console.log(
         `${m.nodes.length} nodes, ${m.edges.length} edges: ${[...count].map(([k, v]) => `${v} ${k}`).join(", ")}`,
+      );
+    });
+
+  program
+    .command("brand <url>")
+    .description(
+      "a site's logo, palette (primary, accent, background, text) and fonts, with confidence: its CSS first, a browser through autobrowse when that is thin. JSON out",
+    )
+    .option("--static", "read the CSS only: no autobrowse")
+    .action(async (url: string, o: { static?: boolean }) => {
+      const contact = process.env.BIRDWATCH_CONTACT;
+      if (!contact) throw new Error("brand needs BIRDWATCH_CONTACT: site operators see it");
+      const sites = o.static ? null : sitesHere(process.env);
+      const fetcher = new PoliteFetcher(userAgent(contact));
+      console.log(
+        JSON.stringify(await brandOf(url, { fetcher, sites: sites ?? undefined }), null, 2),
       );
     });
 

@@ -279,6 +279,10 @@ the viewer then gets that run again. CORS answers `--origin` (the portal by defa
 localhost, and says yes to Chrome's private-network preflight. The types live in
 `src/engine/view.ts`; a host copies them and checks `v`, never imports them.
 
+`brand <url>` prints a site's logo, palette and fonts as JSON (read's `brandOf`): its CSS first, then
+autobrowse (computed styles, else the render rung) when that is thin. `--static` reads the CSS only.
+Needs `BIRDWATCH_CONTACT`.
+
 ## Library
 
 ```ts
