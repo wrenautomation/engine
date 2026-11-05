@@ -164,12 +164,18 @@ export function ytdlpSource(o: {
       return entries.map((e) => entryHit(e)).filter((h): h is NonNullable<typeof h> => h !== null);
     },
     follows: (as, url) => as === "posts" && postsOf(url) !== null,
-    async follow(_as, url, n) {
+    // a window or words ride the Data API
+    ...(o.api ? { followsBy: true as const } : {}),
+    async follow(_as, url, n, by) {
       let at = postsOf(url);
       if (at === "video" || at?.site === "youtube") {
-        const got = await viaApi((a) => a.uploads(url, n));
+        const got = await viaApi((a) =>
+          by?.q ? a.channelSearch(url, by.q, n, by.since) : a.uploads(url, n, by?.since),
+        );
         if (got) return got;
       }
+      if (by?.q || by?.since)
+        throw new Error(`youtube: a follow by date or words needs the Data API on a YouTube page`);
       if (at === "video") {
         const v = await info(o.ytDlp, url);
         const channel = [v.channel_url, v.uploader_url].find((x) => typeof x === "string");

@@ -585,13 +585,25 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       "--see",
       "read what the named videos show, frame by frame (downloaded; Claude reads the frames, ~$0.30 for 10 min): only a video worth it whose captions lean on the screen",
     )
+    .option(
+      "--survey <query>",
+      "a channel survey (the brief's `surveys`): read its first --top uploads by views over the channel's median",
+    )
+    .option("--top <k>", "how many of the survey to read (default 5)", Number)
     .action(
       async (
         runId: string,
         hits: string[],
         o: Common &
           Machine &
-          Agent & { url?: string[]; why?: string; with?: string[]; see?: boolean },
+          Agent & {
+            url?: string[];
+            why?: string;
+            with?: string[];
+            see?: boolean;
+            survey?: string;
+            top?: number;
+          },
       ) => {
         const s = setup(o);
         printDid(
@@ -604,6 +616,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
               ...(o.why ? { why: o.why } : {}),
               ...(o.with ? { with: o.with } : {}),
               ...(o.see ? { see: true } : {}),
+              ...(o.survey ? { survey: { query: o.survey, top: o.top ?? 5 } } : {}),
             },
             whoOf(o),
           ),
@@ -619,11 +632,31 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     .requiredOption("--why <why>", "why this page's neighbors may answer the ask")
     .option("--from <document>", "the read page that led here (its URL when no url is given)")
     .option("--with <source...>", "follow sources this machine has that the run's allow-list lacks")
+    .option(
+      "-n <n>",
+      "how many to list (default 30, at most 1000): a channel survey lists its uploads whole; the brief's surveys rank them over the channel's median",
+      Number,
+    )
+    .option("--since <day>", "posts on or after this day (YYYY-MM-DD); YouTube only")
+    .option(
+      "--q <words>",
+      "only posts inside the channel that match these words (YouTube search: 100 units per 50)",
+    )
     .action(
       async (
         runId: string,
         url: string | undefined,
-        o: Common & Machine & Agent & { as: string; why: string; from?: string; with?: string[] },
+        o: Common &
+          Machine &
+          Agent & {
+            as: string;
+            why: string;
+            from?: string;
+            with?: string[];
+            n?: number;
+            since?: string;
+            q?: string;
+          },
       ) => {
         const s = setup(o);
         printDid(
@@ -636,6 +669,9 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
               ...(url ? { url } : {}),
               ...(o.from ? { document: o.from } : {}),
               ...(o.with ? { with: o.with } : {}),
+              ...(o.n !== undefined ? { n: o.n } : {}),
+              ...(o.since ? { since: o.since } : {}),
+              ...(o.q ? { q: o.q } : {}),
             },
             whoOf(o),
           ),

@@ -163,6 +163,13 @@ records show done.
    or read, then `add person "<name>" --profile <url>... --aka <channel name>... --why`, and
    follow each profile. `brief.people` counts the documents, kept findings and sites per person.
    A follow no source in the run can do fails and names one that can: add it with `--with`.
+   **Channel survey** (skim a channel as a person does; YouTube on the Data API): `follow <run>
+   <channel> --as posts -n 200 --since 2025-01-01 --why` lists up to 1000 uploads, newest first,
+   back to `--since` (2 units per 50). `--q "<words>"` lists only the channel's uploads that match
+   (100 units per 50). `brief.surveys` ranks each survey by views over the channel's median
+   (`lift`; `channels` gives the median and the posts behind it), the first 20, with `length` to
+   tell a short from a long video. The outliers are the formats that win for that channel. Read
+   the top K with `open <run> --survey <query> --top 5 --why`, or name the hits you pick.
    `documents.toExtract[]` carries the judge's `format` and the criteria; the order is a sort,
    never a skip.
 5. **Check.** Read a sample of the kept findings again against their documents (`show`), a

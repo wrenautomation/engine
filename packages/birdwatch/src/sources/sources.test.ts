@@ -1008,6 +1008,84 @@ describe("youtube data api", () => {
       return new Response(JSON.stringify(json), { status: 200 });
     }) as typeof fetch;
 
+  it("a survey stops at the first upload before since; channel search keeps to the channel", async () => {
+    const calls: string[] = [];
+    const f = (async (url: string) => {
+      const u = new URL(url);
+      const path = u.pathname.split("/").pop() as string;
+      calls.push(
+        `${path} ${["channelId", "q", "publishedAfter", "pageToken"]
+          .flatMap((k) => (u.searchParams.has(k) ? [`${k}=${u.searchParams.get(k)}`] : []))
+          .join("&")}`,
+      );
+      const json =
+        path === "channels"
+          ? { items: [{ id: "UC1" }] }
+          : path === "playlistItems"
+            ? u.searchParams.get("pageToken")
+              ? {
+                  items: [
+                    {
+                      contentDetails: {
+                        videoId: "ccccccccccc",
+                        videoPublishedAt: "2026-09-02T10:00:00Z",
+                      },
+                    },
+                    {
+                      contentDetails: {
+                        videoId: "ddddddddddd",
+                        videoPublishedAt: "2026-08-30T10:00:00Z",
+                      },
+                    },
+                  ],
+                  nextPageToken: "p3",
+                }
+              : {
+                  items: [
+                    {
+                      contentDetails: {
+                        videoId: "aaaaaaaaaaa",
+                        videoPublishedAt: "2026-10-02T10:00:00Z",
+                      },
+                    },
+                    {
+                      contentDetails: {
+                        videoId: "bbbbbbbbbbb",
+                        videoPublishedAt: "2026-09-20T10:00:00Z",
+                      },
+                    },
+                  ],
+                  nextPageToken: "p2",
+                }
+            : path === "search"
+              ? { items: [{ id: { videoId: "eeeeeeeeeee" } }] }
+              : {
+                  items: u.searchParams
+                    .get("id")
+                    ?.split(",")
+                    .map((id) => video(id, "10")),
+                };
+      return new Response(JSON.stringify(json), { status: 200 });
+    }) as typeof fetch;
+    const api = youtubeApi({ key: "k", fetch: f });
+    const got = await api.uploads("https://www.youtube.com/@bee", 100, "2026-09-01");
+    expect(got.map((h) => h.url.slice(-11))).toEqual(["aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc"]);
+    // no third page: the older upload ended the list
+    expect(calls.filter((c) => c.startsWith("playlistItems"))).toEqual([
+      "playlistItems ",
+      "playlistItems pageToken=p2",
+    ]);
+    calls.length = 0;
+    const found = await api.channelSearch(
+      "https://www.youtube.com/@bee",
+      "editing",
+      10,
+      "2026-01-01",
+    );
+    expect(found.map((h) => h.url.slice(-11))).toEqual(["eeeeeeeeeee"]);
+    expect(calls).toContain("search channelId=UC1&q=editing&publishedAfter=2026-01-01T00:00:00Z");
+  });
+
   it("searches, lists a channel's uploads and gives exact counts", async () => {
     const calls: string[] = [];
     const api = youtubeApi({ key: "k", fetch: wire(calls) });
@@ -1051,6 +1129,9 @@ describe("youtube data api", () => {
           throw new QuotaSpent("youtube api search: HTTP 403 quotaExceeded");
         },
         uploads: async () => {
+          throw new Error("unused");
+        },
+        channelSearch: async () => {
           throw new Error("unused");
         },
         videos: async () => [],

@@ -952,6 +952,96 @@ describe("agent commands", () => {
     expect(gaps).toHaveLength(3);
   });
 
+  it("a channel survey: lists a channel by date and words, ranks it over its median, opens the top K", async () => {
+    const asked: unknown[] = [];
+    const views = [100, 200, 300, 400, 500, 600, 5000];
+    const chan: Source = {
+      name: "chan",
+      kind: "both",
+      cost: "free",
+      search: async () => [],
+      follows: (as, url) => as === "posts" && url.startsWith("https://b.example/"),
+      followsBy: true,
+      follow: async (_as, _url, n, by) => {
+        asked.push({ n, ...by });
+        return views.map((v, i) => ({
+          url: `https://b.example/v${i}`,
+          title: `v${i}`,
+          channel: "Bee",
+          metrics: { views: v },
+        }));
+      },
+      open: async (h) => ({ url: h.url, media: "text", text: `page ${h.url}` }),
+    };
+    const plain: Source = {
+      name: "plain",
+      kind: "search",
+      cost: "free",
+      search: async () => [],
+      follows: (as) => as === "posts",
+      follow: async () => [],
+    };
+    const d = { ...deps(), sources: registry(fake, chan, plain) };
+    const { run: runId } = await planRound(d, {
+      ask: { text: "which editing videos win for this channel", kind: "web" },
+      planFile: {
+        ...planFile,
+        sources: ["fake", "chan", "plain"],
+        budget: { ...planFile.budget, reads: 5 },
+      },
+      model: "m",
+    });
+    await expect(
+      follow(d, runId, { as: "posts", url: "https://b.example/", why: "w", n: 5000 }, agent),
+    ).rejects.toThrow("n is 1 to 1000");
+    await expect(
+      follow(d, runId, { as: "posts", url: "https://b.example/", why: "w", since: "May 1" }, agent),
+    ).rejects.toThrow("YYYY-MM-DD");
+    await follow(
+      d,
+      runId,
+      {
+        as: "posts",
+        url: "https://b.example/",
+        why: "survey",
+        n: 200,
+        since: "2026-01-01",
+        q: " editing ",
+      },
+      agent,
+    );
+    // only the source that takes a window and words was asked
+    expect(asked).toEqual([{ n: 200, since: "2026-01-01", q: "editing" }]);
+    const [survey] = (await brief(d, runId)).surveys;
+    expect(survey).toMatchObject({
+      url: "https://b.example/",
+      since: "2026-01-01",
+      q: "editing",
+      listed: 7,
+      channels: [{ channel: "Bee", median: 400, n: 7 }],
+    });
+    expect(survey?.top.map((r) => [r.title, r.lift])).toEqual([
+      ["v6", 12.5],
+      ["v5", 1.5],
+      ["v4", 1.25],
+      ["v3", 1],
+      ["v2", 0.75],
+      ["v1", 0.5],
+      ["v0", 0.25],
+    ]);
+    await expect(
+      open(d, runId, { survey: { query: survey?.query as string, top: 2 } }, agent),
+    ).rejects.toThrow("why");
+    await open(
+      d,
+      runId,
+      { survey: { query: survey?.query as string, top: 2 }, why: "the outliers" },
+      agent,
+    );
+    const after = (await brief(d, runId)).surveys[0]?.top;
+    expect(after?.filter((r) => r.read).map((r) => r.title)).toEqual(["v6", "v5"]);
+  });
+
   it("follows a good page like a person would: its author's posts, pages like it, one person across sites", async () => {
     const asked: string[] = [];
     // Lists b.example's posts; its one post names its channel.

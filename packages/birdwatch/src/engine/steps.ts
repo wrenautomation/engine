@@ -253,7 +253,15 @@ export const fetchStep: StepFn = async (ctx, state) => {
         todo.map((s) =>
           ctx.invoke(s, "search", q.terms, q.id, () =>
             q.follow
-              ? (s.follow as NonNullable<Source["follow"]>)(q.follow.as, q.follow.url, FOLLOW_N)
+              ? (s.follow as NonNullable<Source["follow"]>)(
+                  q.follow.as,
+                  q.follow.url,
+                  q.follow.n ?? FOLLOW_N,
+                  {
+                    ...(q.follow.since ? { since: q.follow.since } : {}),
+                    ...(q.follow.q ? { q: q.follow.q } : {}),
+                  },
+                )
               : (s.search as NonNullable<Source["search"]>)(q),
           ),
         ),

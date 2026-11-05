@@ -35,7 +35,9 @@ export interface Source {
   /** Whether it lists that page's own posts (`posts`) or pages like it (`similar`). */
   follows?(as: FollowAs, url: string): boolean;
   /** The follow's hits, newest or closest first, `n` at most. Throw on failure, like search. */
-  follow?(as: FollowAs, url: string, n: number): Promise<HitViewIn[]>;
+  follow?(as: FollowAs, url: string, n: number, by?: FollowBy): Promise<HitViewIn[]>;
+  /** It takes `since` and `q` on a follow; others refuse a follow with them. */
+  followsBy?: true;
   /**
    * Whether this source opens that URL at all (a YouTube page, an http(s) page). The read step
    * asks before a call, so a source that was never going to open it writes no spend. Absent: it
@@ -109,3 +111,11 @@ export const searchersFor = (
 
 /** How many hits a follow lists. */
 export const FOLLOW_N = 30;
+/** The most a follow lists: a channel survey reads its whole upload list up to this. */
+export const FOLLOW_MAX = 1000;
+
+/** A follow's window and words: posts on or after `since`, matching `q`. */
+export interface FollowBy {
+  since?: string;
+  q?: string;
+}

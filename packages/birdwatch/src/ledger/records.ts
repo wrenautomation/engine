@@ -81,7 +81,20 @@ export const QueryRecord = Envelope.extend({ type: z.literal("query") })
   .extend({
     /** A follow's start: the URL, what to list, and the document that led there. */
     follow: z
-      .object({ url: z.string().min(1), as: FollowAs, document: z.string().optional() })
+      .object({
+        url: z.string().min(1),
+        as: FollowAs,
+        document: z.string().optional(),
+        /** How many to list; FOLLOW_N when absent. */
+        n: z.number().int().positive().optional(),
+        /** Posts on or after this day (YYYY-MM-DD). */
+        since: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .optional(),
+        /** Only posts that match these words, inside the channel. */
+        q: z.string().min(1).optional(),
+      })
       .optional(),
   });
 export type QueryRecord = z.infer<typeof QueryRecord>;

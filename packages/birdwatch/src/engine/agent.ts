@@ -19,6 +19,7 @@ import {
   type From,
   type HitRecord,
   LedgerRecord,
+  type QueryRecord,
   SOURCE_CLASSES,
   type SourceClass,
   type Step,
@@ -47,7 +48,7 @@ import {
   treeOf,
   type YieldRow,
 } from "./plan.js";
-import { type Deps, searchersFor } from "./ports.js";
+import { type Deps, FOLLOW_MAX, searchersFor } from "./ports.js";
 import { type Recalled, recall } from "./recall.js";
 import {
   checkCount,
@@ -325,6 +326,12 @@ export interface FollowInput {
   document?: string;
   /** Follow sources this machine has that the run lacks: they join to follow, never to search. */
   with?: readonly string[];
+  /** How many to list (FOLLOW_N when absent, FOLLOW_MAX at most): a survey lists a channel whole. */
+  n?: number;
+  /** Posts on or after this day (YYYY-MM-DD). */
+  since?: string;
+  /** Only posts that match these words, inside the channel. */
+  q?: string;
 }
 
 /**
@@ -350,11 +357,21 @@ export async function follow(deps: Deps, run: string, input: FollowInput, who: W
     if (!s.follow) throw new Error(`${n} follows nothing`);
   }
   const names = [...reach, ...joining];
-  const followers = names.filter((n) => deps.sources.get(n)?.follows?.(input.as, url));
+  if (input.n !== undefined && (!Number.isInteger(input.n) || input.n < 1 || input.n > FOLLOW_MAX))
+    throw new Error(`follow: n is 1 to ${FOLLOW_MAX}`);
+  if (input.since && !/^\d{4}-\d{2}-\d{2}$/.test(input.since))
+    throw new Error("follow: since is YYYY-MM-DD");
+  const by = Boolean(input.since || input.q?.trim());
+  const followers = names.filter((n) => {
+    const s = deps.sources.get(n);
+    return s?.follows?.(input.as, url) && (!by || s.followsBy);
+  });
   if (!followers.length) {
-    const here = [...deps.sources.values()].filter((s) => s.follows?.(input.as, url));
+    const here = [...deps.sources.values()].filter(
+      (s) => s.follows?.(input.as, url) && (!by || s.followsBy),
+    );
     throw new Error(
-      `follow: no source in the run lists ${input.as} of ${url}${here.length ? `; --with ${here.map((s) => s.name).join(" ")}` : ""}`,
+      `follow: no source in the run lists ${input.as} of ${url}${by ? " by date or words" : ""}${here.length ? `; --with ${here.map((s) => s.name).join(" ")}` : ""}`,
     );
   }
   if (joining.length) {
@@ -367,7 +384,14 @@ export async function follow(deps: Deps, run: string, input: FollowInput, who: W
       kind: snapshot.ask.kind,
       terms: `${input.as} of ${url}`,
       why: input.why,
-      follow: { url, as: input.as, ...(doc ? { document: doc.id } : {}) },
+      follow: {
+        url,
+        as: input.as,
+        ...(doc ? { document: doc.id } : {}),
+        ...(input.n ? { n: input.n } : {}),
+        ...(input.since ? { since: input.since } : {}),
+        ...(input.q?.trim() ? { q: input.q.trim() } : {}),
+      },
     },
     who,
   );
@@ -669,6 +693,8 @@ export interface OpenInput {
    * shows, frame by frame. Costly: only for a hit worth it, and the why says so.
    */
   see?: boolean;
+  /** The first `top` uploads of a channel survey (a posts follow's query), by its rank. */
+  survey?: { query: string; top: number };
 }
 
 /** Kept hits of any round with no document yet. */
@@ -688,6 +714,19 @@ export async function open(deps: Deps, run: string, input: OpenInput, who: Who):
   const state = await stateOf(deps, run);
   planned(state);
   const named = [...(input.hits ?? [])];
+  if (input.survey) {
+    const { query, top } = input.survey;
+    if (!Number.isInteger(top) || top < 1) throw new Error("open --top: a whole number from 1");
+    const q = state.queries.find((x) => x.id === query);
+    if (!q) throw new Error(`no query ${query}`);
+    const base = baselines(await deps.ledger.scan({ type: "hit" }));
+    named.push(
+      ...surveyOf(state, base, q)
+        .ranked.slice(0, top)
+        .map((r) => r.hit),
+    );
+    if (!named.length) throw new Error(`survey ${query} listed nothing`);
+  }
   if ((named.length || input.urls?.length) && !input.why?.trim())
     throw new Error("open: why read these?");
   if (input.see && !named.length && !input.urls?.length)
@@ -1309,6 +1348,8 @@ export interface Brief {
    * median and the posts behind it (from 5 up). The base each hit's `lift` reads against.
    */
   authors: ({ channel: string } & Baseline)[];
+  /** Each posts follow (a channel survey): its uploads ranked by views over the channel's median, the first SURVEY_TOP. */
+  surveys: SurveyView[];
   documents: {
     /**
      * Read order; the ask's criteria first when it has some (the mean of their yes odds), else as
@@ -1333,6 +1374,81 @@ export interface Brief {
 const mean = (xs: readonly number[]) => xs.reduce((a, x) => a + x, 0) / xs.length;
 
 /** An uncalled hit's place in the brief: facets it serves, then the ask's criteria. No quality score. */
+/** How many of a survey's uploads the brief shows. */
+export const SURVEY_TOP = 20;
+
+export interface SurveyRow {
+  hit: string;
+  url: string;
+  title?: string;
+  date?: string;
+  /** Seconds: tells a short from a long video. */
+  length?: number;
+  views?: number;
+  /** Views over the channel's median, every run. */
+  lift?: number;
+  read: boolean;
+}
+
+export interface SurveyView {
+  query: string;
+  url: string;
+  since?: string;
+  q?: string;
+  /** Uploads the follow listed. */
+  listed: number;
+  /** Each channel's median views over every run, and the posts behind it (from 5 up). */
+  channels: { channel: string; median: number; n: number }[];
+  /** Views over the channel's median, high first; uploads with no median after, by views. */
+  top: SurveyRow[];
+}
+
+/** A posts follow's uploads, ranked by views over the channel's median, else by views. */
+export function surveyOf(
+  state: RunState,
+  base: ReadonlyMap<string, Baseline>,
+  query: QueryRecord,
+): Omit<SurveyView, "top"> & { ranked: SurveyRow[] } {
+  const f = query.follow;
+  if (!f || f.as !== "posts") throw new Error(`${query.id} is not a posts follow`);
+  const qOf = queriesOf(state);
+  const read = new Set(state.documents.map((d) => d.hit));
+  const hits = state.hits.filter((h) => qOf.get(h.id)?.has(query.id));
+  const rows = hits.map((h): SurveyRow => {
+    const lift = liftOf(h, base)?.views;
+    return {
+      hit: h.id,
+      url: h.url,
+      ...(h.title ? { title: h.title } : {}),
+      ...(h.date ? { date: h.date } : {}),
+      ...(h.length !== undefined ? { length: h.length } : {}),
+      ...(h.metrics?.views !== undefined ? { views: h.metrics.views } : {}),
+      ...(lift !== undefined ? { lift } : {}),
+      read: read.has(h.id),
+    };
+  });
+  const ranked = rows.sort((a, b) =>
+    a.lift !== undefined || b.lift !== undefined
+      ? (b.lift ?? -1) - (a.lift ?? -1)
+      : (b.views ?? -1) - (a.views ?? -1),
+  );
+  const channels = [...new Set(hits.flatMap((h) => (h.channel ? [h.channel] : [])))].flatMap(
+    (channel) => {
+      const v = base.get(channel)?.views;
+      return v ? [{ channel, median: v.median, n: v.n }] : [];
+    },
+  );
+  return {
+    query: query.id,
+    url: f.url,
+    ...(f.since ? { since: f.since } : {}),
+    ...(f.q ? { q: f.q } : {}),
+    listed: hits.length,
+    channels,
+    ranked,
+  };
+}
+
 const hitRank = (h: { facets: string[]; judge?: { criteria?: Record<string, number> } }) =>
   h.facets.length + (h.judge?.criteria ? mean(Object.values(h.judge.criteria)) : 0);
 
@@ -1492,6 +1608,12 @@ export async function brief(deps: Deps, run: string): Promise<Brief> {
       .flatMap((channel) => {
         const b = base.get(channel);
         return b ? [{ channel, ...b }] : [];
+      }),
+    surveys: state.queries
+      .filter((q) => q.follow?.as === "posts")
+      .map((q) => {
+        const { ranked, ...rest } = surveyOf(state, base, q);
+        return { ...rest, top: ranked.slice(0, SURVEY_TOP) };
       }),
     documents: {
       toExtract: unjudged(state)

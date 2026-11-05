@@ -55,8 +55,13 @@ export const videoHit = (v: Video): HitViewIn => {
 export interface YoutubeApi {
   /** `preset`: the grammar's sort and window (`top-week`), as `order` and `publishedAfter`. */
   search(terms: string, n: number, preset?: string): Promise<HitViewIn[]>;
-  /** A channel's newest uploads; `channel` is a channel URL, an @handle page or a video URL. */
-  uploads(channel: string, n: number): Promise<HitViewIn[]>;
+  /**
+   * A channel's newest uploads; `channel` is a channel URL, an @handle page or a video URL.
+   * `since` (YYYY-MM-DD) stops at the first older upload. 2 units per 50.
+   */
+  uploads(channel: string, n: number, since?: string): Promise<HitViewIn[]>;
+  /** Uploads of one channel that match `q`, most relevant first: 100 units per 50. */
+  channelSearch(channel: string, q: string, n: number, since?: string): Promise<HitViewIn[]>;
   videos(ids: readonly string[]): Promise<HitViewIn[]>;
 }
 
@@ -150,15 +155,16 @@ export function youtubeApi(o: {
       });
       return videos((page.items ?? []).flatMap((i) => (i.id?.videoId ? [i.id.videoId] : [])));
     },
-    async uploads(url, n) {
+    async uploads(url, n, since) {
       const channel = await channelOf(url);
       // a channel's uploads playlist is its id with UC -> UU
       const playlist = channel.replace(/^UC/, "UU");
       const ids: string[] = [];
       let pageToken: string | undefined;
-      while (ids.length < n) {
+      let older = false;
+      while (ids.length < n && !older) {
         const page = await get<{
-          items?: { contentDetails?: { videoId?: string } }[];
+          items?: { contentDetails?: { videoId?: string; videoPublishedAt?: string } }[];
           nextPageToken?: string;
         }>("playlistItems", {
           part: "contentDetails",
@@ -166,7 +172,38 @@ export function youtubeApi(o: {
           maxResults: String(Math.min(50, n - ids.length)),
           ...(pageToken ? { pageToken } : {}),
         });
-        ids.push(...(page.items ?? []).flatMap((i) => i.contentDetails?.videoId ?? []));
+        for (const i of page.items ?? []) {
+          const at = i.contentDetails?.videoPublishedAt;
+          // newest first: the first upload before `since` ends the list
+          if (since && at && at.slice(0, 10) < since) {
+            older = true;
+            break;
+          }
+          if (i.contentDetails?.videoId) ids.push(i.contentDetails.videoId);
+        }
+        pageToken = page.nextPageToken;
+        if (!pageToken) break;
+      }
+      return videos(ids.slice(0, n));
+    },
+    async channelSearch(url, q, n, since) {
+      const channel = await channelOf(url);
+      const ids: string[] = [];
+      let pageToken: string | undefined;
+      while (ids.length < n) {
+        const page = await get<{
+          items?: { id?: { videoId?: string } }[];
+          nextPageToken?: string;
+        }>("search", {
+          part: "id",
+          type: "video",
+          channelId: channel,
+          q,
+          maxResults: String(Math.min(50, n - ids.length)),
+          ...(since ? { publishedAfter: `${since}T00:00:00Z` } : {}),
+          ...(pageToken ? { pageToken } : {}),
+        });
+        ids.push(...(page.items ?? []).flatMap((i) => i.id?.videoId ?? []));
         pageToken = page.nextPageToken;
         if (!pageToken) break;
       }
