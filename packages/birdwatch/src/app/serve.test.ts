@@ -2,7 +2,7 @@ import { fakeModel } from "@wrenautomation/models";
 import { describe, expect, it } from "vitest";
 import { claimExtractor } from "../document/index.js";
 import { add, open, planRound, search, type Who } from "../engine/agent.js";
-import type { ResearchMap } from "../engine/map.js";
+import type { ResearchWeb } from "../engine/web.js";
 import { defaultPlanFile } from "../engine/plan.js";
 import { type Deps, registry, type Source } from "../engine/ports.js";
 import type { RunRow, RunView } from "../engine/view.js";
@@ -142,9 +142,9 @@ describe("birdwatch serve", () => {
     await reader.cancel();
   });
 
-  it("draws every run as one map, named by its ledger folder", async () => {
+  it("draws every run as one web, named by its ledger folder", async () => {
     const { run, one, app } = await setup();
-    const m = (await (await app.request("/map")).json()) as ResearchMap;
+    const m = (await (await app.request("/web")).json()) as ResearchWeb;
     expect(m.nodes.find((n) => n.id === run)).toMatchObject({ kind: "run", group: "11-05/test" });
     expect(m.nodes.find((n) => n.id === one)).toMatchObject({ kind: "page", read: true });
     expect(groupOf("/a/tasks/docs/11-05/editing-survey/")).toBe("11-05/editing-survey");

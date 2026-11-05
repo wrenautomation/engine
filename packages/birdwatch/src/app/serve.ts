@@ -1,6 +1,6 @@
 /**
  * `birdwatch serve`: ledgers read over HTTP for a viewer. JSON for the run list, a run's view,
- * a page's text and the map of every run; a server-sent event per run each time its records change.
+ * a page's text and the web of every run; a server-sent event per run each time its records change.
  * Read only, on 127.0.0.1, for the origins named (the portal, any localhost): the CLI stays the one
  * writer. More than one ledger: each run is read with its own folder's deps (its yield, its baselines).
  */
@@ -9,7 +9,7 @@ import { Hono } from "hono";
 import { compress } from "hono/compress";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
-import { mapOf, type ResearchMap } from "../engine/map.js";
+import { webOf, type ResearchWeb } from "../engine/web.js";
 import type { Deps } from "../engine/ports.js";
 import { fold, type RunState } from "../engine/state.js";
 import { type RunRow, type RunView, rowOf, runView } from "../engine/view.js";
@@ -21,14 +21,14 @@ const LOCAL = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 /** A run whose records changed: from a folder watch, or a test. */
 export type Changes = (on: (run: string) => void) => () => void;
 
-/** One ledger folder: its name on the map, its deps, its runs. */
+/** One ledger folder: its name on the web, its deps, its runs. */
 export interface LedgerSet {
   group: string;
   deps: Deps;
   runs: () => Promise<string[]>;
 }
 
-/** A ledger root's name on the map: its last two folders ("11-05/editing-survey"). */
+/** A ledger root's name on the web: its last two folders ("11-05/editing-survey"). */
 export const groupOf = (root: string) =>
   root.replace(/\/+$/, "").split(/[\\/]/).slice(-2).join("/");
 
@@ -75,11 +75,11 @@ export function serveApp(o: {
   const views = new Map<string, Promise<RunView>>();
   const states = new Map<string, Promise<RunState | null>>();
   const owner = new Map<string, LedgerSet>();
-  let map: Promise<ResearchMap> | null = null;
+  let web: Promise<ResearchWeb> | null = null;
   o.changes((run) => {
     views.delete(run);
     states.delete(run);
-    map = null;
+    web = null;
   });
   const cached = <T>(m: Map<string, Promise<T>>, run: string, make: () => Promise<T>) => {
     let v = m.get(run);
@@ -148,19 +148,19 @@ export function serveApp(o: {
     if (d?.type !== "document") return c.json({ error: "no such document" }, 404);
     return c.json({ id: d.id, url: d.url, title: d.title ?? null, media: d.media, text: d.text });
   });
-  app.use("/map", compress());
-  // Every run as one map, positions fixed by the records (engine/map.ts).
-  app.get("/map", async (c) => {
-    map ??= all().then(async (runs) => {
+  app.use("/web", compress());
+  // Every run as one web, positions fixed by the records (engine/web.ts).
+  app.get("/web", async (c) => {
+    web ??= all().then(async (runs) => {
       const got = await Promise.all(
         runs.map(async ({ run, set }) => ({ group: set.group, state: await stateOf(run) })),
       );
-      return mapOf(got.flatMap((g) => (g.state ? [{ group: g.group, state: g.state }] : [])));
+      return webOf(got.flatMap((g) => (g.state ? [{ group: g.group, state: g.state }] : [])));
     });
-    map.catch(() => {
-      map = null;
+    web.catch(() => {
+      web = null;
     });
-    return c.json(await map);
+    return c.json(await web);
   });
   // One event per changed run; the viewer fetches what it shows again.
   app.get("/events", (c) =>

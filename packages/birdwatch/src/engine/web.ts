@@ -1,15 +1,15 @@
 /**
- * The research map (wren designs/2026-11-05-research-map.md): every run as an island, a radial tree
+ * The research web (wren designs/2026-11-05-research-web.md): every run as an island, a radial tree
  * run → query → site or channel → page → finding; a site or channel two runs used is a hub between
- * them. Positions are a pure function of the records: the same ledger draws the same map.
+ * them. Positions are a pure function of the records: the same ledger draws the same web.
  */
 import { kept as keptOf, queriesOf, type RunState } from "./state.js";
 
-export type MapKind = "run" | "query" | "source" | "hub" | "page" | "finding";
+export type WebKind = "run" | "query" | "source" | "hub" | "page" | "finding";
 
-export interface MapNode {
+export interface WebNode {
   id: string;
-  kind: MapKind;
+  kind: WebKind;
   label: string;
   x: number;
   y: number;
@@ -31,20 +31,20 @@ export interface MapNode {
   key?: string;
 }
 
-export interface MapEdge {
+export interface WebEdge {
   source: string;
   target: string;
   kind: "tree" | "hub";
 }
 
-export interface ResearchMap {
+export interface ResearchWeb {
   v: 1;
-  nodes: MapNode[];
-  edges: MapEdge[];
+  nodes: WebNode[];
+  edges: WebEdge[];
 }
 
 /** Each kind's ring, before an island grows to fit its leaves: a folded page keeps the page ring. */
-const RING: Record<Exclude<MapKind, "hub">, number> = {
+const RING: Record<Exclude<WebKind, "hub">, number> = {
   run: 0,
   query: 90,
   source: 190,
@@ -56,7 +56,7 @@ const LEAF_ARC = 9;
 const GAP = 160;
 /** Islands per row before a group wraps. */
 const ROW = 6;
-const SIZE: Record<MapKind, number> = {
+const SIZE: Record<WebKind, number> = {
   run: 14,
   hub: 8,
   query: 5,
@@ -66,7 +66,7 @@ const SIZE: Record<MapKind, number> = {
 };
 
 interface TreeNode {
-  node: Omit<MapNode, "x" | "y">;
+  node: Omit<WebNode, "x" | "y">;
   children: TreeNode[];
   leaves: number;
 }
@@ -197,7 +197,7 @@ function place(
   cx: number,
   cy: number,
   scale: number,
-  out: { nodes: MapNode[]; edges: MapEdge[] },
+  out: { nodes: WebNode[]; edges: WebEdge[] },
 ) {
   const walk = (n: TreeNode, from: number, to: number, parent: string | null) => {
     const mid = (from + to) / 2;
@@ -215,12 +215,12 @@ function place(
 }
 
 /**
- * The map of every run given: islands in rows by group (ledger folder, sorted), runs in start
+ * The web of every run given: islands in rows by group (ledger folder, sorted), runs in start
  * order, ROW per row; hubs at the middle of the runs they join. A new run in the last group moves
  * no older node.
  */
-export function mapOf(runs: readonly { group: string; state: RunState }[]): ResearchMap {
-  const out: { nodes: MapNode[]; edges: MapEdge[] } = { nodes: [], edges: [] };
+export function webOf(runs: readonly { group: string; state: RunState }[]): ResearchWeb {
+  const out: { nodes: WebNode[]; edges: WebEdge[] } = { nodes: [], edges: [] };
   const started = (s: RunState) => s.records[0]?.at ?? "";
   const ordered = [...runs].sort(
     (a, b) =>

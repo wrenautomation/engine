@@ -53,7 +53,7 @@ import {
   tunePlan,
   type Who,
 } from "../engine/index.js";
-import { mapOf } from "../engine/map.js";
+import { webOf } from "../engine/web.js";
 import {
   type AskKind,
   Criterion,
@@ -1081,7 +1081,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
 
   common(program.command("serve"))
     .description(
-      "ledgers over HTTP for a viewer, read only: GET /runs, /runs/:run, /runs/:run/documents/:doc, /map (every run as one map), and /events (one event per changed run)",
+      "ledgers over HTTP for a viewer, read only: GET /runs, /runs/:run, /runs/:run/documents/:doc, /web (every run as one web), and /events (one event per changed run)",
     )
     .option("--port <n>", "the port", (v) => Number(v), SERVE_PORT)
     .option("--host <host>", "the address to bind", "127.0.0.1")
@@ -1103,12 +1103,12 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       },
     );
 
-  common(program.command("map"))
+  common(program.command("web"))
     .description(
-      "every run as one map: nodes (run, query, site or channel, page, finding, hub) with fixed positions, and edges",
+      "every run as one web: nodes (run, query, site or channel, page, finding, hub) with fixed positions, and edges",
     )
     .option("--also <dir...>", "more ledger folders to read beside --ledger")
-    .option("--json", "the map as JSON (the default prints counts)")
+    .option("--json", "the web as JSON (the default prints counts)")
     .action(async (o: Common & { also?: string[]; json?: boolean }) => {
       const sets = await setsOf(o);
       const seen = new Set<string>();
@@ -1120,7 +1120,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
           const records = await set.deps.ledger.trace(run);
           if (records.length) runs.push({ group: set.group, state: fold(run, records) });
         }
-      const m = mapOf(runs);
+      const m = webOf(runs);
       if (o.json) return void console.log(JSON.stringify(m));
       const count = new Map<string, number>();
       for (const n of m.nodes) count.set(n.kind, (count.get(n.kind) ?? 0) + 1);

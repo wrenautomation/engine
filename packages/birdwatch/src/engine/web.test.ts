@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LedgerRecord } from "../ledger/records.js";
-import { mapOf } from "./map.js";
+import { webOf } from "./web.js";
 import { fold } from "./state.js";
 
 const head = (run: string, id: string, at: string) => ({
@@ -50,9 +50,9 @@ const a = runOf("A", "2026-11-01T10:00:00Z", ["https://a.com/1", "https://shared
 const b = runOf("B", "2026-11-01T11:00:00Z", ["https://www.shared.com/y", "https://b.com/2"]);
 const c = runOf("C", "2026-11-02T09:00:00Z", ["https://c.com/1"]);
 
-describe("mapOf", () => {
+describe("webOf", () => {
   it("draws run, query, source, page and finding, with a read page solid", () => {
-    const m = mapOf([{ group: "11-01", state: a }]);
+    const m = webOf([{ group: "11-01", state: a }]);
     const kinds = m.nodes.map((n) => n.kind);
     expect(kinds.filter((k) => k === "run")).toHaveLength(1);
     expect(kinds.filter((k) => k === "source")).toHaveLength(0);
@@ -67,12 +67,12 @@ describe("mapOf", () => {
     expect(m.edges.filter((e) => e.kind === "tree")).toHaveLength(m.nodes.length - 1);
   });
 
-  it("is stable: the same runs in any order draw the same map", () => {
-    const one = mapOf([
+  it("is stable: the same runs in any order draw the same web", () => {
+    const one = webOf([
       { group: "11-01", state: a },
       { group: "11-01", state: b },
     ]);
-    const two = mapOf([
+    const two = webOf([
       { group: "11-01", state: b },
       { group: "11-01", state: a },
     ]);
@@ -80,11 +80,11 @@ describe("mapOf", () => {
   });
 
   it("a new run moves no older node", () => {
-    const before = mapOf([
+    const before = webOf([
       { group: "11-01", state: a },
       { group: "11-01", state: b },
     ]);
-    const after = mapOf([
+    const after = webOf([
       { group: "11-01", state: a },
       { group: "11-01", state: b },
       { group: "11-02", state: c },
@@ -94,7 +94,7 @@ describe("mapOf", () => {
   });
 
   it("a site two runs used is a hub between them; a site one run used is not", () => {
-    const m = mapOf([
+    const m = webOf([
       { group: "11-01", state: a },
       { group: "11-01", state: b },
     ]);
@@ -114,14 +114,14 @@ describe("mapOf", () => {
       ["https://youtube.com/watch?v=1", "https://youtube.com/watch?v=2"],
       "Ali Abdaal",
     );
-    const m = mapOf([{ group: "11-01", state: v }]);
+    const m = webOf([{ group: "11-01", state: v }]);
     const source = m.nodes.find((n) => n.kind === "source");
     expect(source).toMatchObject({ label: "Ali Abdaal", key: "channel:Ali Abdaal" });
     expect(m.edges.filter((e) => e.source === source?.id)).toHaveLength(2);
   });
 
   it("keeps islands apart: no two runs overlap", () => {
-    const m = mapOf([
+    const m = webOf([
       { group: "11-01", state: a },
       { group: "11-01", state: b },
       { group: "11-02", state: c },
