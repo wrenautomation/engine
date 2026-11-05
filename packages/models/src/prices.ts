@@ -89,6 +89,20 @@ export const MODEL_PRICES: readonly ModelPrice[] = [
     tiers: [{ upTo: null, rate: { input: 0.75, output: 3.75 } }],
   },
   {
+    // Google's page, read 2026-11-05; same lower rate to 2026-12-31 as 3.8.
+    model: "gemini-3.6-flash",
+    name: "Gemini 3.6 Flash",
+    vendor: "google",
+    tiers: [{ upTo: null, rate: { input: 0.75, output: 3.75 } }],
+  },
+  {
+    // Not on Google's page 2026-11-05; aggregators quote 3.8's rate.
+    model: "gemini-3.7-flash",
+    name: "Gemini 3.7 Flash",
+    vendor: "google",
+    tiers: [{ upTo: null, rate: { input: 0.75, output: 3.75 } }],
+  },
+  {
     model: "gemini-3.5-flash",
     name: "Gemini 3.5 Flash",
     vendor: "google",
