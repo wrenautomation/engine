@@ -9,10 +9,10 @@ import { Hono } from "hono";
 import { compress } from "hono/compress";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
-import { webOf, type ResearchWeb } from "../engine/web.js";
 import type { Deps } from "../engine/ports.js";
 import { fold, type RunState } from "../engine/state.js";
 import { type RunRow, type RunView, rowOf, runView } from "../engine/view.js";
+import { type ResearchWeb, webOf } from "../engine/web.js";
 
 export const SERVE_PORT = 4747;
 export const SERVE_ORIGINS = ["https://app.wrenautomation.com"];
