@@ -15,8 +15,14 @@ import {
 } from "@wrenautomation/models";
 import { clock, runFor, TOOL_MS } from "./tools.js";
 
-/** Newest first: a busy or refused model hands the call to the next. */
-export const GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"];
+/** Newest first: a busy or refused model hands the call to the next. Free-tier quota counts per model. */
+export const GEMINI_MODELS = [
+  "gemini-3.8-flash",
+  "gemini-3.7-flash",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash",
+  "gemini-3.5-flash-lite",
+];
 /** One call gives up after this long: a stalled socket would wait out undici's 5 minutes. */
 const CALL_MS = 180_000;
 /** One read, every model, key and pass together, gives up after this long. */
@@ -33,7 +39,7 @@ export const SHOWN = (start: number, paraphrase: boolean) =>
 
 /**
  * The video reader on a Gemini key ring: `GEMINI_MODELS` in turn, each over every key that still
- * works, three passes while they only say "later". Null when no key works: a revoked fleet must
+ * works, five passes while they only say "later" (waits 2, 4, 8, 16 s). Null when no key works: a revoked fleet must
  * not get a 14 MB inline body posted to each key.
  */
 export async function geminiVideo(
@@ -52,7 +58,7 @@ export function geminiReader(keys: readonly string[], o: { fetch?: typeof fetch 
   const wire = o.fetch ? { fetch: o.fetch } : {};
   return fallback(
     GEMINI_MODELS.map((model) => gemini({ key: keys, model, limitMs: CALL_MS, ...wire })),
-    { passes: 3 },
+    { passes: 5 },
   );
 }
 
