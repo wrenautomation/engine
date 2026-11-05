@@ -16,6 +16,7 @@ a new price goes here, never in the caller. No guard enforces this; this file an
 | `@wrenautomation/models/command` | a shell command as a model (`commandModel`), Claude Code on the subscription (`claudeCode`) | Node |
 | `@wrenautomation/models/spec` | a model from a setting string: `modelFromSpec("anthropic:sonnet", env)` | Node |
 | `@wrenautomation/models/judge` | a judge: typed questions (`noul` yes or no, `choice`, `score`) answered with each label's probability, no text; `jevJudge` (TypeSafe's Jev, `TYPESAFE_API_KEY`; Laya with `TYPESAFE_BASE_URL`), `judgeFromSpec("jev", env)`, `fakeJudge`, `judgeFailure`, `top`. A hint or a router, never the final call | Node, Workers |
+| `@wrenautomation/models/batch` | calls nobody waits on: `anthropicBatch({key, model})` → `batch(items)` gives a batch id, `batchResults(id)` says running or gives each item's reply. Anthropic Message Batches: half price, answers within 24 h. The caller keeps the id and parses each reply | Node |
 
 ## Use
 
