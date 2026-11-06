@@ -239,8 +239,11 @@ they did not ask for.
 lines as they wrote them and run `open <run> --lines <file> --human <name>`, or
 `open --ask "<their ask>" --lines <file> --human <name>` for a new run. Each line is a kept
 hit under their why, read at once; no search round comes first. A line with no why takes
-`--why`, their words only. A pasted find is a seed, not a small run: when they ask for more
-("his channel, his services, his sites, his themes"), widen the same run with `follow --from
+`--why`, their words only. How far to go is theirs to say. "Just read it" or "watch it and
+do nothing more": read it, write its findings, then `add edge stop` with a why that says they
+asked for this source only. No search, no follow, no pattern. `recall` finds those findings in
+later runs. Otherwise a pasted find is a seed, not a small run: when they ask for more ("his
+channel, his services, his sites, his themes"), widen the same run with `follow --from
 <document> --as posts`, a channel survey, `open --url` on the sites the page links, and a
 query tree on what is left. One find or fifty, the steps after the read are the same.
 
