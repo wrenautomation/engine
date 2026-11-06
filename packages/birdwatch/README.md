@@ -58,6 +58,8 @@ birdwatch search 01M5YS... < tree.json                 # after triage, the same 
 birdwatch add call 01M5YS... 01M5YT... keep --why "a survey with numbers"               # triage: a hit kept
 birdwatch add call 01M5YS... 01M5YU... drop --why "a vendor page"
 birdwatch open 01M5YS... 01M5YT... --url https://a.example/report --why "numbers"      # keep these and read them
+birdwatch open 01M5YS... --lines finds.txt --human                                     # a person's pasted finds, a URL and its why a line: kept and read, no search
+pbpaste | birdwatch open --ask "how he sells editing" --lines - --human                 # the same paste as a new run
 birdwatch open 01M5YS... --with ladder                                                  # an opener the run lacks joins it, to open only
 birdwatch show 01M5YS... 01M5YV...                     # a document's text, for the agent to read itself
 birdwatch add finding 01M5YS... 01M5YV... --text "412 firms were surveyed." --quote "A 2025 survey of 412 firms"
@@ -133,7 +135,7 @@ the bulk (extract, check) only; the agent decides. Sources come
 from the environment: `SEARXNG_URL` (and `SEARXNG_TOKEN`, a bearer, for an instance behind a
 proxy), `EXA_API_KEY` (or `_1..n`), `YOUTUBE_API_KEY` (the YouTube Data API: search, a channel's
 uploads and exact counts; without it yt-dlp lists), `ANTHROPIC_API_KEY` for `youtube-see`
-(Claude reads a video's frames, on `open --see` only, 6 videos a run at most; each download is
+(Claude reads a video's frames, on `open --see` only; each download is
 kept in `BIRDWATCH_MEDIA`, default `~/.cache/birdwatch/media`, 5 GB, oldest out first) and
 `COHERE_API_KEY` to hear a video whose captions fail there,
 `BIRDWATCH_CONTACT` for the fetcher and `arxiv` (no contact, no page opens; `OPENALEX_API_KEY`, free, gives `arxiv` its own citation budget, and `SEMANTIC_SCHOLAR_API_KEY`, free, its own rate for `--as refs`; `--sources arxiv` names it, since no stock plan file does), and for the ladder either

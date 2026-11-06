@@ -6,6 +6,7 @@ export * from "./agent.js";
 export * from "./canonical.js";
 export * from "./context.js";
 export * from "./cost.js";
+export * from "./finds.js";
 export * from "./judge.js";
 export * from "./people.js";
 export * from "./plan.js";

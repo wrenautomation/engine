@@ -40,7 +40,9 @@ birdwatch search <run> < tree.json                      # the round's query tree
 birdwatch add call <run> <hit> keep|drop --why "<why>"  # triage, one per hit; the last call wins, a flip warns, a person's call stands over yours
 echo '[{"on":"<hit>","verdict":"keep","why":".."}]' | birdwatch add call <run>   # many calls, one process
 birdwatch open <run> [<hit>...] [--url <url>...] --why "<why>"   # reads the named; no names: every kept hit without a document
-birdwatch open <run> <hit>... --see --why "<why>"         # what a video shows, frame by frame: only a strong video whose captions lean on the screen
+birdwatch open <run> <hit>... --see --why "<why>"         # what a video shows, frame by frame: a video whose captions lean on the screen
+birdwatch open <run> --lines <file|-> --human           # a person's pasted finds, a URL and its why a line: a kept hit each under its own why, read with no search
+birdwatch open --ask "<the ask>" --lines <file|-> --human   # the same paste as a new run; prints the run id
 birdwatch open <run> --with <source>                    # an opener `sources` lists but the run lacks (a ladder that came later); it joins to open, never to search
 birdwatch show <run> <document> [--head N]              # the page's text: read it yourself
 birdwatch add finding <run> <document> --text "<sentence>" --quote "<quote on the page>"
@@ -135,11 +137,11 @@ records show done.
    differently: keep it, and say so in the why. Open every kept video: its words cost nothing (captions; after a caption 429, Cohere hears the audio).
 4. **Read.** `open`, then `show` each document and read it. A video that failed to read
    stays kept and unread: `open <run> <hit> --why` retries that one alone. **See a video** (`open <run> <hit>
-   --see --why`) only when all three hold: its metrics or lift put it among the run's strongest,
-   it answers the ask, and its captions lean on the screen ("as you can see", "this slide",
-   "look at this", a demo or chart the words do not describe) or leave the point unsaid. It
-   downloads the video, and Claude reads each frame: the text, then what it shows (~$0.30 for
-   10 minutes; 6 videos a run at most). The why names the test it passed. The read is a second document on the hit. Write each fact that answers the
+   --see --why`) when both hold: it answers the ask, and its captions lean on the screen
+   ("as you can see", "this slide", "look at this", a demo or chart the words do not describe)
+   or leave the point unsaid. Captions first, frames only where the words fall short; no cap a
+   run. It downloads the video, and Claude reads each frame: the text, then what it shows
+   (~$0.30 for 10 minutes). The why names what the captions miss. The read is a second document on the hit. Write each fact that answers the
    ask as `add finding` with its exact quote; a quote that is not on the page fails. Say what
    the page lacks as `add gap --on <document>`. For a run too big to read (tens of pages),
    `extract` puts a model behind the same gate; then judge its findings in
@@ -232,6 +234,15 @@ shown first in every later brief and snapshot. Their keep or drop on a hit or fi
 
 When they ask a question mid-run, answer from `brief` (kept findings, gaps, cost); run no step
 they did not ask for.
+
+**Their finds.** When they paste sources (videos, posts, sites, each with their why), save the
+lines as they wrote them and run `open <run> --lines <file> --human <name>`, or
+`open --ask "<their ask>" --lines <file> --human <name>` for a new run. Each line is a kept
+hit under their why, read at once; no search round comes first. A line with no why takes
+`--why`, their words only. A pasted find is a seed, not a small run: when they ask for more
+("his channel, his services, his sites, his themes"), widen the same run with `follow --from
+<document> --as posts`, a channel survey, `open --url` on the sites the page links, and a
+query tree on what is left. One find or fifty, the steps after the read are the same.
 
 ## Records
 

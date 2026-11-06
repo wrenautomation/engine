@@ -15,7 +15,6 @@ import {
   follow,
   open,
   planRound,
-  SEE_PER_RUN,
   search,
   searchTree,
   tunePlan,
@@ -153,12 +152,12 @@ describe("agent commands", () => {
     await expect(open(plain, run, { hits: [one], see: true, why: "w" }, agent)).rejects.toThrow(
       "no source here sees",
     );
-    // 2 seen, then 4, then 6: the cap a run
+    // no cap on seen videos: only the tree's read cap stops a pass
     await open(d, run, { hits: [one, two], see: true, why: "again" }, agent);
     await open(d, run, { hits: [one, two], see: true, why: "again" }, agent);
-    await expect(open(d, run, { hits: [one], see: true, why: "w" }, agent)).rejects.toThrow(
-      `6 seen this run, 1 asked; the cap is ${SEE_PER_RUN} a run`,
-    );
+    expect(seen).toHaveLength(6);
+    const over = await open(d, run, { hits: [one], see: true, why: "again" }, agent);
+    expect(over.note).toContain("read 7 pages, its cap 7");
   });
 
   it("a preset query goes only to sources that take presets; none in the run fails the write", async () => {

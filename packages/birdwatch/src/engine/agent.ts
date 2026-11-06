@@ -27,6 +27,7 @@ import {
 import { canonical } from "./canonical.js";
 import { context } from "./context.js";
 import { costOf } from "./cost.js";
+import type { Find } from "./finds.js";
 import { classGuess, type JudgeStats, judgeStats, pickOf, yesOf } from "./judge.js";
 import {
   type PersonView,
@@ -683,6 +684,8 @@ export interface OpenInput {
   urls?: readonly string[];
   /** Why these: required with `hits` or `urls`. */
   why?: string;
+  /** Pages with a why each (a person's pasted lines): a hit each, kept under its own why and read. */
+  finds?: readonly Find[];
   /**
    * Open sources this machine has that the run's allow-list lacks (a ladder that came after the
    * plan). Written as a new snapshot in the agent's name, so the ledger says when the list grew.
@@ -707,9 +710,6 @@ export const unread = (state: RunState): HitRecord[] => {
  * Keeps the hits named (and writes a hit per URL named), then reads those named that have no
  * document. No names: reads every kept hit of the run that has no document.
  */
-/** Videos seen a run: each is about $0.30 of Claude on the frames. */
-export const SEE_PER_RUN = 6;
-
 export async function open(deps: Deps, run: string, input: OpenInput, who: Who): Promise<Did> {
   const state = await stateOf(deps, run);
   planned(state);
@@ -729,25 +729,34 @@ export async function open(deps: Deps, run: string, input: OpenInput, who: Who):
   }
   if ((named.length || input.urls?.length) && !input.why?.trim())
     throw new Error("open: why read these?");
-  if (input.see && !named.length && !input.urls?.length)
+  if (input.see && !named.length && !input.urls?.length && !input.finds?.length)
     throw new Error("open --see: name the hits to see");
+  for (const f of input.finds ?? []) if (!f.why.trim()) throw new Error(`open: why read ${f.url}?`);
   const ids = new Set(state.hits.map((h) => h.id));
   for (const id of named) if (!ids.has(id)) throw new Error(`no hit ${id}`);
   const ctx = context(deps, run, state.round, "triage");
   const byKey = new Map(state.hits.map((h) => [h.key, h.id]));
-  for (const url of input.urls ?? []) {
+  const hitOf = async (url: string): Promise<string> => {
     const key = canonical(url);
     const have = byKey.get(key);
-    if (have) {
-      named.push(have);
-      continue;
-    }
+    if (have) return have;
     const id = await ctx.write({ type: "hit", url, key, queries: [], sources: [] }, who);
     byKey.set(key, id);
+    return id;
+  };
+  for (const url of input.urls ?? []) named.push(await hitOf(url));
+  // a find's own why wins over the shared one
+  const whys = new Map<string, string>();
+  for (const f of input.finds ?? []) {
+    const id = await hitOf(f.url);
+    whys.set(id, f.why.trim());
     named.push(id);
   }
   for (const id of new Set(named))
-    await ctx.write({ type: "call", on: id, verdict: "keep", why: input.why as string }, who);
+    await ctx.write(
+      { type: "call", on: id, verdict: "keep", why: whys.get(id) ?? (input.why as string) },
+      who,
+    );
   const snapshot = state.snapshot;
   const joining = (input.with ?? []).filter(
     (n) => !snapshot?.sources.includes(n) && !snapshot?.opens.includes(n),
@@ -766,12 +775,6 @@ export async function open(deps: Deps, run: string, input: OpenInput, who: Who):
     if (!seers.length)
       throw new Error("open --see: no source here sees a video (ANTHROPIC_API_KEY)");
     const want = new Set(named);
-    const names = new Set(seers.map((s) => s.name));
-    const seen = state.spends.filter((s) => names.has(s.source) && s.op === "open" && s.ok).length;
-    if (seen + want.size > SEE_PER_RUN)
-      throw new Error(
-        `open --see: ${seen} seen this run, ${want.size} asked; the cap is ${SEE_PER_RUN} a run (about $0.30 each)`,
-      );
     return stepRun(deps, run, "read", (c, s) =>
       readHits(
         c,

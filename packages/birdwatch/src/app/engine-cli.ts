@@ -38,6 +38,7 @@ import {
   type Did,
   type DraftInput,
   extract,
+  findsOf,
   fold,
   follow,
   joined,
@@ -589,19 +590,30 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       console.log(o.head ? d.text.slice(0, o.head) : d.text);
     });
 
-  agent(machine(common(program.command("open <run> [hit...]"))))
+  agent(machine(common(program.command("open [run] [hit...]"))))
     .description(
-      "keep the hits named (and a hit per --url) and read them; no names: read every kept hit of the run that has no document yet",
+      "keep the hits named (and a hit per --url or pasted line) and read them; no names: read every kept hit of the run that has no document yet",
     )
     .option("--url <url...>", "pages the agent names itself")
-    .option("--why <why>", "why read these (with hits or --url)")
+    .option(
+      "--lines <file>",
+      "pasted finds, a URL and its why a line in any order (`-`: stdin); a line with no URL goes on the why above it. A hit each, kept under its own why and read, with no search. With --human: the person's own finds",
+    )
+    .option(
+      "--ask <ask>",
+      "with --lines and no run: a new web run from this ask, seeded by the finds; plan --run, follow and search widen it later",
+    )
+    .option(
+      "--why <why>",
+      "why read these (with hits or --url); with --lines, the why of a line that gives none",
+    )
     .option(
       "--with <source...>",
       "open sources this machine has that the run's allow-list lacks (`sources` lists them)",
     )
     .option(
       "--see",
-      "read what the named videos show, frame by frame (downloaded; Claude reads the frames, ~$0.30 for 10 min): only a video worth it whose captions lean on the screen",
+      "read what the named videos show, frame by frame (downloaded; Claude reads the frames, ~$0.30 for 10 min): a video whose captions lean on the screen or leave the point unsaid",
     )
     .option(
       "--survey <query>",
@@ -610,12 +622,14 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     .option("--top <k>", "how many of the survey to read (default 5)", Number)
     .action(
       async (
-        runId: string,
+        named: string | undefined,
         hits: string[],
         o: Common &
           Machine &
           Agent & {
             url?: string[];
+            lines?: string;
+            ask?: string;
             why?: string;
             with?: string[];
             see?: boolean;
@@ -623,14 +637,36 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
             top?: number;
           },
       ) => {
+        if (o.ask && named) throw new Error("open --ask makes a new run: name no run or hit");
+        if (o.ask && !o.lines)
+          throw new Error("open --ask: the finds that seed it, --lines <file|->");
+        if (!o.ask && !named)
+          throw new Error("open needs a run, or --ask with --lines for a new one");
+        // parsed first: a bad paste makes no run
+        const finds = o.lines
+          ? findsOf(o.lines === "-" ? await stdinText() : await readFile(o.lines, "utf8"), o.why)
+          : undefined;
         const s = setup(o);
+        const deps = depsOf(s, agentOf(o));
+        let runId = named as string;
+        if (o.ask) {
+          const { planFile, opens } = await planFileOf(s.ledger, s.sources, "web", undefined);
+          const made = await planRound(deps, {
+            ask: { text: o.ask, kind: "web", known: [], premises: [], criteria: [] },
+            planFile,
+            opens,
+            model: s.model?.id ?? null,
+          });
+          runId = made.run;
+        }
         printDid(
           await open(
-            depsOf(s, agentOf(o)),
+            deps,
             runId,
             {
               hits,
               ...(o.url ? { urls: o.url } : {}),
+              ...(finds ? { finds } : {}),
               ...(o.why ? { why: o.why } : {}),
               ...(o.with ? { with: o.with } : {}),
               ...(o.see ? { see: true } : {}),
