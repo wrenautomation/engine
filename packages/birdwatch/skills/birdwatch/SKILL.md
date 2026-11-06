@@ -235,9 +235,11 @@ round by default), `checks` before you keep a pattern, a list past its first 15.
 show as `rounds`: each one's edge, patterns and finding count. Their findings stay in the part
 (`--round <n>` or `all`).
 
-A new run starts in a fresh session. To go on with a stopped run, `add edge <run> again --why`,
-then `plan --run <run>`. A fresh session goes on from `brief <run>`: the ledger holds the run, not
-the chat. A new angle on a past run is a child run (`plan --parent`), not more rounds.
+A new run starts in a fresh session. Go on with a stopped run in its own chat when you can: that
+chat holds what the person said about the run. To go on, `add edge <run> again --why`, then
+`plan --run <run>`. In a fresh chat, start from `brief <run>`: the ledger holds every record. When
+the chat grows long, compact it: the brief gives back any record the summary drops. A new angle on
+a past run is a child run (`plan --parent`), not more rounds.
 
 ## The person
 
