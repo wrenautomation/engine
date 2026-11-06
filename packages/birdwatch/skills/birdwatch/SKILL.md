@@ -35,7 +35,8 @@ you and the check agreed with it: a low agreement means read its hints less.
 ```sh
 birdwatch recall <terms> [--not <run>] [--also <ledger>...]   # what earlier runs found: quote, URL, source date, run, who wrote it
 birdwatch plan "<the ask>" [--kind web|video|site|channel|person] [--known "<fact> (<url>)"...] [--premise "<given>"...] [--site <host>] [--reads N]   # --reads: a wide root's whole-tree read cap
-birdwatch brief <run>                                   # read it after every step; a field with no value is left out (read it with .get)
+birdwatch brief <run>                                   # the index, after every step; a field with no value is left out (read it with .get)
+birdwatch brief <run> --part <name> [--round N|all] [--from I]   # one part whole, 100 rows a page; `parts` in the index names each
 birdwatch search <run> < tree.json                      # the round's query tree (below); or "<terms>" --why [--preset top-week], or a JSON array
 birdwatch add call <run> <hit> keep|drop --why "<why>"  # triage, one per hit; the last call wins, a flip warns, a person's call stands over yours
 echo '[{"on":"<hit>","verdict":"keep","why":".."}]' | birdwatch add call <run>   # many calls, one process
@@ -120,8 +121,8 @@ records show done.
      {"name": "spend", "why": "what the buyer pays", "needs": ["survey", "primary_data"], "tries": [[{"terms": "...", "why": "..."}]]}
    ]}
    ```
-3. **Triage.** `brief` lists `hits.uncalled` with title, snippet, `metrics` (what the post
-   drew, as its site counts it), `lift` (each count over the author's median in `brief.authors`,
+3. **Triage.** `brief` lists the first 15 of `hits.uncalled` (`--part uncalled` for all) with title, snippet, `metrics` (what the post
+   drew, as its site counts it), `lift` (each count over the author's median in `--part authors`,
    every run: 4.5 is 4.5 times their usual, the read for a format that worked) and `facets`: the
    facets whose queries found it, most first, then the ask's criteria. `judge` shows its labels:
    `format` (video, post, thread, article, paper, list, sales_page, directory, docs, other),
@@ -210,7 +211,7 @@ records show done.
    child's stop, patterns (with sites per class) and dead ends, and lists a child still going
    as open. The parent decides: drop an option, add one, or stop. `brief.children` shows the
    tree; `brief.treeCost` what all of it cost.
-9. **Report.** From `brief`: the patterns first, each with its site count per class and its findings;
+9. **Report.** From `brief` and `brief --part findings --round all`: the patterns first, each with its site count per class and its findings;
    then the kept findings no pattern rests on, each with its quote, URL and date; the gaps; the
    cost line. Nothing in the report that is not a finding. When the person wants prose (a memo,
    an SOP outline), write a rough draft with `add draft`: each item cites kept patterns or
@@ -224,6 +225,19 @@ records show done.
 
 Stop when the ask is answered or two rounds in a row added nothing that changed the answer.
 Say so in the edge's why.
+
+## Context
+
+`brief <run>` is an index of one size however long the run, as skills load. It holds the small
+fields whole, the first 15 rows of each long list, and `parts`: each part's name, what it holds,
+its size and its read command. Read a part only when a step needs it: `findings` to review (this
+round by default), `checks` before you keep a pattern, a list past its first 15. Earlier rounds
+show as `rounds`: each one's edge, patterns and finding count. Their findings stay in the part
+(`--round <n>` or `all`).
+
+A new run starts in a fresh session. To go on with a stopped run, `add edge <run> again --why`,
+then `plan --run <run>`. A fresh session goes on from `brief <run>`: the ledger holds the run, not
+the chat. A new angle on a past run is a child run (`plan --parent`), not more rounds.
 
 ## The person
 

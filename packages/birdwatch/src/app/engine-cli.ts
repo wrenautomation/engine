@@ -33,6 +33,8 @@ import {
   accept,
   add,
   brief,
+  briefIndex,
+  briefPart,
   check,
   costOf,
   type Did,
@@ -43,6 +45,8 @@ import {
   follow,
   joined,
   open,
+  PART_NAMES,
+  PART_PAGE,
   planRound,
   type QueryInput,
   RESERVED,
@@ -1073,17 +1077,40 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
 
   common(program.command("brief <run>"))
     .description(
-      "the run as the agent needs it: the ask, sources (and those missing here), what earlier runs found, what the last round left open, hits to call with their metrics and lift, authors' baselines, documents to extract, findings, checks, edges, yield, cost",
+      `the run as the agent needs it, in layers: an index of one size however long the run (the ask, sources, round digests, what the last round left open, the head of each list, the parts with what each holds), then --part <name> for one part whole. Parts: ${PART_NAMES.join(", ")}`,
     )
-    .action(async (runId: string, o: Common) => {
-      // this machine's sources, built not called: the brief names which the run lacks; quiet
-      const ledger = ledgerOf(o);
-      const sources = sourcesOf(o, ledger, () => undefined);
-      const s = { ledger, sources, model: null, judge: null };
-      const out = await brief(depsOf(s, o.writer), runId);
-      sayView(runId);
-      console.log(JSON.stringify(out, null, 2));
-    });
+    .option("--part <name>", "one part whole, a page at a time")
+    .option("--round <n>", "a part by round: this round (default), a number, or all")
+    .option("--from <i>", "the page's first row (default 0)", Number)
+    .option("-n <n>", `rows a page (default ${PART_PAGE})`, Number)
+    .option("--full", "every part whole in one object: large on a long run")
+    .action(
+      async (
+        runId: string,
+        o: Common & { part?: string; round?: string; from?: number; n?: number; full?: boolean },
+      ) => {
+        // this machine's sources, built not called: the brief names which the run lacks; quiet
+        const ledger = ledgerOf(o);
+        const sources = sourcesOf(o, ledger, () => undefined);
+        const s = { ledger, sources, model: null, judge: null };
+        const full = await brief(depsOf(s, o.writer), runId);
+        const round =
+          o.round === undefined ? undefined : o.round === "all" ? "all" : Number(o.round);
+        if (typeof round === "number" && !Number.isInteger(round))
+          throw new Error("--round: a round number or all");
+        const out = o.full
+          ? full
+          : o.part
+            ? briefPart(full, o.part, {
+                ...(round !== undefined ? { round } : {}),
+                ...(o.from !== undefined ? { from: o.from } : {}),
+                ...(o.n !== undefined ? { n: o.n } : {}),
+              })
+            : briefIndex(full);
+        sayView(runId);
+        console.log(JSON.stringify(out, null, 2));
+      },
+    );
 
   common(program.command("recall <terms...>"))
     .description(
