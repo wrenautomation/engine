@@ -303,10 +303,17 @@ export const kindOf = (kind: string): AskKind => {
 };
 
 /** Prints what a command did as JSON; a step that gave up exits 2. */
+/** Names the run's card for a chat that draws views: a line of its own on stderr, so stdout
+ * stays one JSON document (wren designs/2026-11-05-research-web.md, Log 11-05). */
+function sayView(run: string): void {
+  console.error(`::view research.run ${JSON.stringify({ run })}`);
+}
+
 function printDid(did: Did): void {
   console.error(
     `${did.run} ${did.round}.${did.step} ${did.ok ? "ok" : "gave up"}${did.note ? `: ${did.note}` : ""}`,
   );
+  sayView(did.run);
   console.log(JSON.stringify(did, null, 2));
   if (!did.ok) process.exitCode = 2;
 }
@@ -791,6 +798,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
     const s = { ledger: ledgerOf(o), sources: registry(), model: null, judge: null };
     const { record, warnings, spread } = await add(depsOf(s, agentOf(o)), runId, a, whoOf(o));
     for (const w of warnings) console.error(`${runId}: ${w}`);
+    sayView(runId);
     console.log(JSON.stringify(spread ? { ...record, ...spread } : record));
   };
   const adds = program
@@ -980,6 +988,7 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
         const s = { ledger: ledgerOf(o), sources: registry(), model: null, judge: null };
         const out = await accept(depsOf(s, agentOf(o)), runId, a, whoOf(o));
         console.error(`${runId}: ${out.wrote.length} taken, ${out.skipped} under the bar`);
+        sayView(runId);
         console.log(JSON.stringify(out, null, 2));
       },
     );
@@ -1071,7 +1080,9 @@ export function addEngineCommands(program: Command, deps: EngineCliDeps = {}): v
       const ledger = ledgerOf(o);
       const sources = sourcesOf(o, ledger, () => undefined);
       const s = { ledger, sources, model: null, judge: null };
-      console.log(JSON.stringify(await brief(depsOf(s, o.writer), runId), null, 2));
+      const out = await brief(depsOf(s, o.writer), runId);
+      sayView(runId);
+      console.log(JSON.stringify(out, null, 2));
     });
 
   common(program.command("recall <terms...>"))

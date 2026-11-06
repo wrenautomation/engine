@@ -239,13 +239,14 @@ they did not ask for.
 lines as they wrote them and run `open <run> --lines <file> --human <name>`, or
 `open --ask "<their ask>" --lines <file> --human <name>` for a new run. Each line is a kept
 hit under their why, read at once; no search round comes first. A line with no why takes
-`--why`, their words only. How far to go is theirs to say. "Just read it" or "watch it and
-do nothing more": read it, write its findings, then `add edge stop` with a why that says they
-asked for this source only. No search, no follow, no pattern. `recall` finds those findings in
-later runs. Otherwise a pasted find is a seed, not a small run: when they ask for more ("his
-channel, his services, his sites, his themes"), widen the same run with `follow --from
-<document> --as posts`, a channel survey, `open --url` on the sites the page links, and a
-query tree on what is left. One find or fifty, the steps after the read are the same.
+`--why`, their words only. How far to go is theirs to say. With no scope said, or "just read
+it" or "watch it and do nothing more": read the pasted sources only, write their findings, then
+`add edge stop` with a why that says they asked for these sources only. No search, no follow,
+no pattern. Do not widen on your own judgment. `recall` finds those findings in later runs. A
+pasted find becomes a seed only when they ask for more ("his channel, his services, his sites,
+his themes"): widen the same run with `follow --from <document> --as posts`, a channel survey,
+`open --url` on the sites the page links, and a query tree on what is left. One find or fifty,
+the steps after the read are the same.
 
 ## Records
 
@@ -253,6 +254,9 @@ Every record carries `from` (ai, human, tool), `by` (your id, their name, a sour
 id), its round, and on a decision, a why. `birdwatch trace <run>` prints them all;
 `birdwatch trace <run> --type finding` one type. A run from before 0.30.0 that the old runner
 made reads the same way in `brief`.
+
+Each step that writes to a run, and `brief`, prints `::view research.run {"run":"<id>"}` on
+stderr. A chat that draws cards shows the run's card from that line: keep stderr on.
 
 To let a person watch or check a run, start `birdwatch serve` (same `--ledger`) in the background
 and tell them to open the portal's Research page on this Mac. It updates live as you write.
